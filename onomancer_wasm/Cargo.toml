@@ -1,0 +1,55 @@
+[package]
+name = "onomancer_wasm"
+version = "0.1.0"
+description = "Wasm/JavaScript bindings for Onomancer (browser and Node.js)"
+categories = ["web-programming"]
+keywords = ["onomancer", "wasm"]
+publish = false
+
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+readme = "./README.md"
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+console_error_panic_hook = { workspace = true }
+getrandom = { workspace = true, features = ["js"] }
+js-sys = { workspace = true }
+onomancer_core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[features]
+default = []
+std = [
+  "js-sys/std",
+  "onomancer_core/std",
+  "thiserror/std",
+  "wasm-bindgen/std",
+  "wasm-bindgen-futures/std",
+]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = [
+  "-Oz",
+  "--enable-bulk-memory",
+  "--enable-multivalue",
+  "--enable-mutable-globals",
+  "--enable-nontrapping-float-to-int",
+  "--enable-reference-types",
+  "--enable-sign-ext",
+  "--enable-simd",
+]
+
+[lints]
+workspace = true

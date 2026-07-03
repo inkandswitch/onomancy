@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned to match the workspace `rust-version` declared in `Cargo.toml`
+# and the Nix flake's `rustVersion` in `flake.nix`. Bump all three in
+# lockstep.
+channel = "1.91.0"
+components = ["clippy", "rustfmt"]

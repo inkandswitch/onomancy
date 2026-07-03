@@ -1,0 +1,90 @@
+[workspace]
+resolver = "3"
+members = ["onomancer_core", "onomancer_wasm"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.91"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/expede/onomancer"
+authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
+
+[workspace.dependencies]
+# Internal crates
+onomancer_core = { version = "0.1.0", path = "onomancer_core", default-features = false }
+onomancer_wasm = { version = "0.1.0", path = "onomancer_wasm", default-features = false }
+
+# External crates
+arbitrary = "1.4"
+bolero = "0.13"
+console_error_panic_hook = "0.1.7"
+getrandom = "0.2"
+js-sys = { version = "0.3", default-features = false }
+serde = { version = "1.0", default-features = false }
+testresult = "0.4"
+thiserror = { version = "2.0", default-features = false }
+tracing = { version = "0.1", default-features = false }
+wasm-bindgen = { version = "0.2", default-features = false }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+
+[workspace.lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
+missing_copy_implementations = "warn"
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2021_compatibility = { level = "warn", priority = -1 }
+
+rust_2018_idioms = { level = "deny", priority = -1 }
+unreachable_pub = "deny"
+unused_extern_crates = "deny"
+
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+expect_used = "warn"
+fallible_impl_from = "warn"
+fn_params_excessive_bools = "warn"
+indexing_slicing = "warn"
+missing_const_for_fn = "warn"
+must_use_candidate = "warn"
+panic = "warn"
+todo = "warn"
+unneeded_field_pattern = "warn"
+unwrap_used = "warn"
+wildcard_enum_match_arm = "warn"
+
+all = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+multiple_crate_versions = "allow"            # various transitive deps
+pedantic = { level = "deny", priority = -1 }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = "symbols"
+
+# Preserve the Wasm name section for readable stack traces in production.
+# Only strips DWARF debug info, not function names.
+[profile.release.package.onomancer_wasm]
+strip = "debuginfo"
+
+# Debug-oriented Wasm profile. Preserves DWARF so Chrome DevTools
+# (with the C/C++ DevTools Support extension) can step through.
+# Built via wasm-bodge with `--debug-profile wasm-debug`.
+[profile.wasm-debug]
+inherits = "release"
+codegen-units = 16
+debug = "limited"
+debug-assertions = true
+lto = "thin"
+opt-level = 1
+overflow-checks = true
+strip = "none"
+
+[profile.wasm-debug.package.onomancer_wasm]
+strip = "none"
