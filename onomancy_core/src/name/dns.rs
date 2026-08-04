@@ -1,0 +1,203 @@
+//! DNS name anchors, normalized to lowercase A-label form.
+
+use alloc::string::String;
+use core::fmt;
+
+/// A normalized DNS name: lowercase ASCII A-labels, at least two labels,
+/// no trailing dot, no IP literals.
+///
+/// Onomancy specifies A-labels only: names are parsed, stored, and
+/// compared as A-labels — the DNSSEC chain
+/// never sees Unicode. Converting U-labels (`аррӏе.com`) to A-labels
+/// (`xn--80ak6aa92e.com`) is an input-layer concern; raw Unicode here is a
+/// parse error.
+///
+/// # Examples
+///
+/// ```
+/// use onomancy_core::name::dns::DnsName;
+///
+/// let dns = DnsName::parse("EXPEDE.WTF.").expect("valid, normalizes");
+/// assert_eq!(dns.as_str(), "expede.wtf");
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DnsName(String);
+
+/// Maximum total length of a DNS name in its textual form.
+pub const MAX_NAME_LEN: usize = 253;
+
+/// Maximum length of a single DNS label.
+pub const MAX_LABEL_LEN: usize = 63;
+
+impl DnsName {
+    /// Parse and normalize a DNS name: lowercase, strip one trailing dot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseDnsNameError`] for non-ASCII input (A-labels only),
+    /// dotless names (defined out of existence, per ICANN SAC053), names
+    /// or labels exceeding DNS length limits, malformed LDH labels, and
+    /// IP literals.
+    pub fn parse(raw: &str) -> Result<Self, ParseDnsNameError> {
+        if !raw.is_ascii() {
+            return Err(ParseDnsNameError::NotALabel);
+        }
+
+        let trimmed = match raw.strip_suffix('.') {
+            Some(stripped) => stripped,
+            None => raw,
+        };
+
+        if trimmed.len() > MAX_NAME_LEN {
+            return Err(ParseDnsNameError::NameTooLong);
+        }
+
+        let lowered = trimmed.to_ascii_lowercase();
+        let mut labels = lowered.split('.');
+        let tld = labels.next_back().ok_or(ParseDnsNameError::Dotless)?;
+
+        validate_label(tld)?;
+
+        if tld.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(ParseDnsNameError::IpLiteral);
+        }
+
+        let mut label_count = 1usize;
+
+        for label in labels {
+            validate_label(label)?;
+            label_count += 1;
+        }
+
+        if label_count < 2 {
+            return Err(ParseDnsNameError::Dotless);
+        }
+
+        Ok(Self(lowered))
+    }
+
+    /// View the normalized name as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for DnsName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// LDH rule: letters, digits, hyphens; hyphens not at either end.
+fn validate_label(label: &str) -> Result<(), ParseDnsNameError> {
+    if label.is_empty() {
+        return Err(ParseDnsNameError::EmptyLabel);
+    }
+
+    if label.len() > MAX_LABEL_LEN {
+        return Err(ParseDnsNameError::LabelTooLong);
+    }
+
+    if label.starts_with('-') || label.ends_with('-') {
+        return Err(ParseDnsNameError::HyphenAtLabelEdge);
+    }
+
+    if !label
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err(ParseDnsNameError::NotALabel);
+    }
+
+    Ok(())
+}
+
+/// The input was not a valid, normalizable DNS name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ParseDnsNameError {
+    /// Dotless DNS names are defined out of existence (ICANN SAC053).
+    #[error("DNS anchors need at least two labels (dotless domains do not exist)")]
+    Dotless,
+
+    /// A label was empty (leading dot or doubled dots).
+    #[error("empty DNS label")]
+    EmptyLabel,
+
+    /// A label began or ended with a hyphen.
+    #[error("DNS labels must not begin or end with a hyphen")]
+    HyphenAtLabelEdge,
+
+    /// The name looked like an IP address, which is not a DNS name.
+    #[error("IP literals are not DNS names")]
+    IpLiteral,
+
+    /// A label exceeded 63 octets.
+    #[error("DNS labels are limited to {MAX_LABEL_LEN} octets")]
+    LabelTooLong,
+
+    /// The whole name exceeded 253 octets.
+    #[error("DNS names are limited to {MAX_NAME_LEN} octets")]
+    NameTooLong,
+
+    /// A label contained something other than lowercase ASCII LDH
+    /// characters. U-label (Unicode) input must be IDNA-encoded to
+    /// A-labels before parsing.
+    #[error("DNS labels are ASCII letters, digits, and hyphens (A-label form)")]
+    NotALabel,
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use alloc::string::ToString;
+
+    #[test]
+    fn normalizes_case_and_trailing_dot() {
+        let dns = DnsName::parse("ExPeDe.WTF.").expect("valid");
+        assert_eq!(dns.as_str(), "expede.wtf");
+    }
+
+    #[test]
+    fn rejects_ipv4_literals() {
+        assert_eq!(
+            DnsName::parse("127.0.0.1"),
+            Err(ParseDnsNameError::IpLiteral)
+        );
+    }
+
+    #[test]
+    fn rejects_unicode_u_labels() {
+        assert_eq!(
+            DnsName::parse("аррӏе.com"),
+            Err(ParseDnsNameError::NotALabel)
+        );
+    }
+
+    #[test]
+    fn accepts_punycode_a_labels() {
+        assert!(DnsName::parse("xn--80ak6aa92e.com").is_ok());
+    }
+
+    #[test]
+    fn trailing_dot_only_strips_once() {
+        assert_eq!(
+            DnsName::parse("expede.wtf.."),
+            Err(ParseDnsNameError::EmptyLabel)
+        );
+    }
+
+    #[test]
+    fn parse_is_idempotent_on_normalized_output() {
+        bolero::check!()
+            .with_type::<alloc::string::String>()
+            .for_each(|raw| {
+                if let Ok(dns) = DnsName::parse(raw) {
+                    let renormalized = DnsName::parse(dns.as_str()).expect("already normalized");
+                    assert_eq!(dns, renormalized);
+                    assert_eq!(dns.to_string(), renormalized.to_string());
+                }
+            });
+    }
+}

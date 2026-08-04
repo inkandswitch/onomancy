@@ -1,0 +1,465 @@
+# Onomancy DNS Anchoring Specification
+## Version 0.1.0
+
+## Dependencies
+[Dependencies]: #dependencies
+
+- [Onomancy Name Grammar]
+- [Onomancy Path Resolution]
+- [Serialization] — byte layouts for the certificate and TXT record
+- [Keyhive]
+
+## Language
+[Language]: #language
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [BCP 14] when, and only when, they appear in all capitals, as shown here.
+
+# Abstract
+[Abstract]: #abstract
+
+This specification defines how a name spelled `@<dns-name>[/segments]` is rooted: the `@` grammar, the DNSSEC-protected TXT binding record, the Onomancy certificate, and the local verification that turns untrusted bytes into a verified binding `hostname → root document`. Once the root document is established, resolution proceeds per [Onomancy Path Resolution] and this specification imposes nothing further.
+
+# Introduction
+[Introduction]: #introduction
+
+DNS names are the memorable corner of [Zooko's triangle]: globally meaningful, human-readable, and — with DNSSEC — verifiable from a single, slow-moving trust anchor. Onomancy layers DNS names over self-certifying document identities so that binding a domain adds a _memorable spelling for an existing identity_, never a new identity.
+
+The binding is **record-first**: everything needed to verify it travels together, so a binding fetched from the owner's server, a local cache, or a Bluetooth peer at a field campout verifies identically, with no trust in the party that relayed it.
+
+## Trust Statement
+[Trust Statement]: #trust-statement
+
+A verified DNS binding proves exactly this:
+
+> The name `<hostname>`, as attested by a DNSSEC chain from the IANA root KSK **during the chain's signature window**, designated the document whose ID appears in the certificate, and a key — delegated by that document, and **not revoked as far as the verifier currently knows** — signed the certificate.
+
+Both clauses are graded, not absolute. The first proves nothing about the current instant (see [Graded Freshness]). The second is bounded by the verifier's knowledge: revocations propagate via document sync and gossip, so a revoked-but-not-yet-known signer's certificates still verify until the revocation arrives (see [Chain Validation]). It proves nothing about the name owner's intentions, and nothing about any other name.
+
+# Grammar
+[Grammar]: #grammar
+
+``` abnf
+dns-name-ref = "@" dns-name *( "/" segment )
+dns-name     = label 1*( "." label )   ; ≥ one dot, post-normalization
+```
+
+Segments follow the shared [Onomancy Name Grammar]; this section defines the `dns-name` production it references.
+
+- `@` means DNS and nothing else. There is no fallback to any other anchor family.
+- Parsers MUST reject dotless `@` names as flat parse errors (no key-parse fallback; [ICANN SAC053] alignment). This deletes the `@bob` vs `@bob.co` near-miss phishing class rather than mitigating it.
+- Parsers MUST reject IP literals (v4 and v6) under `@`.
+- Names MUST be normalized at parse time: lowercase, trailing dot stripped, [IDNA] U-labels converted to A-labels. The parser, stores, comparisons, and chain validation operate on **A-labels only**; U-labels exist purely at the display layer.
+- DNS length limits apply: 253 octets total, 63 per label.
+- `#` is reserved in segments (heads delimiter); DNS anchors do not carry heads.
+
+# TXT Binding Record
+[TXT Binding Record]: #txt-binding-record
+
+The owner of a name publishes:
+
+``` zone
+_onomancy.<name>.  IN TXT  "v=ONO0;k=ed25519;n=<serial>;g=<base64 generation key>;p=<base64 doc ID>"
+```
+
+`<name>` is the A-label domain from the `@` anchor, exactly as parsed — it need NOT be a zone apex. `@blog.expede.wtf` binds at `_onomancy.blog.expede.wtf` even when `blog.expede.wtf` is just a name inside the `expede.wtf` zone. Distinct names carry distinct bindings (and thus distinct identities), regardless of how they group into zones; the DNSSEC chain covers whatever zone the owner name falls in.
+
+| Field | Requirement |
+|-------|-------------|
+| `v` | Format tag. MUST be `ONO0` for the grammar defined here; a record with an unrecognized `ONO`-prefixed tag MUST be skipped, and a TXT record without a `v=ONO…` tag is not an onomancy record at all (see [Format Evolution]) |
+| `k` | MUST be `ed25519` at `v=ONO0`; unknown algorithms MUST cause that record to be rejected — per-record, siblings still processed; unlike skipping an unknown `ONO` tag, the rejection SHOULD be surfaced (see D5) |
+| `n` | Serial: a non-negative integer, monotonically increasing across re-bindings (see [Serial Ratchet]) |
+| `g` | MUST be the base64 encoding of the 32-byte generation key: the delegation-chain chokepoint that certificate chains must pass through (see [Generation Key]) |
+| `p` | MUST be the base64 encoding of the 32-byte root document ID (an ed25519 verifying key) |
+
+- The record MUST live at the `_onomancy` underscore service label ([RFC 8552] convention) directly under `<name>`.
+- The record carries **no expiration**. Revocation happens inside the document's delegation graph (see [Chain Validation]); changing `p=` is reserved for genuine document migration and MUST be accompanied by a serial bump.
+- If multiple parseable records are present, the resolver MUST select by the zone-state key ([Comparing Records Offline]) — highest `n` within a chain window, later window end across them; overlap is expected during migration.
+
+## Format Evolution
+[Format Evolution]: #format-evolution
+
+`v` is a self-identifying format tag (like `v=DKIM1`), not a counter: it changes only when this grammar changes. Within a known tag, parsing is strict — unknown fields, reordered fields, or malformed values MUST reject that record. A record with an `ONO`-prefixed tag the verifier does not recognize is a message to newer software: it MUST be skipped, and MUST NOT poison processing of other records in the RRset. A TXT record at the label without a `v=ONO…` tag is foreign and MUST be ignored entirely. Only if no record parses does the verifier report an unusable binding (distinct from proven absence, see [Error Conditions]).
+
+This is the migration mechanism: a publisher moving to a future `v=ONO1` dual-publishes `ONO0` and `ONO1` records in the same RRset. Old verifiers keep working from the `ONO0` record; new verifiers prefer the highest tag they understand, then the highest `n` within it. No new DNS label is ever needed.
+
+## Serial Ratchet
+[Serial Ratchet]: #serial-ratchet
+
+`n` is the anti-replay ratchet. To any verifier it is an opaque `u64`; publishers are RECOMMENDED to choose it as milliseconds since the Unix epoch, computed as `max(now_ms, last_n + 1)` — monotone by construction, wall-clock-tracking, and collision-free across a publisher's devices when seeded from the highest serial seen.
+
+Ratchet rules:
+
+1. There is exactly **one** definition of the ratchet: the **effective serial** is the serial of the ladder-winning record for the hostname ([Binding Cache spec], derivation) — a derived quantity, which implementations MAY memoize as a counter. Records that derive as pending, contested, or deferred contribute nothing — otherwise gossiping unacceptable records would poison the ratchet without any zone control.
+2. A record of the **same document** whose zone-state key `(window_end, serial, issued_at)` does not exceed the accepted record's is a **replay**: it MUST be dominated — it contributes to no derivation output. ("Rejected" means dominated at derivation, never refused at the store: union sync stores any bytes; domination is what makes them inert. A chain refresh carries a later `window_end` and therefore wins — refreshes are never replays.)
+3. A record whose chain is **fresh ✓** (window covers now) wins rung 0 outright, including with a _lower_ serial than the previous winner. A downward move of the effective serial is a **ratchet-reset event** and MUST be surfaced, never applied silently; if the record also attests a different document, it is additionally a surfaced binding change. This is deterministic, not discretionary — the ladder decides, the surfacing is the obligation. It is sound because minting a fresh chain requires current control of the zone — exactly the capability a transient attacker has lost.
+4. A record whose serial reads more than **5 minutes** in the future (interpreted as milliseconds since epoch) is **deferred**: not considered by the derivation until the verifier's clock reaches it — never treated as malformed, never allowed to poison processing of other records. **Deferral precedes everything and applies regardless of chain freshness**: rule 3 operates only on serials within the skew bound, else a fresh far-future serial would burn the ratchet past wall-clock and the ~5-minute poisoning bound would hold only on the stale path.
+
+```
+seen n=3  →  stale record n=2 arrives          →  reject (replay)
+          →  stale record n=4 arrives          →  accept, ratchet to 4
+          →  fresh record n=1 arrives          →  accept, ratchet to 1,
+                                                  surface ratchet reset
+          →  record n ≈ now + 20 min arrives   →  defer, retry later
+```
+
+Together, rules 3 and 4 bound ratchet poisoning: a transient zone attacker can advance the ratchet at most ~5 minutes past wall-clock, honest serials outgrow that within the skew window, and any verifier that sees one fresh owner chain heals immediately regardless.
+
+> [!WARNING]
+> Residual risk: a **fully offline** verifier (no fresh chains, no clock confidence) that accepted a poisoned serial has no automatic recovery. Implementations MUST provide a per-name manual "reset trust" action as the escape hatch, and MUST NOT reset automatically.
+
+The 5-minute bound is a sanity check, not a validity semantic: records are never "not yet valid" in a trust sense, and verifier clocks remain advisory (the same epistemic status as `issued_at`). A strict not-before gate was considered and rejected — it would make verifier clocks a load-bearing attack surface and turn clock skew into hard verification failures, against the local-first grain.
+
+## Generation Key
+[Generation Key]: #generation-key
+
+The certificate's delegation chain proves the signer was authorized _at issuance_; revocation knowledge otherwise travels only by document sync. Without a recency coupling, a revoked admin holding an old key and its once-valid chain could keep minting verifying certificates — and successor statements — for any verifier that never syncs the document. The generation key closes that gap with a single attested chokepoint:
+
+```
+doc ──▶ admin ──▶ Gₙ ──▶ {alice, bob, carol}
+                  └─ the TXT g= names this key
+```
+
+- The publisher designates one key in the delegation graph as the current **generation key** and attests it in `g=`. The rule is **path membership**, not topology: the attested key MUST appear as an **authority-carrying hop** in the certificate's delegation chain, at any depth — that is, a delegation on the root → signer path is _signed by_ the attested key, or the attested key is the terminal delegatee (the `signer` itself). Mere appearance of the key bytes elsewhere in a delegation record does NOT satisfy the check: what is attested is that the generation key _vouched for_ the signer's authority, not that it was mentioned. A solo publisher MAY attest their admin key directly (`doc → admin`, chain trivially passes through); an organization MAY interpose a dedicated generation key over its cert-signing members.
+- **Grants are free**: delegating a new signer under Gₙ changes nothing in DNS.
+- **Revocation rotates the generation**: revoke the delegation to Gₙ, mint Gₙ₊₁, re-delegate the surviving signers, publish the new `g=` (with a serial bump), and refresh outstanding certificates. A revoked signer's chain routes through a key that is no longer attested — it dies against any fresh chain, with no revocation list, no set enumeration, and no proof machinery: the verifier's check is positive path membership, nothing more.
+- When the DNSSEC chain is **fresh ✓**, the chain-contains-`g=` check is strict (mismatch MUST reject); when **stale ⚠**, it is graded and provisional like every other claim. Revocation lag for record-only verifiers is thereby bounded by RRSIG windows (days–weeks) instead of by sync luck, and resolution remains record-first: bytes plus the baked-in KSK suffice, and syncing the document stays an optional corroboration, never a prerequisite.
+
+The update requirement is deliberately incentive-aligned: the only mandatory DNS touch coincides with a revocation ceremony — the moment the publisher is already in DNS rotating zone credentials and maximally motivated to broadcast. This is also the DS/KSK pattern one level up: exactly as a DS record commits a zone to one key that vouches for its working keys, the TXT commits a name to one key that vouches for its certificate signers.
+
+> [!NOTE]
+> This is structurally similar to ATProto's rotation-key hierarchy — a more-powerful key gates which working keys are currently valid — but decentralized: the current-generation attestation lives in the publisher's own DNSSEC-signed zone rather than a central directory, verification needs no oracle, and recovery is generation rotation plus Keyhive's merge semantics rather than a sequencer's 72-hour history rewrite.
+
+### Generation Lineage
+[Generation Lineage]: #generation-lineage
+
+A generation is identified by the pair **(root document ID, generation key)** — the key alone is not an identity, since the same key bytes may be delegated in more than one document. There is no generation counter on the wire: the ordinal is derived from lineage length, never asserted (an asserted counter would be vouched by nothing the lineage doesn't already vouch better).
+
+Each rotation MUST produce a **rotation statement** signed by Gₙ₊₁ over the triple `(root_doc, Gₙ, Gₙ₊₁)` — the document ID is inside the signed statement precisely so a statement minted in one document cannot be replayed into another document's lineage when keys are reused. Certificates carry the accumulated lineage in the attached region; the wire format is `ONR\x00` per [Serialization], each statement traveling with its **authority carriage** — the delegation chain proving its signer speaks for the document. The signature costs nothing extra — it happens inside the rotation ceremony, when the keys are already out — and it buys the one comparator that works with no network and no zone trust: valid lineage entries are self-authenticating, so **two artifacts for the same name can be ordered offline** — the generation with lineage descent from the other is newer, vouched by the document rather than the zone.
+
+**Statement validity.** A rotation statement is _valid_ only when all of the following hold; anything less is **malformed evidence** — it MUST be ignored entirely, MUST NOT advance lineage memory, and MUST NOT count as fork evidence (otherwise anyone who knows a document ID could mint rival statements and schedule equivocation alarms at will):
+
+1. It decodes strictly per [Serialization]'s `ONR\x00` layout and its signature verifies under the `successor` key.
+2. Its `root_doc` equals the document under consideration (the certificate's `root_doc`).
+3. Its authority carriage is a valid delegation chain rooting at `root_doc`, terminating at the `successor` key, with the delegating hop held at admin access — the same bar as certificate signing ([Who Signs]).
+4. The document's valid statements MUST form a **simple chain** in the replaced → successor graph, and chain-shape violations are evaluated **set-wise** — never by which statement came "first," because any such tiebreak would be evaluation-order-dependent. A key replaced twice, a key appearing as `successor` twice, or a cycle (a retired generation key reappearing as a successor) is a **fork**: every involved statement surfaces per D12a/D16, none is silently preferred, and — because D12's hard rejection requires _uncontested_ lineage — a fork can never brick fresh chains. Publishers MUST NOT reuse generation keys: reuse converts their own lineage into a permanent surfaced fork.
+
+Forks exist only between **valid** statements: two valid statements replacing the same generation are provable equivocation (both signers were genuinely delegated — an insider event, not noise); a valid statement and an invalid one are a statement and some garbage.
+
+The attached lineage SHOULD be complete from the first rotation: the list of every rotated generation key is its projection (`lineage.map(replaced)`), with the signatures being what distinguish it from an assertion. A partial lineage answers only what it covers — ordering G₇ against G₈ needs one statement, but ordering a very stale artifact against a current one needs the receipts in between — and verifiers MUST treat missing coverage as "incomparable," never as evidence.
+
+Size stays trivial by construction: one statement (~150–300 bytes) per rotation, and rotations are cold-key ceremonies coupled to security incidents, not usage — a decades-old identity plausibly carries zero. The DNSSEC chain dominates the certificate regardless. An attacker cannot inflate a lineage (every entry needs a validly-signed statement threading the document's graph); only the owner can grow it, one ceremony per entry. Should a policy-rotating organization ever accumulate a pathological lineage, CT-style compaction (checkpoint statements or a consistency-proof log, under a new `ONx` schema tag) is the documented upgrade path — the format does not preclude it.
+
+Verifiers MUST use lineage when present:
+
+- Ratchet: once a valid, **uncontested** statement shows Gₙ₊₁ replacing Gₙ, an attested `g=` of Gₙ is a provable rewind and MUST be rejected regardless of chain freshness (the zone+insider rewind defense). Where valid statements **compete** — including a fresh chain attesting a generation that a valid statement claims was replaced while another valid observation supports it — the case is a fork: MUST surface, MUST NOT silently resolve in either direction, and MUST NOT hard-reject the fresh chain outright. Forks are insider-grade events (every valid statement was signed by a genuinely delegated key); collapsing them silently in either direction hands the insider a kill switch over the honest owner's fresh chains or a silent rewind, depending on the direction chosen.
+- Comparison: between two stale artifacts, the lineage-descendant generation wins; the serial `n` is only a zone-vouched tiebreak when lineage is absent or incomparable (see [Comparing Records Offline]).
+- Forks: two statements claiming to replace the same generation are **provable equivocation** (e.g. a zone-holding revoked insider minting a rival successor). A fork MUST be surfaced and MUST NOT be silently resolved in either direction — detection where resolution is impossible, the same epistemics as divergence and re-pin.
+
+### Comparing Records Offline
+[Comparing Records Offline]: #comparing-records-offline
+
+Given two certificates (or cached bindings) for the same name, a verifier determines which is current by a precedence ladder, each rung consulted only when stronger rungs are silent. First, **pool the evidence**: both artifacts' attached regions are self-authenticating, so their lineages and chains MUST be evaluated as a union — one artifact's lineage may order the other.
+
+| Rung | Comparator | Vouched by | Rule |
+|------|-----------|------------|------|
+| 0 | Chain freshness | DNSSEC windows | A fresh ✓ artifact beats any stale ⚠ one outright |
+| 1 | Succession proofs / lineage descent | The document's keys | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
+| 2 | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Within a freshness class, every record has one sort key (`window_end` = the end of the chain's ∩-window, [Graded Freshness]): later window end wins; equal ends → higher serial; equal serials → later `issued_at` — but `issued_at` breaks ties only within a single document: cross-document equality at `(window_end, serial)` is zone equivocation (contested), never resolved by a signer-claimed field. Cross-document capable, durable, static — and a **total order**: full key equality between different documents is **zone equivocation** (contested, surfaced, never auto-resolved) |
+
+Rung 2 is one lexicographic key rather than pairwise comparators, deliberately: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset — a single key per record makes the order total and "the maximal record" well-defined. `window_end` leads because it is DNSSEC-vouched where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window). The key orders **zone states** across documents for the same hostname — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
+
+Two verifiers holding the same evidence MUST reach the same verdict — the ladder is deterministic, including any bridged succession verdicts built from the pooled evidence ([Bridging History Gaps]), and its determinism is a conformance target (see [design/verification.md](../../design/verification.md)).
+
+> [!NOTE]
+> Generation lineage is about naming-key generations within the **same** document. It is distinct from [Succession], which is about identity continuity across **different** documents (a `p=` change). Transferring a domain to a new owner is neither: the new owner binds their own document with no continuity proof, and the change is deliberately surfaced — from a verifier's perspective, transfer and capture are the same event.
+>
+> The two statement types scope oppositely, on purpose: rotation statements bind `(root_doc, Gₙ, Gₙ₊₁)` with **no hostname** — a revoked generation must die across every name bound to the document, in one ceremony — while successor statements bind `(hostname, predecessor_doc, successor_doc)` because migration is per-name and its proof must not be replayable across names.
+
+# Onomancy Certificate
+[Onomancy Certificate]: #onomancy-certificate
+
+The certificate is a self-authenticating record: integrity does not depend on the transport, the server, or the peer that relayed it. Consequently, **any** onomancy server MAY serve any name's certificate — the server is an untrusted byte courier, and a malicious one can at worst withhold or serve stale records (denial of service), never forge a binding.
+
+Retrieval paths:
+
+| Path | Requirement | Notes |
+|------|-------------|-------|
+| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT |
+| Any onomancy server's [Lookup Endpoint] | OPTIONAL | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
+| Gossip / cache | OPTIONAL | Certificates travel peer-to-peer and verify identically (see [Binding Cache]) |
+
+Publishers MUST make the certificate retrievable through at least one path; verifiers MUST accept certificate bytes from any source, subject only to [Verification]. A name with no designated endpoint is still fully conformant — it just is not self-bootstrapping for cold verifiers with no peers.
+
+## Lookup Endpoint
+[Lookup Endpoint]: #lookup-endpoint
+
+Every fetch path uses one endpoint shape:
+
+```
+GET https://<host>[:port]/onomancy/v0/<name>
+```
+
+where `<name>` is the A-label DNS name, exactly as it appears in the anchor. The path version (`v0`) is the endpoint-protocol version — it changes when the HTTP contract changes (shape, response semantics, content type), independently of the certificate format tag (`ONC\x00`) and the TXT format tag (`ONO0`), each of which versions its own artifact. The response body is the canonical certificate bytes, nothing else. Because the certificate is an immutable blob, servers MAY implement the endpoint as static files and SHOULD serve long-lived caching headers (e.g. `Cache-Control: immutable` with an `ETag`); refreshing a binding means publishing a new file. `Content-Type` SHOULD be `application/octet-stream` until a dedicated media type is registered. Retrieval is HTTPS-specific at v0; non-HTTPS distribution (gossip, document sync) carries the same bytes but is out of scope for this section.
+
+Servers MAY redirect; verifiers SHOULD follow a bounded number of redirects. Redirects are harmless by construction: every endpoint is a transport hint serving a self-authenticating record, so a hijacked redirect can cause only denial of service or staleness, never a forged binding. The same shape serves one name or a million — a publisher's own host and a mirror of everyone's certificates are the same kind of thing, which is the point.
+
+## Designated Endpoints
+[Designated Endpoints]: #designated-endpoints
+
+Publishers designate where their certificate is served with an SVCB record ([RFC 9460]) at the same owner name as the TXT — keeping all onomancy records under one owner name, with one DNSSEC coverage story and one denial-of-existence story:
+
+``` zone
+_onomancy.expede.wtf.  IN TXT   "v=ONO0;k=ed25519;n=1;g=…;p=…"
+_onomancy.expede.wtf.  IN SVCB  1 certs.example.
+```
+
+This section is the SVCB _protocol mapping_ for onomancy:
+
+- The record is queried at `_onomancy.<name>` — the same owner name as the binding record, so it rides the same DNSSEC coverage and (for resolvers that ask for both types) the same lookup.
+- In ServiceMode (SvcPriority ≥ 1), TargetName designates a host serving the certificate for `<name>` at the standard [Lookup Endpoint] (`https://<TargetName>[:port]/onomancy/v0/<name>`). Lower priorities MUST be tried first; equal priorities MAY be tried in any order.
+- AliasMode (SvcPriority 0) follows standard [RFC 9460] semantics.
+- The `port` SvcParam applies; other SvcParams MAY be ignored at v0.
+- Publishers SHOULD use SVCB. Publishers whose DNS provider cannot create SVCB records MAY publish the equivalent SRV record at `_onomancy._tcp.<name>` (priority/weight/port/target map one-to-one — the gap set is real: several major registrars sign zones but cannot create ServiceMode SVCB, and all of them support SRV). Verifiers MUST try SVCB first and SHOULD fall back to SRV only when SVCB yields nothing — sequential, so when both exist SVCB wins by construction and no precedence ambiguity arises. SRV support is **transitional**: a future version of this specification MAY drop it as registrar SVCB support catches up.
+
+The SVCB record is a [transport hint][Transport Hints] like any other: DNSSEC coverage protects it from off-path spoofing, but it confers no authority, and verifiers MUST NOT require it. Bootstrap order for a cold verifier is therefore: gossip/cache, else the designated endpoint (SVCB, then SRV) — and if neither exists, the name is resolvable only through peers or mirrors learned out of band.
+
+> [!NOTE]
+> Endpoint designation for _document sync_ (e.g. `wss://` sync servers, needed after resolution to actually replicate the target documents) is deliberately out of scope here: cert retrieval and sync discovery are different services, and sync hints travel better alongside the record or inside the identity document than in DNS.
+
+## Transport Hints
+[Transport Hints]: #transport-hints
+
+Designated endpoints, mirrors, and sync peers are **transport hints**: they affect whether a verifier can obtain the bytes, never whether the bytes verify. There is no canonical location for a certificate. Address records (A/AAAA/CNAME) **on the name itself have no role in this protocol** — no fetch path consumes them (retrieval resolves the SVCB/SRV _target_ host, not the name), and a website on the same name is unrelated infrastructure. A verifier MAY try the name's own host as a last-resort endpoint guess; that is out-of-band knowledge like any other, one more hint, nothing else.
+
+- Verifiers MUST NOT treat any retrieval path as authoritative, MUST NOT ascribe any meaning to which source supplied a certificate, and MUST NOT reject a certificate because it arrived from somewhere other than the name's own host.
+- A wrong, stale, or malicious hint can cause only denial of service or staleness — all trust derives from the TXT binding record and the certificate's own proofs.
+- By analogy with magnet links: the TXT `p=` is the infohash; every endpoint is a tracker hint.
+
+## Fields
+[Fields]: #fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `root_doc` | `DocumentId` | Yes | Root [Automerge] document ID; MUST equal the TXT record's `p` |
+| `signer` | `VerifyingKey` | Yes | The delegated admin key that signed this certificate (see [Who Signs]) |
+| `issued_at` | `Timestamp` | Yes | Claimed; sanity-checked against rough client clocks only |
+| `hostname` | `DnsName` | Yes | The full DNS name this certificate binds (subdomains included, e.g. `blog.expede.wtf`; need not be a zone apex) |
+| `heads` | `[ChangeHash]` | No | OPTIONAL **advisory** attestation of the root document's heads at issuance; MUST NOT pin resolution (see [Handoff to Path Resolution]) |
+| `predecessor` | `SuccessorStatement` | No | OPTIONAL proof of continuity from a previously bound document (see [Succession]) |
+| `signature` | `Signature` | Yes | By `signer`, over the canonical encoding of the format tag and all fields above — the **signed region**. Everything below is the **attached region**: unsigned, independently verifiable, replaceable keylessly |
+| `delegation_chain` | `[Signed<Delegation>]` | Yes | [Keyhive] authority proof from the doc root down to `signer`. Attached: any valid chain for the same `signer` is interchangeable, so generation rotation is repaired by re-attaching, not re-signing |
+| `lineage` | `[RotationStatement]` | No | Generation lineage: rotation statements ordering the document's generation keys (see [Generation Lineage]). Attached; empty = never rotated |
+| `chain` | `DnssecChain` | Yes | DNSSEC chain from the IANA root KSK down to the TXT record at `_onomancy.<hostname>`. Attached: refreshed as RRSIG windows lapse |
+
+Field order follows the wire layout ([Serialization]): within the signed region, fixed-width fields first, then variable-width; the signature closes the signed region, and the attached fields follow it.
+
+The document-root signing key is destroyed at creation ([Keyhive]'s `EphemeralSigner`), so the certificate cannot be signed by the document ID itself; the embedded delegation chain is the standard Keyhive authority proof from the self-certifying init down to `signer`.
+
+The canonical encoding (the signature target) MUST be injective; the byte layout, signature target, and chain framing are defined in the [Serialization] specification.
+
+## Who Signs
+[Who Signs]: #who-signs
+
+Certificates are signed by **user-held keys, never servers**: onomancy servers hold no keys and are pure byte couriers (a compromised server can withhold or serve stale, nothing more).
+
+The `signer` MUST hold **admin** access in the delegation chain. Lesser access is insufficient by design: a collaborator with Write access to a shared document could otherwise sign a certificate binding _their_ hostname to _your_ document — the insider variant of key borrowing. Naming authority sits strictly above collaboration authority.
+
+Admin-only signing is operationally cheap because certificate issuance is rare by construction: the DNSSEC chain is attached **unsigned**, so chain refresh (the only frequent event) requires no key at all — any keyless machine re-fetches and re-attaches a fresh chain to the same signed certificate. The admin key leaves cold storage only for deliberate acts: new bindings, migration, revocation. Publishers are RECOMMENDED to delegate admin to two or more cold keys at document creation (backup or social recovery), so losing one is a revocation, not a catastrophe.
+
+## Succession
+[Succession]: #succession
+
+A `p=` change re-binds the name to a different document — either voluntary migration or a hostile re-binding (domain capture, re-registration). The two are distinguished by proof, not appearance:
+
+- A **successor statement** (wire format `ONS\x00` with authority carriage, per [Serialization]) is signed by the _previous_ document's delegation graph over the triple `(hostname, predecessor_doc, successor_doc)`; it is subject to the same validity bar as rotation statements — strict decode, signature, and a carried admin-held delegation chain rooting at `predecessor_doc` — with invalid statements ignored as malformed evidence (D17). The hostname is inside the signature because migration is per-name: a document bound to several names may migrate only one, and without hostname scoping, one name's migration proof could be replayed under a different name to make a hostile capture look like continuity-proven migration. The statement's chain MUST pass through the predecessor's generation key as last known to the verifier — after migration the predecessor's TXT is gone, so this is checked against the verifier's **accepted binding** (document + generation key, as derived per the [Binding Cache spec]; or live during a dual-publish window). The accepted binding is the **single** succession anchor — every rule in this section and in [Proofs Are Relative Evidence] means exactly it when it says "last known." A new certificate carrying a valid `predecessor` proof _for its own hostname_ is a _continuous_ re-binding: verifiers MAY treat it as routine.
+- A `p=` change **without** a successor proof MUST be surfaced as a binding change and MUST NOT be accepted silently, regardless of ratchet or freshness — a zone attacker cannot forge the statement (it requires the old document's admin keys, which zone control does not confer), so hostile capture is structurally incapable of looking routine to any verifier with prior knowledge of the binding.
+- The severity of an unproven change SHOULD be graded by **tenure**: the accumulated window evidence for the displaced binding in the verifier's own store. Months of RRSIG windows attesting a stable binding are unforgeable-by-newcomers history — an unproven change displacing a long-tenured binding warrants the strongest warning UX, while displacing a week-old binding is ordinary. Tenure is derived, not asserted: an earlier design carried an owner-set `continuity` flag promising future proofs, rejected because it was an owner self-assertion of custody quality (the recurring lesson: asserted fields lose to derived evidence), it punished the key-loss backstop with the owner's own past promise, and it demanded sticky cross-migration verifier memory that tenure gets for free. Escalation degrades to warnings, never lockout — no grading can be weaponized to brick a name.
+
+Successor statements also give clock-free ordering across the one boundary the serial ratchet handles weakest: between two documents with no shared history, the signed handoff — not a number — is what establishes which came second.
+
+### Proofs Are Relative Evidence
+[Proofs Are Relative Evidence]: #proofs-are-relative-evidence
+
+A successor proof proves continuity _with a specific prior document_; it confers exactly as much trust as the verifier already had in that predecessor — and therefore nothing at all absent history:
+
+- A proof upgrades a binding change to routine **only** when its `predecessor_doc` matches the verifier's current accepted binding for this hostname ([Binding Cache spec]). A proof chaining from an _older_ previously-accepted document (superseded evidence) is neither routine nor nothing: it is **competing history**, surfaced like a fork — with [Bridging History Gaps] the path to making it comparable. A proof naming a predecessor the verifier has never seen bound MUST confer nothing.
+- On first contact the succession rules never fire (there is no prior binding to change from), and implementations MUST NOT render continuity status for a name the verifier has no history with — a certificate _carrying_ a proof is not a certificate whose proof was _evaluated_. Two attacker-controlled documents can vouch for each other in a circle the verifier has never seen; rendering that as "✓ continuity-proven" is free legitimacy for capture.
+- The converse subtlety is accepted: an attacker who genuinely bound one document during their own tenure and later migrated to another has produced a _true_ proof — of continuity within a tenure the verifier never trusted. Relativity is the point: proofs order documents against _your_ history; they never speak to legitimacy in the absolute.
+
+### Bridging History Gaps
+[Bridging History Gaps]: #bridging-history-gaps
+
+A verifier returning after multiple migrations holds an accepted binding the current certificate's proof does not name (they knew `R`; the cert for `T` proves only `S → T`). Alone, that is incomparable — a surfaced binding change. But successor statements are self-authenticating and superseded certificates keep circulating, so the evidence-union rule ([Comparing Records Offline]) extends across documents:
+
+- Bridging is part of the derivation, not a discretionary feature: verifiers MUST compute bridges from the pooled store (`R → S` from the superseded certificate for `S`, `S → T` from the current one) whenever an unbroken proof chain exists from their own accepted binding to the current document. (Whether to _act_ on a bridged verdict remains policy; whether it is _derived_ is not — two verifiers with the same store MUST agree.)
+- Grading is per hop and honest about what is checkable: the hop departing the verifier's accepted binding is checked **fully** — only when the departing document has **fresh support** in the pooled store ([Binding Cache spec], stage 4); without it the departing hop grades provisional too — its statement's chain MUST thread that document's generation key as last known; subsequent hops are **provisional** — chain-valid against the intermediate document's self-certifying delegation graph, but with no generation-key memory to check attestation against. A bridged continuity verdict MUST be distinguishable from a directly-proven one.
+- Two statements claiming to succeed the same document are **provable equivocation** (e.g. a once-legitimate key of an intermediate document forking history): a fork MUST be surfaced and MUST NOT be silently resolved in either direction — the same rule as generation-lineage forks.
+- A verifier acting on a bridged verdict SHOULD opportunistically re-fetch the current certificate or cross-check against additional peers when connectivity exists — the same obligation as acting on a stale ⚠ verdict. The provisional hops are checkable only against wider evidence, and a bridged verdict under eclipse is exactly what a history-forging attacker wants a verifier to sit on.
+- A missing or broken hop leaves the artifacts incomparable, and the unbridged behavior — surfaced change, pins decide — is the REQUIRED fallback. Bridging is OPTIONAL evidence, never a prerequisite: the common case remains one record plus one memory.
+- Publishers SHOULD keep superseded certificates retrievable after migration (they are immutable static files; the endpoint or any mirror can keep serving them) — a gap-bridging verifier needs exactly those bytes.
+- Intermediate certificates function as **statement carriage**: the statements (with their authority carriages) are the evidence, so an intermediate certificate's own DNSSEC chain MAY be stale or absent without affecting the bridge — hops are graded by statement validity, not by the courier certificate's freshness.
+
+## Verification
+[Verification]: #verification
+
+Given certificate bytes from _any_ source (server, cache, gossip peer), a verifier MUST perform all of the following, in an order that never exposes unverified claims to the caller:
+
+1. Decode the canonical encoding; malformed input MUST be rejected.
+2. Verify `signature` under `signer` over the canonical encoding.
+3. Verify the delegation chain: first hop signed by the doc-root key itself, each subsequent hop by the previous delegate, terminating at `signer` with sufficient (admin) access, with no revocation _known to the verifier's causal past_. Revocation knowledge propagates by sync and gossip, never by oracle ([Chain Validation]): a record-only verifier satisfies this step with the chain's internal validity alone — the recency coupling is step 8's generation check, not an external lookup this step implies.
+4. Validate the embedded DNSSEC chain from the verifier's **own** baked-in IANA root KSK down to the `_onomancy.<hostname>` TXT record (see [Chain Validation]). The chain MUST cover every indirection (CNAMEs, zone cuts), not only the final owner name.
+5. Check `TXT p= == certificate.root_doc`.
+6. Check the chain's owner name matches `certificate.hostname`.
+7. Apply the [Serial Ratchet].
+8. Apply the [Generation Key] rule: with a fresh ✓ chain, the delegation chain MUST thread the key attested in the TXT `g=` as an authority-carrying hop; with a stale ⚠ chain the check is provisional. If valid generation lineage has been observed, a `g=` provably replaced by **uncontested** lineage MUST be rejected; competing valid statements are a fork — surfaced, never silently resolved (D16/D12).
+9. If the binding's document differs from the previously known one, apply the [Succession] rules: verify the `predecessor` proof if present (evaluated per [Proofs Are Relative Evidence]; a history gap MAY be bridged per [Bridging History Gaps]); surface the change if the proof is absent or names an unknown predecessor, graded by the displaced binding's tenure ([Succession]). With no previously known binding, this step does not run and no continuity status exists to render.
+
+``` mermaid
+flowchart TD
+    A["Certificate bytes<br/>(from server, cache, or gossip peer)"] --> B[decode canonical encoding]
+    B --> C{signature valid under signer?}
+    C -->|no| X1[✗ reject]
+    C -->|yes| K{delegation chain valid:<br/>root_doc → … → signer?}
+    K -->|no| X2[✗ reject]
+    K -->|yes| D{DNSSEC chain valid<br/>from baked-in KSK?}
+    D -->|no| X3[✗ invalid / stale ⚠]
+    D -->|yes| E{TXT pubkey == root_doc?<br/>hostname matches?}
+    E -->|no| X4[✗ reject]
+    E -->|yes| G["Verified { verified_at, chain_window }"]
+```
+
+Any failure of steps 1–3, 5, or 6 MUST yield rejection. Step 4 yields the graded verdict (see [Graded Freshness]). Step 7 may reject (stale replay), defer (far-future serial), or accept-and-surface (fresh downward move); step 8 rejects on fresh-chain generation mismatch (or provably replaced generation); step 9 surfaces or escalates per [Succession]. Implementations SHOULD use a type-state witness (`Certificate → Verified<Certificate>`) so that unverified claims are inaccessible by construction.
+
+Step 6 is what defeats key borrowing: an attacker's zone can point its TXT record at a victim's document ID, but no certificate binding the attacker's hostname can exist without a delegation from that document.
+
+# Chain Validation
+[Chain Validation]: #chain-validation
+
+- Verifiers MUST validate locally against a baked-in IANA root KSK (exactly one at v0; a trust-anchor set with [RFC 5011]-style rollover is future work — root rollovers overlap, so clients shipped during an overlap SHOULD carry both keys). Verifiers MUST NOT delegate validation to a resolver's AD bit.
+- Verifiers MUST support the signature algorithms in real-world chains (RSA/SHA-256 for the root; ECDSA P-256 at zones, at minimum). A chain whose validation requires an algorithm the verifier does not implement MUST yield invalid ✗ — never stale ⚠, and never an "insecure" verdict: [RFC 4035]'s treat-unknown-as-insecure resolver semantics would be an algorithm-downgrade path here, because an Onomancy binding is only ever KSK-rooted and "insecure" has no meaning for it.
+- Verifiers MUST support wildcard-synthesized answers ([RFC 4035] §5.3.4): a TXT RRset synthesized from a wildcard owner (e.g. `*.expede.wtf` covering `_onomancy.blog.expede.wtf`) is valid only together with the NSEC/NSEC3 proof that no closer match exists, and that proof MUST validate like any other link. A synthesized binding attaches to the queried owner name exactly as a literal record would — per-hostname identity, ratchet, and cache keying are unchanged. Publishing a wildcard binding binds every matching subname to the same document; that is an owner-side choice with owner-side consequences. A wildcard binds _names_, not certificates: each bound subname still requires its own certificate whose `hostname` matches exactly ([Verification] step 6) — a wildcard TXT alone confers no resolvable binding.
+- Verifiers MUST process NSEC/NSEC3 denial of existence, so that "this zone has no binding" is distinguishable from a stripped-record downgrade.
+- The fetching side (the `ChainProvider` seam) is an **untrusted byte fetcher**: native via [hickory], browser via DNS-over-HTTPS. A malicious provider MUST at worst be able to cause denial of service, never a false verified verdict — all verification runs in core.
+- Revocation is layered: a compromised signer is revoked inside the document's delegation graph, and the [Generation Key] rotation makes that verifier-visible without any list — the signer's chain no longer threads the attested chokepoint. `p=` never changes for key compromise; `g=` does.
+- Revocation knowledge is local-first: it propagates via document sync and gossip, not via any oracle. A revoked-but-not-yet-known signer's certificates continue to verify until the revocation reaches the verifier — an accepted residual, symmetric with graded chain freshness. Online verifiers SHOULD opportunistically sync the binding document's delegation graph (or re-fetch the certificate) when acting on a stale ⚠ verdict.
+
+# Graded Freshness
+[Graded Freshness]: #graded-freshness
+
+RRSIG windows are short (root ≈ 2 weeks; zones 1–30 days). Verifiers MUST NOT hard-reject expired chains; output is graded. A chain whose RRSIG windows have an **empty intersection** never had a moment of joint validity: it is invalid ✗, not stale.
+
+``` rust
+pub struct Verified {
+    pub verified_at: Timestamp,
+    pub chain_window: Range<Timestamp>, // ∩ of all RRSIG windows
+}
+```
+
+| Verdict | Meaning | Online policy | Offline policy |
+|---------|---------|---------------|----------------|
+| fresh ✓ | window covers now | proceed | proceed |
+| stale ⚠ | once-valid; window lapsed | SHOULD re-fetch, then proceed | MUST warn, MAY proceed |
+| deferred | window has not yet begun | not considered until inception (like far-future serials) | same |
+| invalid ✗ | never verified from the KSK | MUST reject | MUST reject |
+
+Staleness is a risk signal, not a forgery signal.
+
+## Staleness in Practice
+[Staleness in Practice]: #staleness-in-practice
+
+Offline, staleness is ambient, not exceptional: every gossiped record decays within its RRSIG window, so an offline mesh operates in stale ⚠ as its steady state. Three rules keep the signal meaningful:
+
+1. **Staleness is a state, not an event.** Implementations SHOULD render stale ⚠ as a passive indicator and SHOULD NOT interrupt for it. Interruptive UX is reserved for _events_ — binding changes, downward ratchet moves, unproven `p=` changes, lineage forks — the tripwires that share the user's finite attention.
+2. **Staleness has magnitude.** Verifiers SHOULD grade by how far the `chain_window` has lapsed, and MAY grade relative to a local baseline: where everything a verifier holds is two weeks stale, two-weeks-stale is ambient, and a record far staler than the local median is the anomaly worth showing. The baseline is a display heuristic only, computed over distinct names/publishers — it MUST NOT feed verdicts, so flooding a verifier with gossiped records can at most dull a badge, never flip an outcome.
+3. **Freshness is a community good.** The DNSSEC chain is attached unsigned ([Serialization]), so _any_ party MAY re-fetch and re-attach a fresh chain — no keys, no owner involvement — and evidence pooling ([Comparing Records Offline]) upgrades existing entries in place. A single connected member gossiping refreshed chains keeps an entire offline mesh fresh.
+
+# Binding Cache
+[Binding Cache]: #binding-cache
+
+Verified bindings MUST NOT be installed as edges in the user's root document (that would launder DNS's authority into the user's signature). They live in a local **binding cache**:
+
+- Entries are self-authenticating (certificate + DNSSEC chain), keyed by hostname.
+- Presence in the cache confers no authority; the chain MUST be re-verifiable, and verifiers MUST re-check it at use (yielding a possibly-stale graded verdict).
+- Entries MAY be gossiped peer-to-peer as-is (record-first sharing); receivers MUST re-verify from their own KSK and MUST NOT extend any trust to the sender.
+- Alongside the cache, the user's **claims** — alleged `hostname → document` associations from introductions that no certificate has yet corroborated (see [Petname Anchoring]'s divergence flow) — live in the user-private judgment document ([Binding Cache spec]): E2EE and device-delegated, so they reach the user's own devices and structurally nothing else. A claim confers nothing and grades below stale ⚠. A verified record for the same hostname takes precedence, but the claim MUST be retained as introduction provenance ([Binding Cache spec] B6).
+- All verifier conclusions — the accepted binding, effective serial, tenure, pending and contested conditions — are a deterministic derivation over the store, normative in the [Binding Cache spec]. In particular, a stale ⚠ record attesting a different document derives as pending and never changes the accepted binding by itself.
+
+# Handoff to Path Resolution
+[Handoff to Path Resolution]: #handoff-to-path-resolution
+
+After verification, the root document is the one designated by `certificate.root_doc`. Remaining segments resolve per [Onomancy Path Resolution]; nothing in this specification affects the walk.
+
+Resolution of DNS-anchored names is always **live**. The certificate's `heads` field is advisory — an attested known-good state at issuance, usable as a sync-expectation hint ("is my replica at least here?") or a document-layer staleness signal — and MUST NOT pin resolution. Two reasons: certificates are immutable and replayable by design (an old certificate with a re-attached fresh chain verifies fully fresh ✓), so certificate-pinned resolution would be a state-freeze mechanism that survives freshness; and pinning is a _user-visible_ property of a name's spelling (`automerge:…#heads`) — the `@` grammar deliberately carries no heads, and a publisher-injected invisible pin would break that.
+
+# Error Conditions
+[Error Conditions]: #error-conditions
+
+| Tag | Condition | Requirement |
+|-----|-----------|-------------|
+| D1 | Dotless `@` name, IP literal, or malformed DNS name | MUST be a parse error; no fallback |
+| D2 | TXT record absent (proven by NSEC/NSEC3) | MUST report "no binding", distinct from D3 |
+| D3 | TXT record absent, absence not proven | MUST treat as possible downgrade; MUST NOT conclude "no binding" |
+| D4 | Same-document record whose zone-state key does not exceed the accepted record's, chain stale ⚠ | Replay: dominated — contributes to no derivation output (bytes remain storable) |
+| D4a | Fresh ✓ record with serial lower than the effective serial | Wins rung 0 (deterministic, not discretionary); MUST surface as a ratchet-reset event — additionally a surfaced binding change if the document differs |
+| D4b | TXT serial reads more than 5 minutes in the future | SHOULD defer (retry later); MUST NOT treat as malformed |
+| D5 | Unknown `k=` algorithm | MUST reject that record only — siblings in the RRset are still processed; SHOULD surface as a possible downgrade/unsupported-algorithm signal (rejection differs from skipping in the surfacing, not the scope) |
+| D6 | Certificate signature or delegation chain invalid | MUST reject |
+| D7 | TXT `p=` ≠ certificate `root_doc`, or hostname mismatch | MUST reject |
+| D8 | DNSSEC chain valid but window lapsed | MUST yield stale ⚠, not invalid ✗ |
+| D9 | Chain does not verify from the baked-in KSK | MUST yield invalid ✗ |
+| D10 | Delegation chain does not thread the TXT `g=` key as an authority-carrying hop, chain fresh ✓ | MUST reject — signer's generation is no longer attested (revoked-signer defense) |
+| D11 | Delegation chain does not thread the TXT `g=` key as an authority-carrying hop, chain stale ⚠ | Provisional: MUST warn, MAY proceed per offline policy |
+| D12 | Attested `g=` is provably superseded per **uncontested** valid lineage | MUST reject — rewind attack |
+| D12a | Valid statements compete over the same generation (incl. fresh chain vs valid superseding statement) | Fork: MUST surface as equivocation; MUST NOT silently resolve or hard-reject in either direction |
+| D13 | Chain validation requires a signature algorithm the verifier does not implement | MUST yield invalid ✗ — no algorithm-downgrade path |
+| D14 | Wildcard-synthesized answer without a validating no-closer-match proof | MUST yield invalid ✗ |
+| D15 | Successor proof names a predecessor for which the verifier's store holds no record bound to this hostname | MUST confer nothing; MUST surface as an ordinary binding change ([Proofs Are Relative Evidence]) |
+| D16 | Two successor statements claim to succeed the same document | Provable equivocation: MUST surface; MUST NOT auto-resolve in either direction ([Bridging History Gaps]) |
+| D17 | Rotation or successor statement fails [statement validity][Generation Lineage] (bad decode, wrong document, missing/invalid/non-admin authority carriage) | MUST ignore as malformed evidence; MUST NOT advance lineage memory; MUST NOT count as fork evidence |
+| D18 | Valid rotation statements violate the simple-chain shape (double-replace, double-successor, or cycle) | Fork, set-wise: all involved statements surface (D12a/D16); no order-dependent invalidation; D12 hard rejection never applies to forked lineage |
+
+# FAQ
+[FAQ]: #faq
+
+## Why no expiration on the binding record?
+
+Expiry is at odds with local-first operation: a binding that silently dies offline punishes exactly the users the system is for. Freshness is graded instead ([Graded Freshness]), and revocation is explicit — a delegation revocation inside the document, with `p=` changes reserved for genuine migration.
+
+## Why does the certificate embed the whole DNSSEC chain?
+
+So the record is self-contained. A receiver with no network access — or no trust in their resolver — re-derives the binding from their own baked-in KSK and nothing else. This is what makes record-first gossip safe among mutually untrusting peers.
+
+## Why can't the document ID sign the certificate directly?
+
+Nobody holds that key: [Keyhive] destroys the doc-root signing key at creation. The document ID roots a delegation graph, and the certificate carries the standard Keyhive proof from that root to the actual signer.
+
+## Why not sign with the doc-ID key and skip the delegation chain?
+
+Nobody can: [Keyhive] destroys the doc-root signing key at creation (`EphemeralSigner`) — the ID roots a delegation graph, not a held key. And if a held root were offered, the prudent move would be to sign one delegation to a rotatable keyset and destroy it anyway — holding the one unrotatable, identity-equated key forever is pure downside after its first signature. That is exactly what Keyhive does; the delegation chain is the deliberate price of a custody model with no permanent single point of failure.
+
+## How does revocation work without a revocation list?
+
+By rotation, not enumeration: revoking a signer rotates the [Generation Key], and verifiers check that a chain passes through the currently attested generation — a positive path-membership test. Nobody ships, syncs, or stores a list of the revoked; the zone attests the one key that vouches for the living.
+
+## Why not put the certificate in DNS and skip the fetch?
+
+The "one round trip" premise is false: validating from the baked-in KSK requires walking the DNSSEC tree regardless (the endpoint fetch is already the single-round-trip option — cert + complete chain in one GET). Large TXT records are amplification-attack fodder, hit registrar input limits, and the delegation chain is unbounded. Gossip would still require the self-contained form, so cert-in-DNS would add a second wire form of the security-critical artifact to optimize a path that was never the slow one.
+
+<!-- External Links -->
+
+[Automerge]: https://automerge.org/
+[BCP 14]: https://www.rfc-editor.org/info/bcp14
+[ICANN SAC053]: https://itp.cdn.icann.org/en/files/security-and-stability-advisory-committee-ssac-reports/sac-053-en.pdf
+[IDNA]: https://www.rfc-editor.org/rfc/rfc5890
+[Keyhive]: https://github.com/inkandswitch/keyhive
+[Binding Cache spec]: ./binding-cache.md
+[Onomancy Name Grammar]: ../name-grammar.md
+[Onomancy Path Resolution]: ../path-resolution.md
+[Petname Anchoring]: ./petname-anchor.md
+[RFC 4035]: https://www.rfc-editor.org/rfc/rfc4035
+[RFC 5011]: https://www.rfc-editor.org/rfc/rfc5011
+[RFC 8552]: https://www.rfc-editor.org/rfc/rfc8552
+[RFC 9460]: https://www.rfc-editor.org/rfc/rfc9460
+[Serialization]: ../serialization.md
+[Zooko's triangle]: https://en.wikipedia.org/wiki/Zooko%27s_triangle
+[hickory]: https://github.com/hickory-dns/hickory-dns

@@ -1,0 +1,26 @@
+# cargo-deny configuration — https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[licenses]
+# Alphabetized. Everything must be compatible with MIT OR Apache-2.0.
+allow = [
+  "Apache-2.0",
+  "BSD-1-Clause",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+
+[bans]
+# Mirrors the workspace lint allowance for clippy::multiple_crate_versions.
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-git = "deny"
+unknown-registry = "deny"

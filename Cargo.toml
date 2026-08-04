@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["onomancer_core", "onomancer_wasm"]
+members = ["onomancy_core", "onomancy_wasm"]
 
 [workspace.package]
 edition = "2024"
@@ -11,13 +11,18 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 
 [workspace.dependencies]
 # Internal crates
-onomancer_core = { version = "0.1.0", path = "onomancer_core", default-features = false }
-onomancer_wasm = { version = "0.1.0", path = "onomancer_wasm", default-features = false }
+onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = false }
+onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = false }
 
 # External crates
 arbitrary = "1.4"
 bolero = "0.13"
+bs58 = { version = "0.5", default-features = false, features = [
+  "alloc",
+  "check",
+] }
 console_error_panic_hook = "0.1.7"
+ed25519-dalek = { version = "2.2", default-features = false }
 getrandom = "0.2"
 js-sys = { version = "0.3", default-features = false }
 serde = { version = "1.0", default-features = false }
@@ -70,7 +75,7 @@ strip = "symbols"
 
 # Preserve the Wasm name section for readable stack traces in production.
 # Only strips DWARF debug info, not function names.
-[profile.release.package.onomancer_wasm]
+[profile.release.package.onomancy_wasm]
 strip = "debuginfo"
 
 # Debug-oriented Wasm profile. Preserves DWARF so Chrome DevTools
@@ -86,5 +91,5 @@ opt-level = 1
 overflow-checks = true
 strip = "none"
 
-[profile.wasm-debug.package.onomancer_wasm]
+[profile.wasm-debug.package.onomancy_wasm]
 strip = "none"

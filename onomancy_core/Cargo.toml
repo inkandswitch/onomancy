@@ -1,12 +1,12 @@
 [package]
-name = "onomancer_core"
+name = "onomancy_core"
 version = "0.1.0"
 description = "Core logic for Onomancer"
 
 authors.workspace = true
 categories = ["data-structures"]
 edition.workspace = true
-keywords = ["onomancer", "names"]
+keywords = ["onomancy", "names"]
 license.workspace = true
 readme = "./README.md"
 repository.workspace = true
@@ -14,20 +14,22 @@ rust-version.workspace = true
 
 [dependencies]
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
-serde = { workspace = true, optional = true, features = ["derive"] }
+bs58 = { workspace = true }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true, optional = true, features = ["alloc", "derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
-onomancer_core = { path = ".", features = ["arbitrary"] }
+onomancy_core = { version = "0.1.0", path = ".", features = ["arbitrary"] }
 testresult = { workspace = true }
 
 [features]
 default = []
-arbitrary = ["dep:arbitrary", "std"] # derive needs std's thread_local
+arbitrary = ["dep:arbitrary", "std"]         # derive needs std's thread_local
 serde = ["dep:serde"]
-std = ["thiserror/std"]
+std = ["ed25519-dalek/std", "thiserror/std"]
 
 [lints]
 workspace = true

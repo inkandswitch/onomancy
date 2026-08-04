@@ -1,4 +1,5 @@
-//! Core logic for Onomancer.
+//! Core logic for Onomancer, the reference implementation of the
+//! Onomancy protocol.
 //!
 //! This crate is `no_std` by default; enable the `std` feature for
 //! `std::error::Error` integration and friends.

@@ -1,0 +1,5 @@
+[default.extend-words]
+# "look-alikes" is intentional
+alikes = "alikes"
+# ONO is the Onomancy TXT format tag (v=ONO0), not a typo of "ONE"
+ono = "ono"

@@ -1,6 +1,6 @@
 # Assumptions
 
-This document lists the assumptions Onomancer makes about its environment. Violating these assumptions may lead to incorrect resolution, accepted forgeries, or unrecoverable trust state.
+This document lists the assumptions Onomancy makes about its environment. Violating these assumptions may lead to incorrect resolution, accepted forgeries, or unrecoverable trust state.
 
 ## Cryptography
 
@@ -8,7 +8,7 @@ This document lists the assumptions Onomancer makes about its environment. Viola
 
 > **Assumption:** Ed25519 signatures cannot be forged without the signing key.
 
-Onomancer certificates, root document edges, and (transitively) the entire key-anchor identity model rest on this. There is no fallback algorithm at v0; `k=ed25519` in the TXT record leaves room for migration via a version bump.
+Onomancy certificates, root document edges, and (transitively) the entire key-anchor identity model rest on this. There is no fallback algorithm at v0; `k=ed25519` in the TXT record leaves room for migration via a version bump.
 
 **Consequence of violation:** Arbitrary identity forgery.
 
@@ -24,12 +24,11 @@ Onomancer certificates, root document edges, and (transitively) the entire key-a
 
 ### Doc ID Is the Controlling Authority
 
-> **Assumption:** A Keyhive root document ID _is_ an ed25519 verifying key, and that key is the controlling authority of the document — not merely derived from a one-time key.
+> **Assumption:** A Keyhive root document ID _is_ an ed25519 verifying key, is stable for the document's lifetime, and roots a self-certifying delegation graph.
 
-> [!WARNING]
-> This assumption is **unverified** (tracked in TODO). If key rotation does not preserve the doc ID, TXT records must point at current keys rather than doc IDs, which reshapes the binding record and the successor-key story in the certificate schema.
+**Verified** against inkandswitch/keyhive @ `d12511d`: `DocumentId` wraps an ed25519 `VerifyingKey`; identity keys are immutable and prekey rotation is ECDH-only, so the ID never changes. However, the doc-root _signing_ key is destroyed at creation (`EphemeralSigner`) — the ID is not a held key. Authority is proven by the `Signed<Delegation>` chain from the root, which the certificate embeds.
 
-**Consequence of violation:** Bindings go stale on rotation; the "no identity migration" property (ADR-010) breaks.
+**Consequence of violation:** If Keyhive's semantics change (e.g. doc IDs become rotatable), the binding record and certificate schema must be redesigned.
 
 ## DNS / DNSSEC
 
@@ -37,17 +36,25 @@ Onomancer certificates, root document edges, and (transitively) the entire key-a
 
 > **Assumption:** The IANA root KSK is not compromised, and clients ship the correct one.
 
-Exactly one KSK is baked in at a time. It rotates every few years — a deliberately slow trust anchor. A trust-anchor _set_ plus an RFC 5011-style rollover story is future work (tracked in TODO): stale clients must be able to validate chains signed under a newer KSK.
+Exactly one KSK is baked in at a time. It rotates every few years — a deliberately slow trust anchor; empirically the root has seen one rollover (2018) and one ceremonial revocation (2019) in its history, so app-update cadence realistically outruns it. A trust-anchor _set_ plus an RFC 5011-style rollover story is future work: stale clients must be able to validate chains signed under a newer KSK, and clients shipped during a rollover overlap should carry both keys so chains gossiped across the boundary verify on either side.
 
-**Consequence of violation:** The entire DNS anchor is forgeable. Key anchors and petnames are unaffected.
+**Consequence of violation:** The entire DNS anchor is forgeable. Doc anchors and petnames are unaffected. Note the offline sharpening: a client offline across a compromise-and-revocation accepts _fresh_ forged chains — graded freshness measures signature windows, not key legitimacy (see [security.md](./security.md#offline-anchor-rot)).
+
+### The Revocation Ceremony Rotates the Generation
+
+> **Assumption:** Revoking a naming-relevant key is one ceremony: the owner revokes the delegation, rotates the generation key, and publishes the new `g=` — the publication is not a separate task that can be forgotten.
+
+There is no revocation oracle — requiring one would break offline verification (a rejected design alternative). The generation key makes revocation verifier-visible through the record itself: a revoked signer's chain no longer threads the attested chokepoint, and fresh chains reject it. This works only if the owner actually publishes the rotation; the spec makes it a MUST of the ceremony, and the ops guidance routes the owner through DNS at that exact moment anyway (rotating zone credentials).
+
+**Consequence of violation:** A revocation performed in the document but not reflected in `g=` is invisible to record-only verifiers — the revoked signer keeps minting acceptable certificates until the rotation is published (fail-open). Residuals after correct rotation are the stale-chain window and lineage forks under zone+insider attack (provable equivocation, surfaced) (see [security.md](./security.md#revocation-lag)).
 
 ### Zone Operators Publish Correctly
 
-> **Assumption:** A domain owner can publish a DNSSEC-signed TXT record and keep its version monotonically increasing.
+> **Assumption:** A domain owner can publish a DNSSEC-signed TXT record and keep its serial (`n`) monotonically increasing.
 
-The replay ratchet ([dns-binding.md](./dns-binding.md)) depends on version monotonicity being maintained by the _legitimate_ owner. A transient attacker who publishes an absurdly high version poisons the ratchet — an accepted risk with a manual reset escape hatch (see [security.md](./security.md)).
+The replay ratchet ([dns-binding.md](./dns-binding.md)) depends on serial monotonicity being maintained by the _legitimate_ owner. A transient attacker who publishes an inflated serial poisons the ratchet, but the damage is bounded: the 5-minute skew deferral caps the attacker's lead, and fresh-beats-stale heals any verifier that sees one fresh owner chain (see [security.md](./security.md#ratchet-poisoning)).
 
-**Consequence of violation:** Replay of superseded bindings, or a burned ratchet requiring manual reset.
+**Consequence of violation:** Replay of superseded bindings, or — for fully offline verifiers only — a poisoned ratchet requiring the per-name manual "reset trust" action (mandated by the spec; not yet implemented).
 
 ### Signature Windows Are Short
 
@@ -67,7 +74,7 @@ Clocks are used to grade chain freshness and to sanity-check claimed issuance ti
 
 ### No Expiration on Bindings
 
-> **Assumption:** Bindings do not expire; revocation is an explicit act (swapping the TXT record's key).
+> **Assumption:** Bindings do not expire; revocation is an explicit act — revoking the signer's delegation inside the document (key compromise) or changing the TXT record (document migration).
 
 Expiry is at odds with local-first operation. The trade-off is that staleness must be surfaced to users rather than enforced by the protocol.
 
@@ -81,7 +88,7 @@ Everything must degrade: offline introductions root as petnames and upgrade late
 
 ### Resolution Is Observable
 
-> **Assumption:** DNS lookups and `/.well-known/onomancy` fetches leak metadata to resolvers and networks.
+> **Assumption:** DNS lookups and certificate-endpoint fetches leak metadata to resolvers and networks.
 
 DoH narrows this in browsers; native resolver traffic leaks. The certificate fetch is integrity-safe even over plain HTTP (the record is self-authenticating) but is not private.
 
@@ -113,4 +120,4 @@ Petname edges live here; local malware with signing access can forge petnames. T
 | Caches are trustworthy | Re-verification at use; cache confers no authority |
 | Clocks are synchronized | Verification is clock-free; time only grades freshness |
 | Names are unambiguous to humans | Syntactic anchor disjointness + display-layer confusable detection |
-| The onomancer server is honest | It serves signed records it cannot forge; the TXT key revokes it |
+| The onomancer server is honest | It serves signed records it cannot forge; servers hold no keys, so compromise is DoS/staleness only |
