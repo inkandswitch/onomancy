@@ -92,7 +92,7 @@
           pname = "wasm-bodge";
           version = wasm-bodge-src.shortRev;
           src = wasm-bodge-src;
-          cargoHash = "sha256-tARojdKFjnkCeJIhgpMFEvfxrOTOH8L3cAvE2UQm0jY=";
+          cargoHash = "sha256-KE/AAkrdQ/tmr1X4Fya9CU/oH8e166qJax2kZ3R6jX0=";
           nativeBuildInputs = [ unstable.cargo-auditable ];
           doCheck = false; # tests require npm/puppeteer infrastructure
         };

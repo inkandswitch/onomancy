@@ -329,46 +329,50 @@ mod tests {
         assert!(Name::parse("@expede.wtf/../a").is_err());
     }
 
-    #[test]
-    fn parse_never_panics_and_roundtrips() {
-        bolero::check!()
-            .with_type::<alloc::string::String>()
-            .for_each(|raw| {
-                if let Ok(name) = Name::parse(raw) {
-                    let printed = name.to_string();
-                    let reparsed = Name::parse(&printed).expect("printed names reparse");
-                    assert_eq!(name, reparsed, "print/parse roundtrip");
-                    assert_eq!(printed, reparsed.to_string(), "printing is stable");
-                }
-            });
-    }
+    mod props {
+        use super::*;
 
-    #[test]
-    fn anchors_are_syntactically_disjoint() {
-        bolero::check!()
-            .with_type::<alloc::string::String>()
-            .for_each(|raw| {
-                if let Ok(name) = Name::parse(&alloc::format!("@{raw}")) {
-                    assert!(
-                        matches!(name.anchor(), Anchor::Dns(_)),
-                        "`@` yields DNS anchors only"
-                    );
-                }
+        #[test]
+        fn parse_never_panics_and_roundtrips() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    if let Ok(name) = Name::parse(raw) {
+                        let printed = name.to_string();
+                        let reparsed = Name::parse(&printed).expect("printed names reparse");
+                        assert_eq!(name, reparsed, "print/parse roundtrip");
+                        assert_eq!(printed, reparsed.to_string(), "printing is stable");
+                    }
+                });
+        }
 
-                if let Ok(name) = Name::parse(&alloc::format!("automerge:{raw}")) {
-                    assert!(
-                        matches!(name.anchor(), Anchor::Doc(_)),
-                        "`automerge:` yields doc anchors only"
-                    );
-                    assert!(name.heads().is_empty() || raw.contains('#'));
-                }
+        #[test]
+        fn anchors_are_syntactically_disjoint() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    if let Ok(name) = Name::parse(&alloc::format!("@{raw}")) {
+                        assert!(
+                            matches!(name.anchor(), Anchor::Dns(_)),
+                            "`@` yields DNS anchors only"
+                        );
+                    }
 
-                if let Ok(name) = Name::parse(&alloc::format!("~{raw}")) {
-                    assert!(
-                        matches!(name.anchor(), Anchor::Local),
-                        "`~` yields local anchors only"
-                    );
-                }
-            });
+                    if let Ok(name) = Name::parse(&alloc::format!("automerge:{raw}")) {
+                        assert!(
+                            matches!(name.anchor(), Anchor::Doc(_)),
+                            "`automerge:` yields doc anchors only"
+                        );
+                        assert!(name.heads().is_empty() || raw.contains('#'));
+                    }
+
+                    if let Ok(name) = Name::parse(&alloc::format!("~{raw}")) {
+                        assert!(
+                            matches!(name.anchor(), Anchor::Local),
+                            "`~` yields local anchors only"
+                        );
+                    }
+                });
+        }
     }
 }

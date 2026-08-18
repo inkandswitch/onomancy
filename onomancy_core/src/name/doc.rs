@@ -230,23 +230,28 @@ mod tests {
         );
     }
 
-    #[test]
-    fn encode_decode_roundtrip_from_raw_bytes() {
-        bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
-            if let Ok(key) = VerifyingKey::from_bytes(bytes) {
-                let anchor = DocAnchor::from(key);
-                let reparsed = DocAnchor::parse(&anchor.to_string()).expect("printed keys reparse");
-                assert_eq!(anchor, reparsed);
-            }
-        });
-    }
+    mod props {
+        use super::*;
 
-    #[test]
-    fn head_roundtrip_from_raw_bytes() {
-        bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
-            let head = Head(*bytes);
-            let reparsed = Head::parse(&head.to_string()).expect("printed heads reparse");
-            assert_eq!(head, reparsed);
-        });
+        #[test]
+        fn encode_decode_roundtrip_from_raw_bytes() {
+            bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
+                if let Ok(key) = VerifyingKey::from_bytes(bytes) {
+                    let anchor = DocAnchor::from(key);
+                    let reparsed =
+                        DocAnchor::parse(&anchor.to_string()).expect("printed keys reparse");
+                    assert_eq!(anchor, reparsed);
+                }
+            });
+        }
+
+        #[test]
+        fn head_roundtrip_from_raw_bytes() {
+            bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
+                let head = Head(*bytes);
+                let reparsed = Head::parse(&head.to_string()).expect("printed heads reparse");
+                assert_eq!(head, reparsed);
+            });
+        }
     }
 }

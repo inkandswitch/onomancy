@@ -2,14 +2,16 @@
 name = "onomancy_core"
 version = "0.1.0"
 description = "Core logic for Onomancer"
-
-authors.workspace = true
-categories = ["data-structures"]
-edition.workspace = true
-keywords = ["onomancy", "names"]
-license.workspace = true
 readme = "./README.md"
+
 repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["data-structures"]
+keywords = ["onomancy", "names"]
+
+edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]

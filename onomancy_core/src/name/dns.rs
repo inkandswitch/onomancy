@@ -188,16 +188,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_is_idempotent_on_normalized_output() {
-        bolero::check!()
-            .with_type::<alloc::string::String>()
-            .for_each(|raw| {
-                if let Ok(dns) = DnsName::parse(raw) {
-                    let renormalized = DnsName::parse(dns.as_str()).expect("already normalized");
-                    assert_eq!(dns, renormalized);
-                    assert_eq!(dns.to_string(), renormalized.to_string());
-                }
-            });
+    mod props {
+        use super::*;
+
+        #[test]
+        fn parse_is_idempotent_on_normalized_output() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    if let Ok(dns) = DnsName::parse(raw) {
+                        let renormalized =
+                            DnsName::parse(dns.as_str()).expect("already normalized");
+                        assert_eq!(dns, renormalized);
+                        assert_eq!(dns.to_string(), renormalized.to_string());
+                    }
+                });
+        }
     }
 }
