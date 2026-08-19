@@ -27,12 +27,45 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 
 ## Workspace
 
-| Crate                                | Purpose                                                                            |
-|--------------------------------------|------------------------------------------------------------------------------------|
-| [`onomancy_core`](./onomancy_core) | `no_std`-leaning domain crate: name grammar, petname store, certificate, TXT codec |
-| [`onomancy_wasm`](./onomancy_wasm) | Wasm/JavaScript bindings for browsers and Node.js                                  |
+| Crate                                  | Purpose                                                                              |
+|----------------------------------------|--------------------------------------------------------------------------------------|
+| [`onomancy_core`](./onomancy_core)   | `no_std`-leaning vocabulary: name grammar, TXT codec, certificate & statement units  |
+| [`onomancy_proto`](./onomancy_proto) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
+| [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings for browsers and Node.js                                    |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
+
+```mermaid
+graph TD
+    subgraph pure ["sans-IO (native + Wasm, no sockets/clocks/storage)"]
+        core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
+        proto["onomancy_proto<br/><i>machines: resolve · ladder · derive</i>"]
+        dnssec["onomancy_dnssec†<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
+        publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
+    end
+
+    subgraph backends ["IO backends (trait-seam implementors)"]
+        hickory["onomancy_hickory†<br/><i>native chain fetching</i>"]
+        wasm["onomancy_wasm<br/><i>browser bindings · DoH fetch</i>"]
+        keyhive["onomancy_keyhive†<br/><i>authority · judgment doc · namestores</i>"]
+    end
+
+    onomancer["onomancer† (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
+
+    proto --> core
+    dnssec -- "implements ChainValidator" --> proto
+    publish --> proto
+    hickory -- "implements ChainProvider" --> proto
+    wasm --> core
+    wasm -- "implements ChainProvider" --> proto
+    keyhive -- "implements AuthorityVerifier,<br/>JudgmentView, Namestore" --> proto
+    onomancer --> publish
+    onomancer --> dnssec
+    onomancer --> hickory
+    onomancer --> keyhive
+```
+
+† planned — the crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier, servers are keyless byte couriers, and all cryptographic verification happens in the sans-IO layer against locally-held trust anchors.
 
 ## Development
 

@@ -13,18 +13,20 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ed25519-dalek = { workspace = true }
 onomancy_core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
-ed25519-dalek = { workspace = true }
+onomancy_proto = { version = "0.1.0", path = ".", features = ["test_utils"] }
 testresult = { workspace = true }
 
 [features]
 default = []
 std = ["onomancy_core/std", "thiserror/std"]
+test_utils = []                              # deterministic evidence factories
 
 [lints]
 workspace = true

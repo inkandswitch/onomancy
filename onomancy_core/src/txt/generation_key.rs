@@ -25,3 +25,16 @@ impl From<VerifyingKey> for GenerationKey {
         Self(key)
     }
 }
+
+impl PartialOrd for GenerationKey {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for GenerationKey {
+    /// By key bytes, matching `DocAnchor`'s convention.
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.as_bytes().cmp(other.0.as_bytes())
+    }
+}

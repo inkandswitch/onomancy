@@ -141,7 +141,7 @@ Each rotation MUST produce a **rotation statement** signed by Gₙ₊₁ over th
 1. It decodes strictly per [Serialization]'s `ONR\x00` layout and its signature verifies under the `successor` key.
 2. Its `root_doc` equals the document under consideration (the certificate's `root_doc`).
 3. Its authority carriage is a valid delegation chain rooting at `root_doc`, terminating at the `successor` key, with the delegating hop held at admin access — the same bar as certificate signing ([Who Signs]).
-4. The document's valid statements MUST form a **simple chain** in the replaced → successor graph, and chain-shape violations are evaluated **set-wise** — never by which statement came "first," because any such tiebreak would be evaluation-order-dependent. A key replaced twice, a key appearing as `successor` twice, or a cycle (a retired generation key reappearing as a successor) is a **fork**: every involved statement surfaces per D12a/D16, none is silently preferred, and — because D12's hard rejection requires _uncontested_ lineage — a fork can never brick fresh chains. Publishers MUST NOT reuse generation keys: reuse converts their own lineage into a permanent surfaced fork.
+4. The document's valid statements MUST form a **confluent chain** in the replaced → successor graph, and chain-shape violations are evaluated **set-wise** — never by which statement came "first," because any such tiebreak would be evaluation-order-dependent. A key **replaced twice** or a **cycle** (a retired generation key reappearing as a successor) is a **fork**: every involved statement surfaces per D12a/D16, none is silently preferred, and — because D12's hard rejection is scoped to the [protected prefix](#heads-and-the-protected-prefix) — a fork can never brick fresh chains and never disarms the history beneath it. A key appearing as `successor` in more than one statement with **distinct** replaced keys is NOT a violation: it is a **convergence merge**, the fork-repair primitive — safe to permit because statements are signed *by* the successor, so only that key's holder can merge into it (an attacker cannot merge branches into the owner's key). Publishers MUST NOT reuse generation keys: reuse converts their own lineage into a permanent surfaced fork.
 
 Forks exist only between **valid** statements: two valid statements replacing the same generation are provable equivocation (both signers were genuinely delegated — an insider event, not noise); a valid statement and an invalid one are a statement and some garbage.
 
@@ -155,6 +155,20 @@ Verifiers MUST use lineage when present:
 - Comparison: between two stale artifacts, the lineage-descendant generation wins; the serial `n` is only a zone-vouched tiebreak when lineage is absent or incomparable (see [Comparing Records Offline]).
 - Forks: two statements claiming to replace the same generation are **provable equivocation** (e.g. a zone-holding revoked insider minting a rival successor). A fork MUST be surfaced and MUST NOT be silently resolved in either direction — detection where resolution is impossible, the same epistemics as divergence and re-pin.
 
+### Heads and the Protected Prefix
+[Heads and the Protected Prefix]: #heads-and-the-protected-prefix
+
+The scope of D12 under a fork is defined by the lineage's **heads**. In the replaced → successor graph of a document's valid statements, a *head* is a generation that no valid statement replaces. A healthy lineage has exactly one head — the current generation. A fork is precisely the multi-headed (or otherwise chain-shape-violating) state.
+
+A fork suspends D12 **fork-locally, never document-wide**:
+
+- The **protected prefix** is the portion of the lineage strictly below the fork point (below the lowest common uncontested ancestor of all heads). Every generation in the prefix was superseded by an individually uncontested statement, and an attested `g=` from the prefix remains a provable rewind: D12 MUST still reject it, fork or no fork. A document-wide suspension would let an insider *purchase rewind immunity for the entire history* with one cheap equivocation — the exact inversion of what the ratchet exists for.
+- The **fork-implicated suffix** — the fork point and the generations reachable from it on any branch — is D12a territory: records attesting those generations MUST surface as forks and MUST NOT be hard-rejected or silently resolved in either direction.
+
+**Repair narrows the suffix.** The owner converges heads by ordinary rotation: statements retiring each branch head into a single fresh successor (Gₙ₊₁ MUST be a fresh key) — a convergence merge, per validity rule 4 — a new `g=` in the zone, a serial bump, a fresh chain. The retirement of a branch does not require the branch key's cooperation — rotation-statement authority is the admin-held carriage, never the outgoing key — which is what makes repairing an attacker's branch possible at all. **A single head settles the lineage**: when the graph converges to one head (and contains no cycle), every replaced generation is protected — all branches were retired, however contested the route — and D12 resumes over the whole history. The fork's statements remain permanently in the lineage: repair converges heads going forward; it never launders the historical equivocation, which stays surfaced as evidence of an insider event.
+
+**Layer confinement.** Fork repair is a generation-layer (`g=`) ceremony. It MUST NOT require, and verifiers MUST NOT escalate it to, document succession: `p=` moves only for identity loss ([Succession]), never for lineage hygiene. Were succession ever the mandated repair, one insider statement could force an identity migration — a strictly worse kill switch than the ones this section already refuses.
+
 ### Comparing Records Offline
 [Comparing Records Offline]: #comparing-records-offline
 
@@ -165,6 +179,8 @@ Given two certificates (or cached bindings) for the same name, a verifier determ
 | 0 | Chain freshness | DNSSEC windows | A fresh ✓ artifact beats any stale ⚠ one outright |
 | 1 | Succession proofs / lineage descent | The document's keys | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
 | 2 | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Within a freshness class, every record has one sort key (`window_end` = the end of the chain's ∩-window, [Graded Freshness]): later window end wins; equal ends → higher serial; equal serials → later `issued_at` — but `issued_at` breaks ties only within a single document: cross-document equality at `(window_end, serial)` is zone equivocation (contested), never resolved by a signer-claimed field. Cross-document capable, durable, static — and a **total order**: full key equality between different documents is **zone equivocation** (contested, surfaced, never auto-resolved) |
+
+The maximal record is defined as the **unique undominated candidate**: the one no other candidate beats on the ladder. Implementations MUST select it by dominance testing (or an equivalent order-insensitive computation), never by a fold whose result can depend on enumeration order: rungs 0–1 together with rung 2 are not guaranteed transitive (a proof can order a pair the keys order oppositely), so pairwise folding is not implementation-independent. Zero or several undominated candidates — dominance cycles, equivocation, forks — derive as **contested**.
 
 Rung 2 is one lexicographic key rather than pairwise comparators, deliberately: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset — a single key per record makes the order total and "the maximal record" well-defined. `window_end` leads because it is DNSSEC-vouched where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window). The key orders **zone states** across documents for the same hostname — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
 
@@ -311,7 +327,7 @@ Given certificate bytes from _any_ source (server, cache, gossip peer), a verifi
 5. Check `TXT p= == certificate.root_doc`.
 6. Check the chain's owner name matches `certificate.hostname`.
 7. Apply the [Serial Ratchet].
-8. Apply the [Generation Key] rule: with a fresh ✓ chain, the delegation chain MUST thread the key attested in the TXT `g=` as an authority-carrying hop; with a stale ⚠ chain the check is provisional. If valid generation lineage has been observed, a `g=` provably replaced by **uncontested** lineage MUST be rejected; competing valid statements are a fork — surfaced, never silently resolved (D16/D12).
+8. Apply the [Generation Key] rule: with a fresh ✓ chain, the delegation chain MUST thread the key attested in the TXT `g=` as an authority-carrying hop; with a stale ⚠ chain the check is provisional. If valid generation lineage has been observed, a `g=` in the protected prefix MUST be rejected ([Heads and the Protected Prefix]); a `g=` in a fork-implicated suffix is surfaced, never silently resolved or hard-rejected (D16/D12/D12a).
 9. If the binding's document differs from the previously known one, apply the [Succession] rules: verify the `predecessor` proof if present (evaluated per [Proofs Are Relative Evidence]; a history gap MAY be bridged per [Bridging History Gaps]); surface the change if the proof is absent or names an unknown predecessor, graded by the displaced binding's tenure ([Succession]). With no previously known binding, this step does not run and no continuity status exists to render.
 
 ``` mermaid
@@ -409,14 +425,14 @@ Resolution of DNS-anchored names is always **live**. The certificate's `heads` f
 | D9 | Chain does not verify from the baked-in KSK | MUST yield invalid ✗ |
 | D10 | Delegation chain does not thread the TXT `g=` key as an authority-carrying hop, chain fresh ✓ | MUST reject — signer's generation is no longer attested (revoked-signer defense) |
 | D11 | Delegation chain does not thread the TXT `g=` key as an authority-carrying hop, chain stale ⚠ | Provisional: MUST warn, MAY proceed per offline policy |
-| D12 | Attested `g=` is provably superseded per **uncontested** valid lineage | MUST reject — rewind attack |
+| D12 | Attested `g=` lies in the lineage's **protected prefix** (superseded by an individually uncontested statement below any fork point; [Heads and the Protected Prefix]) | MUST reject — rewind attack; forks elsewhere in the lineage do not disarm this |
 | D12a | Valid statements compete over the same generation (incl. fresh chain vs valid superseding statement) | Fork: MUST surface as equivocation; MUST NOT silently resolve or hard-reject in either direction |
 | D13 | Chain validation requires a signature algorithm the verifier does not implement | MUST yield invalid ✗ — no algorithm-downgrade path |
 | D14 | Wildcard-synthesized answer without a validating no-closer-match proof | MUST yield invalid ✗ |
 | D15 | Successor proof names a predecessor for which the verifier's store holds no record bound to this hostname | MUST confer nothing; MUST surface as an ordinary binding change ([Proofs Are Relative Evidence]) |
 | D16 | Two successor statements claim to succeed the same document | Provable equivocation: MUST surface; MUST NOT auto-resolve in either direction ([Bridging History Gaps]) |
 | D17 | Rotation or successor statement fails [statement validity][Generation Lineage] (bad decode, wrong document, missing/invalid/non-admin authority carriage) | MUST ignore as malformed evidence; MUST NOT advance lineage memory; MUST NOT count as fork evidence |
-| D18 | Valid rotation statements violate the simple-chain shape (double-replace, double-successor, or cycle) | Fork, set-wise: all involved statements surface (D12a/D16); no order-dependent invalidation; D12 hard rejection never applies to forked lineage |
+| D18 | Valid rotation statements violate the confluent-chain shape (double-replace or cycle; a double-successor over distinct replaced keys is a legal convergence merge) | Fork, set-wise: all involved statements surface (D12a/D16); no order-dependent invalidation; D12 stays armed for the protected prefix and is suspended only for the fork-implicated suffix ([Heads and the Protected Prefix]) |
 
 # FAQ
 [FAQ]: #faq

@@ -26,8 +26,8 @@
 //!
 //! ```text
 //! "v=ONO0;…"        ──►  Classified::Binding(TxtRecord)   (parse strictly)
-//! "v=ONO7;…"        ──►  Classified::Future               (skip; newer software's mail)
-//! "v=spf1 …" etc.   ──►  Classified::Foreign              (ignore entirely)
+//! "v=ONO7;…"        ──►  Classified::UnknownVersion       (skip; newer software's mail)
+//! "v=spf1 …" etc.   ──►  Classified::UnknownRecord        (ignore entirely)
 //! "v=ONO0;<junk>"   ──►  Err(ParseTxtRecordError::…)      (reject THIS record, surfaced)
 //! ```
 //!

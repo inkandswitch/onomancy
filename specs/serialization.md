@@ -89,7 +89,7 @@ Fields 11–16 form the **attached region**: independently verifiable evidence, 
 
 Two certificates differing only in attached fields are the _same_ certificate carrying different evidence.
 
-Verifiers MUST NOT accept a signature over any other byte sequence, and signers MUST NOT sign decoded/re-encoded structures — the wire bytes of fields 0–7 are the target.
+Verifiers MUST NOT accept a signature over any other byte sequence, and signers MUST NOT sign decoded/re-encoded structures — the wire bytes of fields 0–9 are the target.
 
 ## Delegation Chain Bytes
 [Delegation Chain Bytes]: #delegation-chain-bytes

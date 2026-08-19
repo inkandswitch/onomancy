@@ -66,8 +66,8 @@ impl TxtRecord {
     }
 
     /// Classify one TXT string per the `RRset` rules: a strict `ONO0`
-    /// parse, a future `ONO` tag to skip, or a foreign record to
-    /// ignore.
+    /// parse, a future `ONO` tag to skip, or an unknown (non-Onomancy)
+    /// record to ignore.
     ///
     /// The input is the *concatenation* of the TXT RDATA's character
     /// strings (standard TXT semantics); concatenation is the caller's
@@ -77,24 +77,24 @@ impl TxtRecord {
     ///
     /// Returns [`ParseTxtRecordError`] only for a record that *is*
     /// `ONO0` but violates its grammar — the reject-and-surface
-    /// disposition. Foreign and future records are `Ok` classifications,
-    /// never errors.
+    /// disposition. Unknown and future records are `Ok`
+    /// classifications, never errors.
     pub fn classify(raw: &str) -> Result<Classified, ParseTxtRecordError> {
         let Some(version_onward) = raw.strip_prefix("v=ONO") else {
-            return Ok(Classified::Foreign);
+            return Ok(Classified::UnknownRecord);
         };
 
         let version_digits = version_onward.split(';').next().unwrap_or(version_onward);
 
         if version_digits.is_empty() || !version_digits.bytes().all(|b| b.is_ascii_digit()) {
             // `v=ONO` followed by non-digits is not an ONO tag at all.
-            return Ok(Classified::Foreign);
+            return Ok(Classified::UnknownRecord);
         }
 
         if version_digits != "0" {
             // Any other digit string — including "00" and digit runs too
             // large for u64 — is a tag this software does not implement.
-            return Ok(Classified::Future);
+            return Ok(Classified::UnknownVersion);
         }
 
         Self::parse_ono0(raw).map(Box::new).map(Classified::Binding)
@@ -108,14 +108,14 @@ impl TxtRecord {
     /// # Errors
     ///
     /// Returns [`ParseTxtRecordError`], including the
-    /// [`Foreign`](ParseTxtRecordError::Foreign) and
-    /// [`FutureFormatTag`](ParseTxtRecordError::FutureFormatTag)
+    /// [`UnknownRecord`](ParseTxtRecordError::UnknownRecord) and
+    /// [`UnknownVersion`](ParseTxtRecordError::UnknownVersion)
     /// variants for inputs `classify` would have dispositioned instead.
     pub fn parse(raw: &str) -> Result<Self, ParseTxtRecordError> {
         match Self::classify(raw)? {
             Classified::Binding(record) => Ok(*record),
-            Classified::Foreign => Err(ParseTxtRecordError::Foreign),
-            Classified::Future => Err(ParseTxtRecordError::FutureFormatTag),
+            Classified::UnknownRecord => Err(ParseTxtRecordError::UnknownRecord),
+            Classified::UnknownVersion => Err(ParseTxtRecordError::UnknownVersion),
         }
     }
 
@@ -221,12 +221,15 @@ impl fmt::Display for TxtRecord {
 pub enum Classified {
     /// A strictly conforming `ONO0` binding record.
     Binding(Box<TxtRecord>),
-    /// Not an onomancy record at all — MUST be ignored entirely.
-    Foreign,
+    /// Not an onomancy record at all (SPF, DKIM, some other
+    /// protocol's TXT — the spec's "foreign" disposition) — MUST be
+    /// ignored entirely.
+    UnknownRecord,
     /// An `ONO`-tagged record with a version this software does not
-    /// implement — MUST be skipped, MUST NOT poison the `RRset` (a
-    /// message to newer software, not junk).
-    Future,
+    /// implement (the spec's "future tag" disposition) — MUST be
+    /// skipped, MUST NOT poison the `RRset` (a message to newer
+    /// software, not junk).
+    UnknownVersion,
 }
 
 /// Decode a `<prefix><44 chars of canonical padded base64>` key field.
@@ -292,19 +295,19 @@ impl fmt::Display for FieldName {
 }
 
 /// A record that is `ONO0` (or was required to be) but violates the
-/// grammar. Reject-and-surface disposition; never applies to foreign or
-/// future records under [`TxtRecord::classify`].
+/// grammar. Reject-and-surface disposition; never applies to unknown
+/// or future records under [`TxtRecord::classify`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseTxtRecordError {
     /// Not an onomancy record at all (only from [`TxtRecord::parse`];
     /// [`TxtRecord::classify`] dispositions this instead).
     #[error("not an onomancy TXT record")]
-    Foreign,
+    UnknownRecord,
 
     /// An `ONO` tag this software does not implement (only from
     /// [`TxtRecord::parse`]; `classify` dispositions this instead).
     #[error("ONO format tag newer than this implementation")]
-    FutureFormatTag,
+    UnknownVersion,
 
     /// A conforming record is at most [`MAX_RECORD_LEN`] octets.
     #[error("record is {len} octets; ONO0 records are at most {max}")]
@@ -490,7 +493,7 @@ mod tests {
             "v=ONO", // no version digits at all
             "v=ONOx;k=ed25519;n=1;g=a;p=b",
         ] {
-            assert_eq!(TxtRecord::classify(foreign)?, Classified::Foreign);
+            assert_eq!(TxtRecord::classify(foreign)?, Classified::UnknownRecord);
         }
         Ok(())
     }
@@ -502,7 +505,7 @@ mod tests {
             "v=ONO00;utter=junk",
             "v=ONO18446744073709551616", // > u64::MAX is still an ONO tag
         ] {
-            assert_eq!(TxtRecord::classify(future)?, Classified::Future);
+            assert_eq!(TxtRecord::classify(future)?, Classified::UnknownVersion);
         }
         Ok(())
     }

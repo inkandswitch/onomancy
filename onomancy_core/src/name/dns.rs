@@ -76,6 +76,27 @@ impl DnsName {
         Ok(Self(lowered))
     }
 
+    /// Decode wire bytes that MUST already be canonical: lowercase
+    /// A-labels, no trailing dot. Decoders reject rather than
+    /// normalize — accept-then-canonicalize is the aliasing bug class
+    /// the strict codecs exist to kill.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CanonicalDnsNameError`] when the bytes are not UTF-8
+    /// (a fortiori not ASCII), do not parse as a DNS name, or parse
+    /// but were not already in canonical form.
+    pub fn from_canonical(raw: &[u8]) -> Result<Self, CanonicalDnsNameError> {
+        let text = core::str::from_utf8(raw).map_err(|_| CanonicalDnsNameError::NotUtf8)?;
+        let parsed = Self::parse(text)?;
+
+        if parsed.as_str() == text {
+            Ok(parsed)
+        } else {
+            Err(CanonicalDnsNameError::NotCanonical)
+        }
+    }
+
     /// View the normalized name as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -111,6 +132,23 @@ fn validate_label(label: &str) -> Result<(), ParseDnsNameError> {
     }
 
     Ok(())
+}
+
+/// Wire bytes were not the canonical spelling of a DNS name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CanonicalDnsNameError {
+    /// The bytes parse but are not in canonical form (uppercase,
+    /// trailing dot, …). Decoders reject rather than normalize.
+    #[error("not in canonical A-label form")]
+    NotCanonical,
+
+    /// The bytes were not UTF-8 text at all.
+    #[error("not UTF-8 text")]
+    NotUtf8,
+
+    /// The bytes do not parse as a DNS name.
+    #[error(transparent)]
+    Parse(#[from] ParseDnsNameError),
 }
 
 /// The input was not a valid, normalizable DNS name.

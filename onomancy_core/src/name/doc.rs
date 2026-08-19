@@ -142,6 +142,12 @@ impl Head {
     }
 }
 
+impl From<[u8; KEY_LEN]> for Head {
+    fn from(bytes: [u8; KEY_LEN]) -> Self {
+        Self(bytes)
+    }
+}
+
 impl fmt::Display for Head {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&bs58::encode(&self.0).with_check().into_string())

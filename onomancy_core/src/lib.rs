@@ -9,6 +9,16 @@
 
 extern crate alloc;
 
+pub mod cert;
 pub mod collections;
+pub mod content_hash;
+pub mod delegation;
+pub mod digest;
+pub mod freshness;
 pub mod name;
+pub mod signed;
+pub mod statement;
+pub mod time;
 pub mod txt;
+pub mod wire;
+pub mod zone_state;
