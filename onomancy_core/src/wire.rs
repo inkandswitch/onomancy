@@ -48,7 +48,8 @@ impl<'a> Reader<'a> {
     }
 
     /// Bytes not yet consumed.
-    pub(crate) const fn remaining(&self) -> usize {
+    #[must_use]
+    pub const fn remaining(&self) -> usize {
         self.bytes.len().saturating_sub(self.pos)
     }
 
@@ -133,7 +134,12 @@ impl<'a> Reader<'a> {
     }
 
     /// Require that the whole unit was consumed.
-    pub(crate) const fn finish(self) -> Result<(), WireError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::TrailingBytes`] when unconsumed bytes
+    /// remain: not the canonical encoding of anything.
+    pub const fn finish(self) -> Result<(), WireError> {
         let extra = self.remaining();
 
         if extra == 0 {

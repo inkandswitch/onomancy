@@ -1,5 +1,6 @@
 //! The attested generation key (`g=`).
 
+use core::cmp::Ordering;
 use ed25519_dalek::VerifyingKey;
 
 /// The current generation key: the attested chokepoint that certificate
@@ -27,14 +28,14 @@ impl From<VerifyingKey> for GenerationKey {
 }
 
 impl PartialOrd for GenerationKey {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for GenerationKey {
     /// By key bytes, matching `DocAnchor`'s convention.
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.0.as_bytes().cmp(other.0.as_bytes())
     }
 }

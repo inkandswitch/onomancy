@@ -10,11 +10,11 @@
 //! derive from `[n; 32]`, so a `rotation(1, 11, 12)` in one crate is
 //! byte-identical to the same call in another.
 
-use alloc::{boxed::Box, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
@@ -134,11 +134,11 @@ pub fn binding_carrying(
 
     let proof = ChainProof::Binding {
         leaf_inception: UnixSeconds::from(window_span.0),
-        record: Box::new(TxtRecord::new(
+        records: vec![TxtRecord::new(
             Serial::from(serial),
             generation(gen_seed),
             doc(doc_seed),
-        )),
+        )],
         window: window(window_span.0, window_span.1),
     };
 

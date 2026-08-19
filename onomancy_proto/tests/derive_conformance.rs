@@ -21,8 +21,8 @@ use onomancy_proto::{
         store::{Item, Store},
     },
     test_utils::{
-        binding, binding_carrying, chain, doc, generation, host, rotation, succession, window,
-        Binding,
+        Binding, binding, binding_carrying, chain, doc, generation, host, rotation, succession,
+        window,
     },
 };
 

@@ -1,0 +1,37 @@
+[package]
+name = "onomancy_dnssec"
+version = "0.1.0"
+description = "Sans-IO DNSSEC chain validation for Onomancy: RFC 4034/4035 over supplied bytes"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["cryptography", "no-std"]
+keywords = ["dns", "dnssec", "onomancy", "validation"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+onomancy_core = { workspace = true }
+onomancy_proto = { workspace = true }
+p256 = { workspace = true }
+rsa = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["arbitrary"] }
+onomancy_proto = { workspace = true, features = ["test_utils"] }
+testresult = { workspace = true }
+
+[features]
+default = []
+std = ["onomancy_core/std", "onomancy_proto/std", "thiserror/std"]
+
+[lints]
+workspace = true

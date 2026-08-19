@@ -27,6 +27,8 @@
 //! Determinism is a conformance target: two verifiers holding the same
 //! evidence MUST reach the same verdict.
 
+use core::cmp::Ordering;
+
 use onomancy_core::{freshness::Freshness, name::doc::DocAnchor, zone_state::ZoneStateKey};
 
 /// One record's ladder-relevant facts, extracted by the derivation.
@@ -112,17 +114,17 @@ pub fn compare(left: &Contender, right: &Contender, continuity: Continuity) -> V
     // Rung 2: the zone-state key.
     if left.document == right.document {
         match left.key.cmp(&right.key) {
-            core::cmp::Ordering::Greater => Verdict::Left,
-            core::cmp::Ordering::Less => Verdict::Right,
-            core::cmp::Ordering::Equal => Verdict::Equal,
+            Ordering::Greater => Verdict::Left,
+            Ordering::Less => Verdict::Right,
+            Ordering::Equal => Verdict::Equal,
         }
     } else {
         // Cross-document: issued_at is signer-claimed and MUST NOT
         // resolve what would otherwise be zone equivocation.
         match left.key.zone_vouched().cmp(&right.key.zone_vouched()) {
-            core::cmp::Ordering::Greater => Verdict::Left,
-            core::cmp::Ordering::Less => Verdict::Right,
-            core::cmp::Ordering::Equal => Verdict::Equivocation,
+            Ordering::Greater => Verdict::Left,
+            Ordering::Less => Verdict::Right,
+            Ordering::Equal => Verdict::Equivocation,
         }
     }
 }

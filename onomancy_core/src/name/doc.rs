@@ -11,7 +11,7 @@
 //! loudly instead of silently denoting a different (valid) key.
 
 use alloc::vec::Vec;
-use core::fmt;
+use core::{cmp::Ordering, fmt};
 use ed25519_dalek::VerifyingKey;
 
 /// The URI scheme for doc anchors, including the `:` separator.
@@ -94,13 +94,13 @@ impl From<VerifyingKey> for DocAnchor {
 }
 
 impl PartialOrd for DocAnchor {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for DocAnchor {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         self.0.as_bytes().cmp(other.0.as_bytes())
     }
 }

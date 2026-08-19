@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate},
+    cert::{Certificate, chain::DnssecChain},
     collections::Set,
     content_hash::ContentHash,
     name::dns::DnsName,

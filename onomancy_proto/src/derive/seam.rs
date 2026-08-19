@@ -7,7 +7,7 @@
 //! verification) can plug in — and so conformance tests can fake them
 //! without mocking IO, because there is no IO to mock.
 
-use alloc::boxed::Box;
+use alloc::vec::Vec;
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
     cert::chain::DnssecChain,
@@ -32,12 +32,18 @@ pub enum ChainProof {
         leaf_inception: UnixSeconds,
     },
 
-    /// A proven TXT binding record.
+    /// A proven TXT `RRset` carrying binding records.
     Binding {
         /// Inception of the TXT `RRset`'s own RRSIG.
         leaf_inception: UnixSeconds,
-        /// The proven record: serial, generation key, document.
-        record: Box<TxtRecord>,
+        /// Every parseable `ONO0` record in the proven `RRset`, in
+        /// `RRset` order. Several is normal during migration
+        /// dual-publish; SELECTION is the derivation's job (zone-state
+        /// key), not the validator's — the validator only proves what
+        /// the zone said. Unknown-version and unknown-record strings
+        /// are already dispositioned out; per-record grammar
+        /// rejections (D5) drop only the offending record.
+        records: Vec<TxtRecord>,
         /// The chain's ∩-window.
         window: ChainWindow,
     },
@@ -54,7 +60,7 @@ pub trait ChainValidator {
     /// trust anchor (including empty ∩-windows and unsupported
     /// algorithms, which MUST be invalid ✗, never insecure-but-ok).
     fn validate(&self, hostname: &DnsName, chain: &DnssecChain)
-        -> Result<ChainProof, InvalidChain>;
+    -> Result<ChainProof, InvalidChain>;
 }
 
 /// Verifies Keyhive delegation proofs — `onomancy_keyhive`'s seam.

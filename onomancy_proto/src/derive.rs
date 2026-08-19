@@ -352,31 +352,36 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
             Item::ChainRefresh { hostname, chain } => {
                 let Ok(ChainProof::Binding {
                     leaf_inception,
-                    record,
+                    records,
                     window,
                 }) = validator.validate(hostname, chain)
                 else {
                     continue;
                 };
 
-                evidence.records.push(BindingEvidence {
-                    document: *record.document(),
-                    generation: *record.generation(),
-                    hash,
-                    hostname: hostname.clone(),
-                    key: ZoneStateKey {
-                        window_end: window.expiration(),
-                        serial: record.serial(),
-                        // Bare refreshes sort below equal-window,
-                        // equal-serial certificate items.
-                        issued_at: UnixSeconds::from(0),
-                    },
-                    leaf_inception,
-                    // No delegation chain to check: D10 is a
-                    // certificate rule.
-                    threads_generation: true,
-                    window,
-                });
+                // A bare refresh proves the whole RRset: each record
+                // is candidate evidence (dual-publish carries several
+                // documents); the ladder selects downstream.
+                evidence
+                    .records
+                    .extend(records.iter().map(|record| BindingEvidence {
+                        document: *record.document(),
+                        generation: *record.generation(),
+                        hash,
+                        hostname: hostname.clone(),
+                        key: ZoneStateKey {
+                            window_end: window.expiration(),
+                            serial: record.serial(),
+                            // Bare refreshes sort below equal-window,
+                            // equal-serial certificate items.
+                            issued_at: UnixSeconds::from(0),
+                        },
+                        leaf_inception,
+                        // No delegation chain to check: D10 is a
+                        // certificate rule.
+                        threads_generation: true,
+                        window,
+                    }));
             }
 
             Item::Absence { hostname, chain } => {
@@ -419,18 +424,21 @@ fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
 ) -> Option<BindingEvidence> {
     let Ok(ChainProof::Binding {
         leaf_inception,
-        record,
+        records,
         window,
     }) = validator.validate(certificate.hostname(), certificate.dnssec_chain())
     else {
         return None;
     };
 
-    // Cross-check: the chain-proven TXT must attest the certificate's
-    // own document.
-    if record.document() != certificate.root_doc() {
-        return None;
-    }
+    // Cross-check: the chain-proven RRset must attest the
+    // certificate's own document. Among matching records — several is
+    // legal within one window (migration dual-publish) — the highest
+    // serial is the zone's word for this document.
+    let record = records
+        .iter()
+        .filter(|record| record.document() == certificate.root_doc())
+        .max_by_key(|record| record.serial())?;
 
     let threads_generation = authority.threads(certificate.delegation_chain(), record.generation());
 

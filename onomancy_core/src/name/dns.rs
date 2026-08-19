@@ -1,7 +1,7 @@
 //! DNS name anchors, normalized to lowercase A-label form.
 
 use alloc::string::String;
-use core::fmt;
+use core::{fmt, str};
 
 /// A normalized DNS name: lowercase ASCII A-labels, at least two labels,
 /// no trailing dot, no IP literals.
@@ -87,7 +87,7 @@ impl DnsName {
     /// (a fortiori not ASCII), do not parse as a DNS name, or parse
     /// but were not already in canonical form.
     pub fn from_canonical(raw: &[u8]) -> Result<Self, CanonicalDnsNameError> {
-        let text = core::str::from_utf8(raw).map_err(|_| CanonicalDnsNameError::NotUtf8)?;
+        let text = str::from_utf8(raw).map_err(|_| CanonicalDnsNameError::NotUtf8)?;
         let parsed = Self::parse(text)?;
 
         if parsed.as_str() == text {

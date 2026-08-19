@@ -13,7 +13,7 @@
 //! decode over the received bytes, at signing over the built bytes —
 //! never over re-encoded or normalized forms.
 
-use core::{cmp::Ordering, fmt, hash::Hash, marker::PhantomData};
+use core::{any, cmp::Ordering, fmt, hash::Hash, marker::PhantomData};
 
 use crate::content_hash::ContentHash;
 
@@ -85,7 +85,7 @@ impl<T: ?Sized> Hash for Digest<T> {
 
 impl<T: ?Sized> fmt::Debug for Digest<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Digest<{}>({self})", core::any::type_name::<T>())
+        write!(f, "Digest<{}>({self})", any::type_name::<T>())
     }
 }
 

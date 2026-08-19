@@ -1,8 +1,8 @@
 //! The TXT binding record itself, and its `RRset` dispositions.
 
 use alloc::{boxed::Box, string::String};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use core::fmt;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use core::{fmt, str};
 use ed25519_dalek::VerifyingKey;
 
 use super::{
@@ -431,7 +431,7 @@ mod tests {
         #[test]
         fn classify_is_total_and_errors_only_on_ono0() {
             bolero::check!().for_each(|bytes: &[u8]| {
-                let Ok(raw) = core::str::from_utf8(bytes) else {
+                let Ok(raw) = str::from_utf8(bytes) else {
                     return;
                 };
                 match TxtRecord::classify(raw) {
@@ -450,7 +450,7 @@ mod tests {
         #[test]
         fn accepted_strings_are_canonical() {
             bolero::check!().for_each(|bytes: &[u8]| {
-                let Ok(raw) = core::str::from_utf8(bytes) else {
+                let Ok(raw) = str::from_utf8(bytes) else {
                     return;
                 };
                 if let Ok(Classified::Binding(record)) = TxtRecord::classify(raw) {
