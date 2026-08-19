@@ -31,7 +31,7 @@ use crate::{
     wire::{
         algorithm::Algorithm,
         dnskey::Dnskey,
-        ds::{DigestType, Ds},
+        ds::{DigestType, Ds, DsDigest, Sha256Digest},
         name::Name,
         record::CLASS_IN,
         rrsig::Rrsig,
@@ -249,12 +249,12 @@ fn split_rsa_key(blob: &[u8]) -> Result<(&[u8], &[u8]), VerifyError> {
 /// The SHA-256 DS digest for a DNSKEY at an owner name:
 /// `H(owner canonical wire ‖ DNSKEY RDATA)`.
 #[must_use]
-pub fn ds_digest(owner: &Name, key: &Dnskey) -> [u8; 32] {
+pub fn ds_digest(owner: &Name, key: &Dnskey) -> Sha256Digest {
     let mut input = Vec::new();
     owner.write(&mut input);
     input.extend_from_slice(key.rdata());
 
-    Sha256::digest(&input).into()
+    Sha256Digest::from(<[u8; 32]>::from(Sha256::digest(&input)))
 }
 
 /// Whether a DS record commits to this DNSKEY at this owner.
@@ -276,7 +276,8 @@ pub fn ds_matches(owner: &Name, key: &Dnskey, ds: &Ds) -> Result<(), VerifyError
         });
     }
 
-    if ds_digest(owner, key) == *ds.digest() {
+    let computed = DsDigest::from(ds_digest(owner, key));
+    if computed.matches_wire(ds.digest_type(), ds.digest()) {
         Ok(())
     } else {
         Err(VerifyError::DsMismatch)
@@ -506,7 +507,7 @@ mod tests {
         ds_rdata.extend_from_slice(&key.key_tag().to_be_bytes());
         ds_rdata.push(Algorithm::ED25519.0);
         ds_rdata.push(DigestType::SHA256.0);
-        ds_rdata.extend_from_slice(&ds_digest(&owner, &key));
+        ds_rdata.extend_from_slice(ds_digest(&owner, &key).as_bytes());
         let ds = Ds::parse(&ds_rdata).expect("parses");
 
         ds_matches(&owner, &key, &ds).expect("digest matches");

@@ -27,14 +27,17 @@
 //! - [`link`] — one chain link as (`RRset`, covering RRSIGs)
 //! - [`crypto`] — canonical signed-data assembly, per-algorithm
 //!   signature verification (8/13/15), the DS digest check
-//!
-//! Planned: the `validator::Validator` walk.
+//! - [`anchor`] — DS-form trust anchors + the baked-in IANA root KSKs
+//! - [`validator`] — the walk: [`Validator`](validator::Validator)
+//!   implements `ChainValidator`
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+pub mod anchor;
 pub mod crypto;
 pub mod link;
+pub mod validator;
 pub mod wire;

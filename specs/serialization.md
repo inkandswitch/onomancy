@@ -38,7 +38,7 @@ Consequences relied on by this specification:
 - The tag byte alone determines total length (no lookahead)
 - Lexicographic byte order matches numeric order
 
-Fixed-width cryptographic material (keys, hashes, signatures) is encoded raw, without length prefixes, at the widths given below.
+Fixed-width cryptographic material (keys, hashes, signatures) is encoded raw, without length prefixes, at the widths given below. Fields typed as ed25519 verifying keys — document IDs, signers, generation keys — MUST decode to valid curve points: decoders MUST reject a unit whose key field does not decompress, even where that field is never verified against within the unit. (A 32-byte string that cannot denote a key is not the canonical encoding of anything, and implementations that disagree about whether such a unit exists diverge on every derivation it feeds — the parser-differential class this document exists to kill. The rejection also applies to the TXT record's `g=` and `p=` fields.)
 
 # Certificate Encoding
 [Certificate Encoding]: #certificate-encoding
