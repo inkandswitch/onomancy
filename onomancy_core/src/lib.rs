@@ -9,5 +9,6 @@
 
 extern crate alloc;
 
+pub mod collections;
 pub mod name;
 pub mod txt;

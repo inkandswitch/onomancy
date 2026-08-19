@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["onomancy_core", "onomancy_wasm"]
+members = ["onomancy_core", "onomancy_proto", "onomancy_wasm"]
 
 [workspace.package]
 edition = "2024"
@@ -12,6 +12,7 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 [workspace.dependencies]
 # Internal crates
 onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = false }
+onomancy_proto = { version = "0.1.0", path = "onomancy_proto", default-features = false }
 onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = false }
 
 # External crates

@@ -1,0 +1,30 @@
+[package]
+name = "onomancy_proto"
+version = "0.1.0"
+description = "The sans-IO protocol machines for Onomancy: resolution, comparison, derivation"
+
+authors.workspace = true
+categories = ["data-structures", "no-std"]
+edition.workspace = true
+keywords = ["onomancy", "names", "resolution"]
+license.workspace = true
+readme = "./README.md"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+onomancy_core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bolero = { workspace = true, features = ["arbitrary"] }
+ed25519-dalek = { workspace = true }
+testresult = { workspace = true }
+
+[features]
+default = []
+std = ["onomancy_core/std", "thiserror/std"]
+
+[lints]
+workspace = true

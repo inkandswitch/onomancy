@@ -5,13 +5,11 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use core::fmt;
 use ed25519_dalek::VerifyingKey;
 
-use crate::{
-    name::doc::DocAnchor,
-    txt::{
-        generation_key::GenerationKey,
-        serial::{ParseSerialError, Serial},
-    },
+use super::{
+    generation_key::GenerationKey,
+    serial::{ParseSerialError, Serial},
 };
+use crate::name::doc::DocAnchor;
 
 /// The format tag this module implements, as it appears on the wire.
 pub const FORMAT_TAG: &str = "v=ONO0";

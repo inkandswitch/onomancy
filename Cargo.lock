@@ -496,6 +496,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "onomancy_proto"
+version = "0.1.0"
+dependencies = [
+ "bolero",
+ "ed25519-dalek",
+ "onomancy_core",
+ "testresult",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "onomancy_wasm"
 version = "0.1.0"
 dependencies = [
