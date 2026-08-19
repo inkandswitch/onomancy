@@ -120,6 +120,59 @@
           wasm-tools
         ];
 
+        ci-env = [
+          rust-toolchain
+          nightly-rustfmt
+          pkgs.cargo-deny
+        ];
+
+        mkCheck = name: text:
+          pkgs.writeShellApplication {
+            name = "onomancy-${name}";
+            runtimeInputs = ci-env;
+            text = ''
+              export RUSTFMT="${nightly-rustfmt}/bin/rustfmt"
+              set -x
+              ${text}
+            '';
+          };
+
+        ci-checks = {
+          ci-fmt = mkCheck "ci-fmt" ''
+            cargo fmt --check
+          '';
+
+          ci-clippy = mkCheck "ci-clippy" ''
+            cargo clippy --workspace --all-features --all-targets
+          '';
+
+          ci-test = mkCheck "ci-test" ''
+            cargo test --workspace --all-features
+          '';
+
+          ci-wasm = mkCheck "ci-wasm" ''
+            cargo check --target wasm32-unknown-unknown -p onomancy_wasm
+            cargo check --target wasm32-unknown-unknown --no-default-features \
+              -p onomancy_core -p onomancy_proto -p onomancy_dnssec
+          '';
+
+          ci-no-std = mkCheck "ci-no-std" ''
+            cargo check --workspace --no-default-features
+          '';
+
+          ci-deny = mkCheck "ci-deny" ''
+            cargo deny check
+          '';
+        };
+
+        ci-all = pkgs.writeShellApplication {
+          name = "onomancy-ci";
+          runtimeInputs = pkgs.lib.attrValues ci-checks;
+          text = pkgs.lib.concatMapStringsSep "\n"
+            (check: "onomancy-${check}")
+            (builtins.attrNames ci-checks);
+        };
+
         # Built-in command modules from nix-command-utils
         rust = command-utils.rust.${system};
         wasm = command-utils.wasm.${system};
@@ -170,6 +223,13 @@
             menu
           '';
         };
+
+        apps =
+          pkgs.lib.mapAttrs (name: check: {
+            type = "app";
+            program = "${check}/bin/onomancy-${name}";
+          })
+          (ci-checks // { ci = ci-all; });
 
         formatter = pkgs.alejandra;
       }

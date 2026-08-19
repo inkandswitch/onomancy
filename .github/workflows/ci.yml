@@ -22,29 +22,16 @@ jobs:
         uses: crate-ci/typos@v1.49.0
 
   checks:
-    name: fmt · clippy · test · wasm · deny
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [ci-fmt, ci-clippy, ci-test, ci-wasm, ci-no-std, ci-deny]
     steps:
       - uses: actions/checkout@v4
 
-      # The flake is the single source of truth for the toolchain
-      # (rust 1.91 + nightly rustfmt wrapper + wasm32 target).
       - uses: DeterminateSystems/nix-installer-action@v16
 
-      - name: Format
-        run: nix develop --command cargo fmt --check
-
-      - name: Clippy
-        run: nix develop --command cargo clippy --workspace --all-features --all-targets
-
-      - name: Test
-        run: nix develop --command cargo test --workspace --all-features
-
-      - name: Wasm target
-        run: nix develop --command cargo check --target wasm32-unknown-unknown -p onomancy_wasm
-
-      - name: no_std core
-        run: nix develop --command cargo check -p onomancy_core --no-default-features
-
-      - name: cargo-deny
-        run: nix develop --command cargo deny check
+      - name: ${{ matrix.check }}
+        run: nix run .#${{ matrix.check }}

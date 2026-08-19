@@ -28,7 +28,7 @@
 //! - [`crypto`] — canonical signed-data assembly, per-algorithm
 //!   signature verification (8/13/15), the DS digest check
 //!
-//! Planned: the `RfcValidator` walk.
+//! Planned: the `validator::Validator` walk.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]

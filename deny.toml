@@ -16,6 +16,16 @@ allow = [
   "Zlib",
 ]
 
+[advisories]
+ignore = [
+  # Marvin attack (timing sidechannel on RSA PRIVATE-key operations).
+  # onomancy_dnssec uses `rsa` for signature VERIFICATION only — no RSA
+  # private key exists anywhere in the system (DNSSEC verifiers never
+  # sign; Onomancy's own signatures are Ed25519). Revisit when the rsa
+  # crate ships its constant-time rewrite.
+  { id = "RUSTSEC-2023-0071", reason = "verification-only use; Marvin requires private-key operations" },
+]
+
 [bans]
 # Mirrors the workspace lint allowance for clippy::multiple_crate_versions.
 multiple-versions = "allow"
