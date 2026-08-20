@@ -1,0 +1,31 @@
+[package]
+name = "onomancy_hickory"
+version = "0.1.0"
+description = "Native DNSSEC chain courier for Onomancy, built on hickory-proto"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["network-programming"]
+keywords = ["dns", "dnssec", "onomancy"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hickory-proto = { workspace = true }
+onomancy_core = { workspace = true, features = ["std"] }
+onomancy_protocol = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+onomancy_dnssec = { workspace = true, features = ["std"] }
+testresult = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

@@ -17,15 +17,16 @@
 //!   over local replicas (the path-resolution specification)
 //! - [`verify`] — one-shot certificate verification: graded verdicts
 //!   for a single unit at a single clock reading
-//!
-//! Planned: the `ChainProvider` fetch seam (providers are IO and live
-//! in backend crates; the seam lands here when the first one does).
+//! - [`chain_provider`] — the fetch seam: the one place IO enters.
+//!   Providers are byte couriers in backend crates (`onomancy_hickory`
+//!   natively, `DoH` on Wasm); everything downstream is pure.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+pub mod chain_provider;
 pub mod ladder;
 pub mod resolve;
 pub mod verifier_state;
