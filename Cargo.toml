@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "onomancy_automerge",
   "onomancy_core",
   "onomancy_dnssec",
   "onomancy_protocol",
@@ -16,6 +17,7 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 
 [workspace.dependencies]
 # Internal crates
+onomancy_automerge = { version = "0.1.0", path = "onomancy_automerge", default-features = false }
 onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = false }
 onomancy_dnssec = { version = "0.1.0", path = "onomancy_dnssec", default-features = false }
 onomancy_protocol = { version = "0.1.0", path = "onomancy_protocol", default-features = false }
@@ -23,6 +25,7 @@ onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = 
 
 # External crates
 arbitrary = "1.4"
+automerge = { version = "0.11", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 bijoux = { version = "0.3", default-features = false, features = ["u64"] }
 blake3 = { version = "1.8", default-features = false }

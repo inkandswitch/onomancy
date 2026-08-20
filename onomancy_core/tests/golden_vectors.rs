@@ -23,7 +23,7 @@ use onomancy_core::{
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
 use testresult::TestResult;
-use vectors_catalog::{from_hex, to_hex, vectors, Expect, Vector};
+use vectors_catalog::{Expect, Vector, from_hex, to_hex, vectors};
 
 fn vectors_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

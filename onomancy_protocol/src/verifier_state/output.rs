@@ -110,7 +110,7 @@ pub enum BindingGrade {
     Provisional,
 }
 
-/// A judgment claim or pinned target that disagrees with the accepted
+/// A decisions claim or pinned target that disagrees with the accepted
 /// binding — a badge input for the divergence/re-pin flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Divergence {
@@ -123,7 +123,7 @@ pub struct Divergence {
 /// Which kind of evidence disagrees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DivergenceSource {
-    /// An introduction claim in the judgment document.
+    /// An introduction claim in the decision document.
     Claim,
 
     /// A petname pin whose target no longer matches.

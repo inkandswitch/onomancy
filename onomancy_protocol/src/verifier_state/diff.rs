@@ -82,7 +82,7 @@ pub enum EventKind {
     },
 
     /// A losing acceptance's badge cleared (its receipts now win, or
-    /// the acceptance left the judgment).
+    /// the acceptance left the decisions).
     LosingAcceptanceCleared(DocAnchor),
 
     /// An acceptance document was outranked under the receipts rule

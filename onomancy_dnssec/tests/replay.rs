@@ -19,7 +19,7 @@ use onomancy_protocol::{
     test_utils as proto_utils,
     verifier_state::{
         VerifierState,
-        judgment::{Acceptance, Judgment},
+        decisions::{Acceptance, Decisions},
         memory::{MemoryAuthority, MemoryValidator},
         seam::ChainProof,
         store::{Item, Store},
@@ -94,7 +94,7 @@ fn real_binding(
 /// identical output.
 fn derive_both_ways(
     bindings: &[&RealBinding],
-    judgment: &Judgment,
+    decisions: &Decisions,
     extra: Vec<Item>,
 ) -> VerifierState {
     let hostname = proto_utils::host();
@@ -114,8 +114,8 @@ fn derive_both_ways(
     let pins = Map::default();
     let now = UnixSeconds::from(NOW);
 
-    let with_real = VerifierState::compute(&store, now, judgment, &pins, &real, &authority);
-    let with_fake = VerifierState::compute(&store, now, judgment, &pins, &memory, &authority);
+    let with_real = VerifierState::compute(&store, now, decisions, &pins, &real, &authority);
+    let with_fake = VerifierState::compute(&store, now, decisions, &pins, &memory, &authority);
 
     assert_eq!(
         with_real, with_fake,
@@ -125,7 +125,7 @@ fn derive_both_ways(
     with_real
 }
 
-fn accept(binding: &RealBinding) -> Judgment {
+fn accept(binding: &RealBinding) -> Decisions {
     let mut acceptances = Map::default();
     let mut cited = Set::default();
     cited.insert(binding.cert.digest().into());
@@ -137,9 +137,9 @@ fn accept(binding: &RealBinding) -> Judgment {
         }],
     );
 
-    Judgment {
+    Decisions {
         acceptances,
-        ..Judgment::default()
+        ..Decisions::default()
     }
 }
 
@@ -148,7 +148,7 @@ fn fresh_binding_derives_identically() -> TestResult {
     // Window covers NOW: fresh, confirmed.
     let binding = real_binding(1, 11, 100, (1_754_000_000, 1_756_000_000), 50)?;
 
-    let derivation = derive_both_ways(&[&binding], &Judgment::default(), vec![]);
+    let derivation = derive_both_ways(&[&binding], &Decisions::default(), vec![]);
     let state = derivation
         .hosts
         .get(&proto_utils::host())
@@ -188,7 +188,7 @@ fn d4a_ratchet_reset_derives_identically() -> TestResult {
     let stale_high = real_binding(1, 11, 999, (1_744_000_000, 1_748_000_000), 50)?;
     let fresh_low = real_binding(1, 11, 7, (1_754_000_000, 1_756_000_000), 60)?;
 
-    let derivation = derive_both_ways(&[&stale_high, &fresh_low], &Judgment::default(), vec![]);
+    let derivation = derive_both_ways(&[&stale_high, &fresh_low], &Decisions::default(), vec![]);
     let state = derivation
         .hosts
         .get(&proto_utils::host())

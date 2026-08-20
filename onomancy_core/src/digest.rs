@@ -4,7 +4,7 @@
 //! The Keyhive/subduction pattern: a BLAKE3-256 digest carrying a
 //! phantom marker for the unit type it addresses, so digests of
 //! different artifact kinds are different types and cannot be swapped
-//! by accident. The unit-agnostic form — what judgment-document
+//! by accident. The unit-agnostic form — what decisions-document
 //! entries and reset exclusion sets hold, since they reference store
 //! items of any kind — is [`ContentHash`](crate::content_hash::ContentHash),
 //! obtained by erasure (`.into()`).

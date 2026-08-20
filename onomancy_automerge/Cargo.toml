@@ -1,0 +1,29 @@
+[package]
+name = "onomancy_automerge"
+version = "0.1.0"
+description = "Automerge substrate adapter for Onomancy: namestore walking, decision reading, petnames"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["data-structures"]
+keywords = ["automerge", "names", "onomancy"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+automerge = { workspace = true }
+ed25519-dalek = { workspace = true }
+onomancy_core = { workspace = true, features = ["std"] }
+onomancy_protocol = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+testresult = { workspace = true }
+
+[lints]
+workspace = true

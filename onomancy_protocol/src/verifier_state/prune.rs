@@ -32,7 +32,7 @@ use onomancy_core::{
 
 use super::{
     BindingEvidence,
-    judgment::Judgment,
+    decisions::Decisions,
     seam::{AuthorityVerifier, ChainValidator},
     store::{Item, Store},
     validate_and_extract,
@@ -49,7 +49,7 @@ pub const DEFERRAL_HORIZON_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
     store: &Store,
     now: UnixSeconds,
-    judgment: &Judgment,
+    decisions: &Decisions,
     validator: &V,
     authority: &A,
 ) -> Store {
@@ -57,7 +57,7 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
 
     // Everything an acceptance cites is load-bearing.
     let mut cited: Set<ContentHash> = Set::default();
-    for acceptances in judgment.acceptances.values() {
+    for acceptances in decisions.acceptances.values() {
         for acceptance in acceptances {
             cited.extend(acceptance.cited.iter().copied());
         }
@@ -143,7 +143,7 @@ mod tests {
         test_utils::{Binding, binding, doc, host, rotation},
         verifier_state::{
             VerifierState,
-            judgment::Acceptance,
+            decisions::Acceptance,
             memory::{MemoryAuthority, MemoryValidator},
         },
     };
@@ -171,17 +171,17 @@ mod tests {
     fn assert_prune_invariant(
         store: &Store,
         validator: &MemoryValidator,
-        judgment: &Judgment,
+        decisions: &Decisions,
     ) -> Store {
         let authority = MemoryAuthority::default();
         let now = UnixSeconds::from(NOW);
         let pins = Map::default();
 
-        let pruned = prune(store, now, judgment, validator, &authority);
+        let pruned = prune(store, now, decisions, validator, &authority);
 
         assert_eq!(
-            VerifierState::compute(store, now, judgment, &pins, validator, &authority),
-            VerifierState::compute(&pruned, now, judgment, &pins, validator, &authority),
+            VerifierState::compute(store, now, decisions, &pins, validator, &authority),
+            VerifierState::compute(&pruned, now, decisions, &pins, validator, &authority),
             "pruning changed the derivation"
         );
 
@@ -197,7 +197,7 @@ mod tests {
         let strong = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
 
         let (store, validator) = setup(&[&weak, &strong], vec![]);
-        let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         assert_eq!(pruned.items().len(), 1, "the dominated record is gone");
         Ok(())
@@ -211,7 +211,7 @@ mod tests {
         let late = binding(1, 11, 2, 200, (NOW - 4_000, NOW + 1_000), 20)?;
 
         let (store, validator) = setup(&[&early, &late], vec![]);
-        let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         assert_eq!(pruned.items().len(), 2);
         Ok(())
@@ -233,16 +233,16 @@ mod tests {
                 cited,
             }],
         );
-        let judgment = Judgment {
+        let decisions = Decisions {
             acceptances,
-            ..Judgment::default()
+            ..Decisions::default()
         };
 
         let (store, validator) = setup(
             &[&weak, &strong],
             vec![Item::Rotation(rotation(1, 40, 41)?)],
         );
-        let pruned = assert_prune_invariant(&store, &validator, &judgment);
+        let pruned = assert_prune_invariant(&store, &validator, &decisions);
 
         assert_eq!(
             pruned.items().len(),
@@ -266,7 +266,7 @@ mod tests {
         )?;
 
         let (store, validator) = setup(&[&poisoned], vec![]);
-        let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         // Alone, it survives as the tenure endpoint (keeping more
         // than needed is always safe).
@@ -278,7 +278,7 @@ mod tests {
         // and that is accepted).
         let anchor_record = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
         let (store, validator) = setup(&[&poisoned, &anchor_record], vec![]);
-        let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         assert_eq!(pruned.items().len(), 1, "past the horizon: dropped");
         Ok(())

@@ -28,7 +28,7 @@
 
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     delegation::DelegationBytes,
     name::{
         dns::DnsName,

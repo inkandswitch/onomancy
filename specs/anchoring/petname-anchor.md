@@ -121,7 +121,7 @@ later:      @bob.example's verified cert names automerge:9QxT…
 Fully-offline introductions (QR code, verbal exchange, Bluetooth) root as petnames immediately:
 
 1. The introduction payload carries the referent's [Automerge URL] and a suggested display name. It MUST NOT carry a `~` spelling (see [Local-Only by Construction]).
-2. The receiver writes `~/<chosen-label> → <Automerge URL>` under their own authority; any alleged name in the payload is recorded as a claim entry in the user-private judgment document ([Binding Cache spec]). The name works immediately, offline, forever.
+2. The receiver writes `~/<chosen-label> → <Automerge URL>` under their own authority; any alleged name in the payload is recorded as a claim entry in the user-private decision document ([Binding Cache spec]). The name works immediately, offline, forever.
 3. If a certificate for a DNS binding to the **same** document ID later arrives (fetched or gossiped) and verifies per [DNS Anchoring], the identity gains a second spelling:
 
 ```
@@ -153,7 +153,7 @@ The root store for a `~` name is the user's own petname store — always locally
 
 - _Compromise scope._ Petname integrity reduces to local signing-key custody. Malware **without** key access can read or corrupt caches but cannot forge edges; malware **with** key access is out of scope (game over).
 - _Phishing surface._ Petnames never appear under `@`, so no petname can be confused with a DNS-anchored name at the grammar level — discrimination is by sigil, not spelling. A label that _resembles_ a DNS name (dots permitted) conveys no verification status; that is a display-layer concern, like confusable-label defenses generally (e.g. Cyrillic lookalikes chosen by the user).
-- _Privacy._ `~` names never hit the wire, so the petname store leaks nothing by construction — but the store is replicated document data; its confidentiality is inherited from the document sync layer, not from this specification. The store contains only labels and targets: introduction provenance (alleged names) lives in the user-private judgment document ([Binding Cache spec]) — E2EE, device-delegated, structurally unreadable by sync peers or groups.
+- _Privacy._ `~` names never hit the wire, so the petname store leaks nothing by construction — but the store is replicated document data; its confidentiality is inherited from the document sync layer, not from this specification. The store contains only labels and targets: introduction provenance (alleged names) lives in the user-private decision document ([Binding Cache spec]) — E2EE, device-delegated, structurally unreadable by sync peers or groups.
 
 # FAQ
 [FAQ]: #faq

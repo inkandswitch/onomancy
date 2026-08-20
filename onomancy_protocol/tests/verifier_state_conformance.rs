@@ -1,4 +1,4 @@
-//! Conformance scenarios for `VerifierState::compute(store, now, judgment)`, tagged
+//! Conformance scenarios for `VerifierState::compute(store, now, decisions)`, tagged
 //! with the binding-cache spec's condition table (B1, B12, B13, …) and
 //! the DNS-anchor decision rows (D4a, D10, D12/D12a), plus the
 //! permutation-determinism property (verification target 7).
@@ -17,7 +17,7 @@ use onomancy_protocol::{
     test_utils::{Binding, binding, binding_carrying, doc, generation, host, rotation, succession},
     verifier_state::{
         VerifierState,
-        judgment::{Acceptance, Claim, Judgment},
+        decisions::{Acceptance, Claim, Decisions},
         memory::{MemoryAuthority, MemoryValidator},
         output::{BindingGrade, ContinuityGrade, HostState},
         store::{Item, Store},
@@ -26,7 +26,7 @@ use onomancy_protocol::{
 
 const NOW: u64 = 1_755_000_000;
 
-fn run(bindings: &[&Binding], judgment: &Judgment, extra: Vec<Item>) -> HostState {
+fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostState {
     let mut validator = MemoryValidator::default();
     let mut store = Store::default();
 
@@ -41,7 +41,7 @@ fn run(bindings: &[&Binding], judgment: &Judgment, extra: Vec<Item>) -> HostStat
     let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
-        judgment,
+        decisions,
         &Map::default(),
         &validator,
         &MemoryAuthority::default(),
@@ -50,7 +50,7 @@ fn run(bindings: &[&Binding], judgment: &Judgment, extra: Vec<Item>) -> HostStat
     derivation.hosts.get(&host()).cloned().unwrap_or_default()
 }
 
-fn accept(document: DocAnchor, cited: &Binding) -> Judgment {
+fn accept(document: DocAnchor, cited: &Binding) -> Decisions {
     let mut acceptances = Map::default();
     let mut set = Set::default();
     set.insert(cited.cert.digest().into());
@@ -62,9 +62,9 @@ fn accept(document: DocAnchor, cited: &Binding) -> Judgment {
         }],
     );
 
-    Judgment {
+    Decisions {
         acceptances,
-        ..Judgment::default()
+        ..Decisions::default()
     }
 }
 
@@ -72,7 +72,7 @@ fn accept(document: DocAnchor, cited: &Binding) -> Judgment {
 fn sole_fresh_record_is_accepted_confirmed() -> TestResult {
     // Fresh window covering NOW.
     let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
-    let state = run(&[&b], &Judgment::default(), vec![]);
+    let state = run(&[&b], &Decisions::default(), vec![]);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(1));
@@ -87,7 +87,7 @@ fn sole_fresh_record_is_accepted_confirmed() -> TestResult {
 fn sole_stale_first_contact_is_provisional_incumbent() -> TestResult {
     // B10: sole candidate, only stale evidence.
     let b = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
-    let state = run(&[&b], &Judgment::default(), vec![]);
+    let state = run(&[&b], &Decisions::default(), vec![]);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.grade, BindingGrade::Provisional);
@@ -236,7 +236,7 @@ fn d4a_fresh_record_with_lower_serial_wins_and_resets_the_ratchet() -> TestResul
     let stale_high = binding(1, 11, 1, 999, (NOW - 5000, NOW - 1000), 50)?;
     let fresh_low = binding(1, 11, 2, 7, (NOW - 500, NOW + 500), 60)?;
 
-    let state = run(&[&stale_high, &fresh_low], &Judgment::default(), vec![]);
+    let state = run(&[&stale_high, &fresh_low], &Decisions::default(), vec![]);
 
     assert_eq!(state.effective_serial, Some(Serial::from(7)));
     assert_eq!(
@@ -253,7 +253,7 @@ fn b13_zone_equivocation_is_contested_with_empty_output() -> TestResult {
     let a = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
     let b = binding(2, 22, 2, 100, (NOW - 5000, NOW - 1000), 99)?;
 
-    let state = run(&[&a, &b], &Judgment::default(), vec![]);
+    let state = run(&[&a, &b], &Decisions::default(), vec![]);
 
     assert!(state.contested);
     assert!(state.accepted.is_none(), "contested output is empty");
@@ -267,7 +267,7 @@ fn stale_candidates_with_ordered_keys_pick_the_later_provisionally() -> TestResu
     let earlier = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
     let later = binding(2, 22, 2, 100, (NOW - 4000, NOW - 1000), 50)?;
 
-    let state = run(&[&earlier, &later], &Judgment::default(), vec![]);
+    let state = run(&[&earlier, &later], &Decisions::default(), vec![]);
 
     assert!(!state.contested);
     let accepted = state.accepted.expect("accepted");
@@ -288,7 +288,7 @@ fn d10_fresh_record_not_threading_g_is_rejected() -> TestResult {
     let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
-        &Judgment::default(),
+        &Decisions::default(),
         &Map::default(),
         &validator,
         &MemoryAuthority::default().without_thread(&generation(11)),
@@ -305,12 +305,12 @@ fn b8_reset_excludes_the_challenger() -> TestResult {
     let poison = binding(2, 22, 2, 999, (NOW - 100, NOW + 1000), 60)?;
 
     // Fresh challenger would displace (see B2) — but it is excluded.
-    let mut judgment = accept(doc(1), &incumbent);
+    let mut decisions = accept(doc(1), &incumbent);
     let mut excluded = Set::default();
     excluded.insert(poison.cert.digest().into());
-    judgment.resets.insert(host(), excluded);
+    decisions.resets.insert(host(), excluded);
 
-    let state = run(&[&incumbent, &poison], &judgment, vec![]);
+    let state = run(&[&incumbent, &poison], &decisions, vec![]);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(1), "excluded evidence is inert");
@@ -326,10 +326,10 @@ fn outranked_acceptances_surface_as_losers() -> TestResult {
     let older = binding(1, 11, 1, 100, (NOW - 9000, NOW - 5000), 10)?;
     let newer = binding(2, 22, 2, 200, (NOW - 4000, NOW - 1000), 20)?;
 
-    let mut judgment = accept(doc(1), &older);
+    let mut decisions = accept(doc(1), &older);
     let mut cited = Set::default();
     cited.insert(newer.cert.digest().into());
-    judgment
+    decisions
         .acceptances
         .get_mut(&host())
         .expect("acceptance entry for the test hostname")
@@ -338,7 +338,7 @@ fn outranked_acceptances_surface_as_losers() -> TestResult {
             cited,
         });
 
-    let state = run(&[&older, &newer], &judgment, vec![]);
+    let state = run(&[&older, &newer], &decisions, vec![]);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(2), "greater receipts win");
@@ -363,7 +363,7 @@ fn far_future_serials_are_deferred() -> TestResult {
         50,
     )?;
 
-    let state = run(&[&poisoned], &Judgment::default(), vec![]);
+    let state = run(&[&poisoned], &Decisions::default(), vec![]);
     assert!(state.accepted.is_none(), "deferred, not considered");
     Ok(())
 }
@@ -372,16 +372,16 @@ fn far_future_serials_are_deferred() -> TestResult {
 fn divergent_claims_badge_but_do_not_move_bindings() -> TestResult {
     let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
 
-    let judgment = Judgment {
+    let decisions = Decisions {
         claims: vec![Claim {
             hostname: host(),
             document: doc(3),
             note: None,
         }],
-        ..Judgment::default()
+        ..Decisions::default()
     };
 
-    let state = run(&[&b], &judgment, vec![]);
+    let state = run(&[&b], &decisions, vec![]);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(1), "claims never move bindings");
@@ -408,7 +408,7 @@ fn d12_protected_prefix_survives_a_fork() -> TestResult {
         Item::Rotation(rotation(1, 13, 15)?),
     ];
 
-    let state = run(&[&rewind, &branch], &Judgment::default(), lineage);
+    let state = run(&[&rewind, &branch], &Decisions::default(), lineage);
 
     let accepted = state.accepted.expect("branch record survives");
     assert_eq!(
@@ -439,7 +439,7 @@ fn lineage_descent_orders_within_a_document_before_the_key() -> TestResult {
         Item::Rotation(rotation(1, 11, 13)?),
     ];
 
-    let state = run(&[&at_fork, &on_branch], &Judgment::default(), lineage);
+    let state = run(&[&at_fork, &on_branch], &Decisions::default(), lineage);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(
@@ -473,7 +473,7 @@ fn cross_branch_records_fall_back_to_the_key_deterministically() -> TestResult {
         Item::Rotation(rotation(1, 11, 13)?),
     ];
 
-    let state = run(&[&branch_a, &branch_b], &Judgment::default(), lineage);
+    let state = run(&[&branch_a, &branch_b], &Decisions::default(), lineage);
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.generation, generation(13), "higher key wins");
@@ -503,7 +503,7 @@ fn fork_repair_by_convergence_merge_settles_the_lineage() -> TestResult {
         Item::Rotation(rotation(1, 15, 16)?),
     ];
 
-    let state = run(&[&stale_branch, &current], &Judgment::default(), lineage);
+    let state = run(&[&stale_branch, &current], &Decisions::default(), lineage);
 
     let accepted = state.accepted.expect("current generation accepted");
     assert_eq!(accepted.generation, generation(16));
@@ -535,7 +535,7 @@ fn b9_unauthorized_statements_have_no_lineage_effect() -> TestResult {
     let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
-        &Judgment::default(),
+        &Decisions::default(),
         &Map::default(),
         &validator,
         &MemoryAuthority::default().deny(doc(1), generation(12).verifying_key()),
@@ -577,11 +577,11 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     let rewind = binding(1, 11, 3, 70, (NOW - 3000, NOW - 200), 30)?;
 
     let reset_a = {
-        let mut judgment = Judgment::default();
+        let mut decisions = Decisions::default();
         let mut excluded = Set::default();
         excluded.insert(carrier_a.cert.digest().into());
-        judgment.resets.insert(host(), excluded);
-        judgment
+        decisions.resets.insert(host(), excluded);
+        decisions
     };
 
     let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_a, vec![]);
@@ -593,12 +593,12 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     );
 
     let reset_both = {
-        let mut judgment = Judgment::default();
+        let mut decisions = Decisions::default();
         let mut excluded = Set::default();
         excluded.insert(carrier_a.cert.digest().into());
         excluded.insert(carrier_b.cert.digest().into());
-        judgment.resets.insert(host(), excluded);
-        judgment
+        decisions.resets.insert(host(), excluded);
+        decisions
     };
 
     let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_both, vec![]);
@@ -697,13 +697,13 @@ mod props {
                     validator = validator.with(host(), &b.chain, b.proof.clone());
                 }
 
-                // Judgment: an acceptance PLUS a reset excluding one
+                // Decisions: an acceptance PLUS a reset excluding one
                 // carrier — exclusion closure is where order
                 // dependence hid the first time.
-                let mut judgment = accept(doc(specs[0].0 % 3), &bindings[0]);
+                let mut decisions = accept(doc(specs[0].0 % 3), &bindings[0]);
                 let mut excluded = Set::default();
                 excluded.insert(bindings[bindings.len() - 1].cert.digest().into());
-                judgment.resets.insert(host(), excluded);
+                decisions.resets.insert(host(), excluded);
 
                 // The item pool: records, a statement carried by TWO
                 // of them, the same statement standalone, and a
@@ -763,7 +763,7 @@ mod props {
                     VerifierState::compute(
                         store,
                         UnixSeconds::from(NOW),
-                        &judgment,
+                        &decisions,
                         &Map::default(),
                         &validator,
                         &MemoryAuthority::default(),

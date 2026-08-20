@@ -23,7 +23,7 @@ The Rust implementation is never verified directly; it is checked against the Le
 | 4 | Resolution termination (no symlink edges) | [resolution.md](./resolution.md#termination) | sketched |
 | 5 | Canonical encoding injectivity (certificate, TXT record, rotation + successor statements) | [certificate.md](./certificate.md#canonical-encoding) | pending codec |
 | 6 | Ratchet safety + fresh-heals (stale-path monotone; fresh-path reset) | [dns-binding.md](./dns-binding.md) | sketch predates the zone-state key — restate over `(window_end, serial, issued_at)` and fold into 7 |
-| 7 | Derivation determinism: `derive(store, now, judgment)` is a pure function — same inputs ⇒ same verdicts, ladder (incl. zone-state key), bridging, and judgment-document entries included (subsumes pooled-evidence verdict determinism) | [binding-cache spec](../specs/anchoring/binding-cache.md#conformance) | pending |
+| 7 | Derivation determinism: `derive(store, now, decisions)` is a pure function — same inputs ⇒ same verdicts, ladder (incl. zone-state key), bridging, and decision-document entries included (subsumes pooled-evidence verdict determinism) | [binding-cache spec](../specs/anchoring/binding-cache.md#conformance) | pending |
 
 Later/maybe: chain-validation soundness (symbolic crypto), graded-freshness monotonicity, petname-store CRDT merge laws.
 

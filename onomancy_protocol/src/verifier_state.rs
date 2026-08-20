@@ -1,4 +1,4 @@
-//! `derive(store, now, judgment)`: the binding-cache derivation.
+//! `derive(store, now, decisions)`: the binding-cache derivation.
 //!
 //! The store is the only state. Every piece of verifier state — the
 //! accepted binding, the effective serial, tenure, lineage forks,
@@ -11,7 +11,7 @@
 //! ```text
 //!            store ─┐
 //!              now ─┼─► derive ─► VerifierState (state)
-//!         judgment ─┤               │
+//!         decisions ─┤               │
 //!             pins ─┘               ▼ diff vs previous
 //!                                 events (surfacing — the caller's job)
 //! ```
@@ -28,15 +28,15 @@
 //! # Module Organization
 //!
 //! - [`store`] — the grow-only item store
-//! - [`judgment`] — the judgment-document view (claims, acceptances,
+//! - [`decisions`] — the decisions-document view (claims, acceptances,
 //!   resets)
 //! - [`seam`] — the [`ChainValidator`](seam::ChainValidator) and
 //!   [`AuthorityVerifier`](seam::AuthorityVerifier) oracles
 //! - [`output`] — the derived-state vocabulary
 //! - [`memory`] — table-driven fakes for conformance tests
 
+pub mod decisions;
 pub mod diff;
-pub mod judgment;
 pub mod memory;
 pub mod output;
 pub mod prune;
@@ -59,8 +59,8 @@ use onomancy_core::{
 };
 
 use self::{
+    decisions::Decisions,
     diff::Event,
-    judgment::Judgment,
     output::{
         AcceptedBinding, BindingGrade, ContinuityGrade, Divergence, DivergenceSource, Fork,
         HostState, SuccessionFork,
@@ -76,7 +76,7 @@ const SKEW_MS: u64 = 5 * 60 * 1000;
 
 /// Everything the verifier believes, per hostname: the deterministic
 /// derivation of the binding-cache store, the clock reading, and the
-/// judgment document.
+/// decision document.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerifierState {
     /// Per-hostname conclusions.
@@ -85,9 +85,9 @@ pub struct VerifierState {
 
 impl VerifierState {
     /// Compute all verifier state from the evidence held — the spec's
-    /// `derive(store, now, judgment)`.
+    /// `derive(store, now, decisions)`.
     ///
-    /// Pure and total: the same `(store, now, judgment, pins)` yield
+    /// Pure and total: the same `(store, now, decisions, pins)` yield
     /// the same outputs on any device, in any implementation —
     /// including under any permutation of the store. `pins` are the
     /// user's pinned targets, read by stage 8's divergence badges
@@ -97,7 +97,7 @@ impl VerifierState {
     pub fn compute<V: ChainValidator, A: AuthorityVerifier>(
         store: &Store,
         now: UnixSeconds,
-        judgment: &Judgment,
+        decisions: &Decisions,
         pins: &Map<DnsName, Vec<DocAnchor>>,
         validator: &V,
         authority: &A,
@@ -109,14 +109,14 @@ impl VerifierState {
         let mut hostnames: Set<DnsName> = Set::default();
         hostnames.extend(evidence.records.iter().map(|r| r.hostname.clone()));
         hostnames.extend(evidence.successors.iter().map(|s| s.hostname.clone()));
-        hostnames.extend(judgment.claims.iter().map(|c| c.hostname.clone()));
-        hostnames.extend(judgment.acceptances.keys().cloned());
+        hostnames.extend(decisions.claims.iter().map(|c| c.hostname.clone()));
+        hostnames.extend(decisions.acceptances.keys().cloned());
         hostnames.extend(pins.keys().cloned());
 
         let mut hosts: Map<DnsName, HostState> = Map::default();
 
         for hostname in hostnames {
-            let state = derive_host(&hostname, &evidence, now, judgment, pins, authority);
+            let state = derive_host(&hostname, &evidence, now, decisions, pins, authority);
             hosts.insert(hostname, state);
         }
 
@@ -156,14 +156,14 @@ fn derive_host<A: AuthorityVerifier>(
     hostname: &DnsName,
     evidence: &Evidence,
     now: UnixSeconds,
-    judgment: &Judgment,
+    decisions: &Decisions,
     pins: &Map<DnsName, Vec<DocAnchor>>,
     authority: &A,
 ) -> HostState {
     // Stage 2: exclude and defer.
     let empty = Set::default();
-    let excluded = judgment.resets.get(hostname).unwrap_or(&empty);
-    let rotation_exclusions = global_rotation_exclusions(judgment);
+    let excluded = decisions.resets.get(hostname).unwrap_or(&empty);
+    let rotation_exclusions = global_rotation_exclusions(decisions);
 
     let considered: Vec<&BindingEvidence> = {
         let mut records: Vec<&BindingEvidence> = evidence
@@ -220,7 +220,7 @@ fn derive_host<A: AuthorityVerifier>(
         lineage: &lineage,
         now,
     };
-    let resolution = resolve_document(&surviving, &ctx, hostname, judgment, evidence);
+    let resolution = resolve_document(&surviving, &ctx, hostname, decisions, evidence);
 
     // Stage 6: grade the binding. Fresh support confirms — unless
     // continuity to the accepted document holds only through
@@ -266,7 +266,7 @@ fn derive_host<A: AuthorityVerifier>(
     // Stage 8: divergence against the POST-mask output.
     let masked = resolution.contested;
     let output_binding = if masked { None } else { accepted };
-    let divergence = derive_divergence(hostname, output_binding.as_ref(), judgment, pins);
+    let divergence = derive_divergence(hostname, output_binding.as_ref(), decisions, pins);
 
     HostState {
         accepted: output_binding,
@@ -378,7 +378,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
         match item {
             Item::Record(certificate) => {
                 // Extraction is closed over DECODABLE carriers, before
-                // any chain judgment: a superseded certificate whose
+                // any chain decisions: a superseded certificate whose
                 // chain is stale or absent still yields its carried
                 // statements (they are independently signed units, and
                 // gap-bridging needs exactly those bytes).
@@ -550,9 +550,9 @@ fn extract_successor<A: AuthorityVerifier>(
 
 /// Rotation statements are document-scoped: an exclusion from ANY
 /// hostname's reset removes the statement for its document everywhere.
-fn global_rotation_exclusions(judgment: &Judgment) -> Set<ContentHash> {
+fn global_rotation_exclusions(decisions: &Decisions) -> Set<ContentHash> {
     let mut all: Set<ContentHash> = Set::default();
-    for excluded in judgment.resets.values() {
+    for excluded in decisions.resets.values() {
         all.extend(excluded.iter().copied());
     }
     all
@@ -933,7 +933,7 @@ fn resolve_document<A: AuthorityVerifier>(
     surviving: &[&BindingEvidence],
     ctx: &LadderContext<'_, A>,
     hostname: &DnsName,
-    judgment: &Judgment,
+    decisions: &Decisions,
     evidence: &Evidence,
 ) -> DocumentResolution {
     // Best record per candidate document, by the full within-document
@@ -980,7 +980,7 @@ fn resolve_document<A: AuthorityVerifier>(
 
     // The winning acceptance, by the receipts rule; its losers are
     // surfaced through the output state.
-    let acceptance_resolution = winning_acceptance(hostname, judgment, evidence, &mut contested);
+    let acceptance_resolution = winning_acceptance(hostname, decisions, evidence, &mut contested);
     let acceptance = acceptance_resolution.winner;
 
     // Incumbency: acceptance-backed, extended along proofs up to the
@@ -1026,7 +1026,7 @@ fn resolve_document<A: AuthorityVerifier>(
     };
 
     // B1: every stale candidate attesting a document other than the
-    // judgment-backed incumbent, without a proof, badges pending — not
+    // decision-backed incumbent, without a proof, badges pending — not
     // just the maximal challenger. The incumbent itself never does:
     // when displaced, that surfaces as a binding change, not a badge.
     let mut pending: Vec<DocAnchor> = best
@@ -1200,13 +1200,13 @@ struct AcceptanceResolution {
 
 fn winning_acceptance(
     hostname: &DnsName,
-    judgment: &Judgment,
+    decisions: &Decisions,
     evidence: &Evidence,
     contested: &mut bool,
 ) -> AcceptanceResolution {
     let empty = Set::default();
-    let excluded = judgment.resets.get(hostname).unwrap_or(&empty);
-    let Some(acceptances) = judgment.acceptances.get(hostname) else {
+    let excluded = decisions.resets.get(hostname).unwrap_or(&empty);
+    let Some(acceptances) = decisions.acceptances.get(hostname) else {
         return AcceptanceResolution::default();
     };
 
@@ -1309,7 +1309,7 @@ fn tenure_span(records: &[&&BindingEvidence]) -> Option<ChainWindow> {
 fn derive_divergence(
     hostname: &DnsName,
     accepted: Option<&AcceptedBinding>,
-    judgment: &Judgment,
+    decisions: &Decisions,
     pins: &Map<DnsName, Vec<DocAnchor>>,
 ) -> Vec<Divergence> {
     let Some(binding) = accepted else {
@@ -1318,7 +1318,7 @@ fn derive_divergence(
 
     let mut divergence: Vec<Divergence> = Vec::new();
 
-    for claim in judgment.claims.iter().filter(|c| c.hostname == *hostname) {
+    for claim in decisions.claims.iter().filter(|c| c.hostname == *hostname) {
         if claim.document != binding.document {
             divergence.push(Divergence {
                 alleged: claim.document,

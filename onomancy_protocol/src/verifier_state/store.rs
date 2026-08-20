@@ -2,7 +2,7 @@
 //!
 //! Items are accepted from **anyone** — records carry their own proof,
 //! so ingestion costs no trust and sync is plain set union. The user's
-//! own decisions live elsewhere (the judgment document); no derived
+//! own decisions live elsewhere (the decision document); no derived
 //! state ever enters the store.
 
 use alloc::vec::Vec;

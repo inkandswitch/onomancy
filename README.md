@@ -44,7 +44,7 @@ graph TD
         publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
 
         subgraph adapters ["substrate adapters (pure over held documents)"]
-            automerge["onomancy_automerge†<br/><i>namestores · judgment view ·<br/>Head ⇄ ChangeHash</i>"]
+            automerge["onomancy_automerge†<br/><i>namestores · decision view ·<br/>Head ⇄ ChangeHash</i>"]
             keyhive["onomancy_keyhive†<br/><i>delegation-chain verification</i>"]
         end
     end
@@ -59,7 +59,7 @@ graph TD
     proto --> core
     dnssec -- "implements ChainValidator" --> proto
     publish --> proto
-    automerge -- "implements Namestore,<br/>JudgmentView" --> proto
+    automerge -- "implements Namestore,<br/>DecisionsView" --> proto
     keyhive -- "implements AuthorityVerifier" --> proto
     keyhive --> automerge
     hickory -- "implements ChainProvider" --> proto
@@ -72,7 +72,7 @@ graph TD
     onomancer --> keyhive
 ```
 
-† planned — the crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, judgment state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
+† planned — the crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, decision state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
 
 ## Development
 

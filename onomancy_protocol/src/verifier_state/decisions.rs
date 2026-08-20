@@ -1,7 +1,7 @@
-//! The judgment view: the user's decisions, read from their private
-//! judgment document.
+//! The decisions view: the user's decisions, read from their private
+//! decision document.
 //!
-//! Judgment lives in a user-private Keyhive document (authentication =
+//! Decisions lives in a user-private Keyhive document (authentication =
 //! write delegation, privacy = E2EE, sync = replication, undo = CRDT
 //! editing). This module is the *data-shape contract* the derivation
 //! reads — the substrate carries the bytes; `onomancy_keyhive`
@@ -41,13 +41,13 @@ pub struct Acceptance {
     pub cited: Set<ContentHash>,
 }
 
-/// The judgment document's state, as read at derivation time.
+/// The decision document's state, as read at derivation time.
 ///
 /// `acceptances` may carry multiple concurrent values per hostname
 /// (the substrate's MV conflict); the derivation resolves them by the
 /// receipts rule, surfacing the loser.
-#[derive(Debug, Clone, Default)]
-pub struct Judgment {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Decisions {
     /// Per-hostname acceptances (usually one; several = MV conflict).
     pub acceptances: Map<DnsName, Vec<Acceptance>>,
     /// Introduction claims, append-only.

@@ -10,7 +10,7 @@
 //! # Crate Organization
 //!
 //! - [`verifier_state`] — the binding-cache derivation: all verifier state as
-//!   a pure function of `(store, now, judgment)`
+//!   a pure function of `(store, now, decisions)`
 //! - [`ladder`] — the comparison ladder: freshness, then succession/
 //!   lineage, then the zone-state key (the offline-comparison rules)
 //! - [`resolve`] — the namestore walk: greedy longest-key matching

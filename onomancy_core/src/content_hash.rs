@@ -5,7 +5,7 @@ use core::fmt;
 /// The content hash of a store item: BLAKE3-256 over the item's exact
 /// wire bytes.
 ///
-/// Judgment-document entries reference store items by content hash, so
+/// Decisions-document entries reference store items by content hash, so
 /// the hash MUST be computed over verbatim bytes — never re-encoded or
 /// normalized forms. Two certificates differing only in their attached
 /// regions are the *same certificate* but *different store items*, and

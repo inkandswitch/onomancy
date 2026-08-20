@@ -153,9 +153,9 @@ The same framing and verbatim-[Keyhive] treatment as the certificate's `delegati
 # Content Addressing
 [Content Addressing]: #content-addressing
 
-Store items (see the [Binding Cache spec]) are exact byte strings: a certificate unit, a statement unit, a framed chain refresh. The **content hash** of an item is BLAKE3-256 over those exact bytes. Judgment-document entries reference store items by content hash, so hashes MUST be computed over the item's verbatim wire bytes — never over re-encoded or normalized forms.
+Store items (see the [Binding Cache spec]) are exact byte strings: a certificate unit, a statement unit, a framed chain refresh. The **content hash** of an item is BLAKE3-256 over those exact bytes. Decision-document entries reference store items by content hash, so hashes MUST be computed over the item's verbatim wire bytes — never over re-encoded or normalized forms.
 
-Judgment itself — acceptances, resets, claims — has **no wire encoding in this specification**: it lives in the user-private judgment document, whose replication, authentication, and privacy are the document substrate's job; the [Binding Cache spec] defines its entry schema as a data-shape contract. Only _records_ need canonical bytes here, because only records are content-addressed and gossiped.
+Decisions themselves — acceptances, resets, claims — have **no wire encoding in this specification**: it lives in the user-private decision document, whose replication, authentication, and privacy are the document substrate's job; the [Binding Cache spec] defines its entry schema as a data-shape contract. Only _records_ need canonical bytes here, because only records are content-addressed and gossiped.
 
 # DNSSEC Chain Framing
 [DNSSEC Chain Framing]: #dnssec-chain-framing
@@ -204,7 +204,7 @@ base64char = ALPHA / DIGIT / "+" / "/"
 
 - A certificate or statement unit larger than **1 MiB** (2²⁰ bytes) MUST be rejected at decode. The cap is deliberately generous — honest certificates run 10–100 KB, dominated by the DNSSEC chain, so 1 MiB is one to two orders of magnitude of headroom — because its job is bounding adversarial memory (a gossiped "certificate" a verifier must chew through before any signature check rejects it), not constraining honest growth. It is part of the format contract: raising it is a specification revision, since a conforming verifier rejects units beyond it.
 - Decoders MUST validate every declared length and count against the remaining input **before allocating**: a bijou64 length or count that implies bytes beyond the end of the unit is a decode failure, never an allocation. With the unit cap, this bounds all collection sizes implicitly — no per-field count limits are needed.
-- The TXT record is already bounded by its own grammar (≤ 133 octets); the judgment document is bounded by its substrate.
+- The TXT record is already bounded by its own grammar (≤ 133 octets); the decision document is bounded by its substrate.
 
 # Test Vectors
 [Test Vectors]: #test-vectors
