@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "onomancer",
   "onomancy_automerge",
   "onomancy_core",
   "onomancy_dnssec",
@@ -28,6 +29,7 @@ onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = 
 # External crates
 arbitrary = "1.4"
 automerge = { version = "0.11", default-features = false }
+clap = { version = "4.6", features = ["derive"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 bijoux = { version = "0.3", default-features = false, features = ["u64"] }
 blake3 = { version = "1.8", default-features = false }

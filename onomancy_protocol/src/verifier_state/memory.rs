@@ -62,7 +62,7 @@ impl ChainValidator for MemoryValidator {
 #[derive(Debug, Clone, Default)]
 pub struct MemoryAuthority {
     denied_signers: Set<(DocAnchor, [u8; 32])>,
-    unthreaded: Set<[u8; 32]>,
+    off_paths: Set<[u8; 32]>,
 }
 
 impl MemoryAuthority {
@@ -73,11 +73,11 @@ impl MemoryAuthority {
         self
     }
 
-    /// Report every carriage as NOT threading `generation` (for D10
+    /// Report `generation` as on NO delegation path (for D10
     /// scenarios).
     #[must_use]
-    pub fn without_thread(mut self, generation: &GenerationKey) -> Self {
-        self.unthreaded
+    pub fn off_path(mut self, generation: &GenerationKey) -> Self {
+        self.off_paths
             .insert(*generation.verifying_key().as_bytes());
         self
     }
@@ -93,9 +93,9 @@ impl AuthorityVerifier for MemoryAuthority {
         !self.denied_signers.contains(&(*root, *signer.as_bytes()))
     }
 
-    fn threads(&self, _carriage: &[DelegationBytes], generation: &GenerationKey) -> bool {
+    fn on_path(&self, _carriage: &[DelegationBytes], generation: &GenerationKey) -> bool {
         !self
-            .unthreaded
+            .off_paths
             .contains(generation.verifying_key().as_bytes())
     }
 }

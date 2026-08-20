@@ -44,7 +44,7 @@ Exactly one KSK is baked in at a time. It rotates every few years — a delibera
 
 > **Assumption:** Revoking a naming-relevant key is one ceremony: the owner revokes the delegation, rotates the generation key, and publishes the new `g=` — the publication is not a separate task that can be forgotten.
 
-There is no revocation oracle — requiring one would break offline verification (a rejected design alternative). The generation key makes revocation verifier-visible through the record itself: a revoked signer's chain no longer threads the attested chokepoint, and fresh chains reject it. This works only if the owner actually publishes the rotation; the spec makes it a MUST of the ceremony, and the ops guidance routes the owner through DNS at that exact moment anyway (rotating zone credentials).
+There is no revocation oracle — requiring one would break offline verification (a rejected design alternative). The generation key makes revocation verifier-visible through the record itself: the attested chokepoint no longer lies on a revoked signer's delegation path, and fresh chains reject it. This works only if the owner actually publishes the rotation; the spec makes it a MUST of the ceremony, and the ops guidance routes the owner through DNS at that exact moment anyway (rotating zone credentials).
 
 **Consequence of violation:** A revocation performed in the document but not reflected in `g=` is invisible to record-only verifiers — the revoked signer keeps minting acceptable certificates until the rotation is published (fail-open). Residuals after correct rotation are the stale-chain window and lineage forks under zone+insider attack (provable equivocation, surfaced) (see [security.md](./security.md#revocation-lag)).
 

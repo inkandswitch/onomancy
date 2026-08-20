@@ -20,7 +20,7 @@ The Keyhive doc-root signing key is destroyed at document creation (`EphemeralSi
 
 Admin access is required deliberately: a collaborator with mere Write access could otherwise bind _their_ hostname to _your_ document (insider key borrowing). And admin-only signing is cheap in practice — because the DNSSEC chain, the delegation chain, and the lineage are all attached unsigned, refresh and repair need no key at all, so the cold key surfaces only for genuine ceremonies: new bindings, migration, revocation. Servers never sign anything; they serve bytes.
 
-The signer's chain must additionally thread the **generation key** the TXT attests ([dns-binding.md](./dns-binding.md#generation-key)) — the chokepoint that makes revocation verifier-visible without a revocation list. The delegation chain itself is the deliberate price of an unheld doc root: even if a held root were possible, the prudent design would sign one delegation to a rotatable keyset and destroy the root — which is exactly what Keyhive does.
+The **generation key** the TXT attests must additionally lie on the signer's delegation path ([dns-binding.md](./dns-binding.md#generation-key)) — the chokepoint that makes revocation verifier-visible without a revocation list. The delegation chain itself is the deliberate price of an unheld doc root: even if a held root were possible, the prudent design would sign one delegation to a rotatable keyset and destroy the root — which is exactly what Keyhive does.
 
 ```rust
 // Field order mirrors the wire layout: fixed-width first, then
@@ -47,7 +47,7 @@ pub struct Certificate {
     /// self-authenticating evidence, replaceable keylessly.
     signature: Signature,
     /// Keyhive authority proof: Signed<Delegation> chain from the
-    /// doc root (self-certifying init) down to `signer`, threading
+    /// doc root (self-certifying init) down to `signer`, passing through
     /// the TXT-attested generation key. Any valid chain for the same
     /// signer is interchangeable, so generation rotation is repaired
     /// by re-attaching — no re-signing.

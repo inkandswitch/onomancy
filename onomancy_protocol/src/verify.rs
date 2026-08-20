@@ -49,8 +49,8 @@ pub struct Verdict {
     /// The attested generation key from the proven TXT record.
     pub generation: GenerationKey,
 
-    /// Whether the delegation chain threads the attested generation.
-    /// With a fresh chain this is always `Threaded` (D10 rejects
+    /// Whether the delegation chain lies on the delegation path for the attested generation.
+    /// With a fresh chain this is always `OnPath` (D10 rejects
     /// otherwise); with a stale chain the check is provisional.
     pub generation_check: GenerationCheck,
 
@@ -74,13 +74,13 @@ impl Verdict {
 /// The D10 standing of the delegation-chain/generation-key check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GenerationCheck {
-    /// Stale chain and the delegation chain does not thread `g=`:
+    /// Stale chain and the attested `g=` is not on the delegation path:
     /// provisional — surfaced, re-checked when fresher evidence
     /// arrives (a fresh chain in this state is rejected instead).
     Provisional,
 
-    /// The delegation chain threads the attested `g=`.
-    Threaded,
+    /// The delegation chain lies on the delegation path for the attested `g=`.
+    OnPath,
 }
 
 /// Verify one certificate unit for `expected_hostname` at `now`.
@@ -91,7 +91,7 @@ pub enum GenerationCheck {
 /// signature failure, a hostname other than expected, an invalid
 /// chain, a proven `RRset` that does not attest the certificate's
 /// document, a deferral (never malformed — re-evaluate later), or a
-/// fresh chain whose delegation does not thread `g=` (D10).
+/// fresh chain whose delegation path lacks the attested `g=` (D10).
 pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
     bytes: &[u8],
     expected_hostname: &DnsName,
@@ -124,12 +124,12 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
 
     let freshness = verifier_state::freshness(&evidence, now);
 
-    // D10: fresh + unthreaded is a rejection; stale + unthreaded is
+    // D10: fresh + off_paths is a rejection; stale + off_paths is
     // provisional.
-    let generation_check = if evidence.threads_generation {
-        GenerationCheck::Threaded
+    let generation_check = if evidence.generation_on_path {
+        GenerationCheck::OnPath
     } else if freshness == Freshness::Fresh {
-        return Err(Rejection::GenerationNotThreaded);
+        return Err(Rejection::GenerationOffPath);
     } else {
         GenerationCheck::Provisional
     };
@@ -163,10 +163,10 @@ pub enum Rejection {
     #[error("deferred: not considered until the clock reaches it")]
     Deferred,
 
-    /// D10: a fresh chain whose delegation does not thread the
+    /// D10: a fresh chain whose delegation path lacks the
     /// attested `g=`.
-    #[error("fresh chain does not thread the attested generation key")]
-    GenerationNotThreaded,
+    #[error("fresh chain does not lie on the delegation path for the attested generation key")]
+    GenerationOffPath,
 
     /// The certificate binds a hostname other than the expected one.
     #[error("certificate binds {found}, not the expected hostname")]
@@ -207,7 +207,7 @@ mod tests {
         assert_eq!(verdict.generation, generation(11));
         assert_eq!(verdict.serial, Serial::from(100));
         assert_eq!(verdict.freshness, Freshness::Fresh);
-        assert_eq!(verdict.generation_check, GenerationCheck::Threaded);
+        assert_eq!(verdict.generation_check, GenerationCheck::OnPath);
         Ok(())
     }
 
@@ -233,7 +233,7 @@ mod tests {
     fn d10_rejects_fresh_but_grades_stale_provisional() -> TestResult {
         let fresh = binding(1, 11, 3, 100, (NOW - 1_000, NOW + 1_000), 50)?;
         let stale = binding(1, 11, 4, 100, (NOW - 9_000, NOW - 1_000), 50)?;
-        let authority = MemoryAuthority::default().without_thread(&generation(11));
+        let authority = MemoryAuthority::default().off_path(&generation(11));
 
         let validator = MemoryValidator::default()
             .with(host(), &fresh.chain, fresh.proof.clone())
@@ -247,7 +247,7 @@ mod tests {
                 &validator,
                 &authority,
             ),
-            Err(Rejection::GenerationNotThreaded)
+            Err(Rejection::GenerationOffPath)
         );
 
         let verdict = verify(
@@ -257,7 +257,7 @@ mod tests {
             &validator,
             &authority,
         )
-        .expect("stale + unthreaded is provisional");
+        .expect("stale + off_paths is provisional");
         assert_eq!(verdict.generation_check, GenerationCheck::Provisional);
         Ok(())
     }

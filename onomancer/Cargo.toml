@@ -1,0 +1,29 @@
+[package]
+name = "onomancer"
+version = "0.1.0"
+description = "The Onomancy agent: keygen, record generation, and live resolution"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["command-line-utilities"]
+keywords = ["dns", "dnssec", "names", "onomancy"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap = { workspace = true }
+ed25519-dalek = { workspace = true }
+getrandom = { workspace = true }
+onomancy_core = { workspace = true, features = ["idna", "std"] }
+onomancy_dnssec = { workspace = true, features = ["std"] }
+onomancy_hickory = { workspace = true }
+onomancy_protocol = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

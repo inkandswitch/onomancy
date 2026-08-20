@@ -301,8 +301,8 @@ pub(crate) struct BindingEvidence {
     pub(crate) hash: ContentHash,
     pub(crate) hostname: DnsName,
     pub(crate) key: ZoneStateKey,
-    /// Whether the delegation chain threads the attested `g=` (D10).
-    pub(crate) threads_generation: bool,
+    /// Whether the delegation chain lies on the delegation path for the attested `g=` (D10).
+    pub(crate) generation_on_path: bool,
     pub(crate) window: ChainWindow,
 }
 
@@ -355,7 +355,7 @@ struct RotationEvidence {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SuccessorEvidence {
     /// The statement's authority carriage, kept for stage 5's
-    /// departing-hop threading check (bridging-hop grading).
+    /// departing-hop path-membership check (bridging-hop grading).
     carriage: Vec<DelegationBytes>,
     hash: ContentHash,
     hostname: DnsName,
@@ -418,7 +418,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                         },
                         // No delegation chain to check: D10 is a
                         // certificate rule.
-                        threads_generation: true,
+                        generation_on_path: true,
                         window,
                     }));
             }
@@ -437,7 +437,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
 }
 
 /// Validate one certificate item into a binding record: chain proof,
-/// TXT cross-check, D10 threading input.
+/// TXT cross-check, D10 path-membership input.
 pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     certificate: &Certificate,
     hash: ContentHash,
@@ -459,7 +459,7 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
         .filter(|record| record.document() == certificate.root_doc())
         .max_by_key(|record| record.serial())?;
 
-    let threads_generation = authority.threads(certificate.delegation_chain(), record.generation());
+    let generation_on_path = authority.on_path(certificate.delegation_chain(), record.generation());
 
     Some(BindingEvidence {
         document: *certificate.root_doc(),
@@ -471,7 +471,7 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
             serial: record.serial(),
             issued_at: certificate.issued_at(),
         },
-        threads_generation,
+        generation_on_path,
         window,
     })
 }
@@ -784,9 +784,9 @@ fn generation_rule(
 ) -> Disposition {
     let fresh = freshness(record, now) == Freshness::Fresh;
 
-    // D10: a fresh record whose delegation chain does not thread the
+    // D10: a fresh record whose delegation path lacks the
     // attested g= is rejected.
-    if fresh && !record.threads_generation {
+    if fresh && !record.generation_on_path {
         return Disposition::Reject;
     }
 
@@ -830,7 +830,7 @@ struct ProofGraph<'e> {
     edges: Vec<(DocAnchor, DocAnchor)>,
     forks: Vec<SuccessionFork>,
     /// The filtered statements behind the edges, kept for stage 5's
-    /// departing-hop threading check (bridging-hop grading).
+    /// departing-hop path-membership check (bridging-hop grading).
     statements: Vec<&'e SuccessorEvidence>,
 }
 
@@ -1067,8 +1067,8 @@ fn resolve_document<A: AuthorityVerifier>(
 
 /// Whether the hop departing `base` toward `next` is fully checked:
 /// the departing document has fresh support in the pooled store, and
-/// some valid statement for the hop threads its last-known
-/// (ladder-best) generation. Anything less grades the hop
+/// some valid statement for the hop has its last-known generation
+/// (ladder-best) on-path. Anything less grades the hop
 /// provisional.
 fn fully_checked_departure<A: AuthorityVerifier>(
     base: DocAnchor,
@@ -1093,7 +1093,7 @@ fn fully_checked_departure<A: AuthorityVerifier>(
         .statements
         .iter()
         .filter(|s| s.predecessor == base && s.successor == next)
-        .any(|s| ctx.authority.threads(&s.carriage, &last_known.generation))
+        .any(|s| ctx.authority.on_path(&s.carriage, &last_known.generation))
 }
 
 /// The document's ladder-best record: the undominated set under the

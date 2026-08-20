@@ -156,7 +156,7 @@ fn succession_proof_makes_a_stale_challenger_eligible() -> TestResult {
 
 #[test]
 fn directly_proven_migration_is_confirmed() -> TestResult {
-    // Fresh departure, one hop, threading intact: the fully-checked
+    // Fresh departure, one hop, generation on-path: the fully-checked
     // case. Continuity is directly proven and the fresh terminus
     // confirms.
     let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW + 1000), 50)?;
@@ -277,7 +277,7 @@ fn stale_candidates_with_ordered_keys_pick_the_later_provisionally() -> TestResu
 }
 
 #[test]
-fn d10_fresh_record_not_threading_g_is_rejected() -> TestResult {
+fn d10_fresh_record_g_not_on_path_is_rejected() -> TestResult {
     let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
 
     let mut validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
@@ -291,7 +291,7 @@ fn d10_fresh_record_not_threading_g_is_rejected() -> TestResult {
         &Decisions::default(),
         &Map::default(),
         &validator,
-        &MemoryAuthority::default().without_thread(&generation(11)),
+        &MemoryAuthority::default().off_path(&generation(11)),
     );
 
     let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();

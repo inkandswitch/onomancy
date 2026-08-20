@@ -83,12 +83,12 @@ pub enum ContinuityGrade {
 
     /// Directly proven: one fully-checked hop departs the
     /// acceptance-backed document — fresh support there, and the
-    /// statement's carriage threads its last-known generation.
+    /// statement's carriage has its last-known generation on-path.
     Proven,
 
     /// Continuity holds only through provisional hops: a multi-hop
     /// bridge, or a departing hop without fresh support or generation
-    /// threading. Caps the binding grade at provisional and carries
+    /// path membership. Caps the binding grade at provisional and carries
     /// the opportunistic re-check obligation.
     Bridged,
 

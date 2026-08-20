@@ -222,7 +222,7 @@ Content-addressing vectors MUST cover hash stability: the hash of a certificate 
 
 - _Deterministic parsing is the point._ Every rule above that forbids a second spelling or a second reading (bijou64, fixed field order, sorted heads, no absent-vs-empty distinction, canonical hostnames, strict TXT grammar) exists so that one byte string means one thing and one certificate has one byte string — no parser differentials, no re-encode mismatches.
 - _Decoders are strict, never normalizing._ Any input that is not the canonical encoding MUST be rejected. Accept-then-canonicalize would reintroduce exactly the aliasing these rules remove (the bug class behind DER-malleability incidents: verify received bytes, act on re-encoded ones).
-- _The attached region is not a loophole._ Every attached item is independently verifiable: the DNSSEC chain against the verifier's own KSK (cross-checked against signed `hostname` and `root_doc`), the delegation chain by its own signatures (terminating at the signed `signer`, threading the TXT-attested generation key), and lineage entries by keys on the document's own chain. An attacker who swaps attachments can only cause rejection or staleness, never a false bind.
+- _The attached region is not a loophole._ Every attached item is independently verifiable: the DNSSEC chain against the verifier's own KSK (cross-checked against signed `hostname` and `root_doc`), the delegation chain by its own signatures (terminating at the signed `signer`, with the TXT-attested generation key on the path), and lineage entries by keys on the document's own chain. An attacker who swaps attachments can only cause rejection or staleness, never a false bind.
 
 <!-- External Links -->
 

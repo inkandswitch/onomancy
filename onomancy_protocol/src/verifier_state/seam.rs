@@ -66,9 +66,9 @@ pub trait AuthorityVerifier {
         carriage: &[DelegationBytes],
     ) -> bool;
 
-    /// Whether `carriage` threads `generation` at any depth — the
-    /// path-membership check behind the TXT `g=` rules.
-    fn threads(&self, carriage: &[DelegationBytes], generation: &GenerationKey) -> bool;
+    /// Whether `generation` lies on the delegation path in `carriage`,
+    /// at any depth — the path-membership check behind the TXT `g=` rules.
+    fn on_path(&self, carriage: &[DelegationBytes], generation: &GenerationKey) -> bool;
 }
 
 /// The chain never verified from the trust anchor: invalid ✗, not
