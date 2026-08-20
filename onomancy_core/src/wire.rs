@@ -155,6 +155,25 @@ pub(crate) fn put_varint(buf: &mut Vec<u8>, value: u64) {
     bijoux::u64::encode(value, buf);
 }
 
+/// Enforce [`MAX_UNIT_BYTES`] on a unit under CONSTRUCTION: encoders
+/// MUST NOT build units their own decoders reject.
+pub(crate) const fn check_unit_len(len: usize) -> Result<(), OversizeUnit> {
+    if len > MAX_UNIT_BYTES {
+        Err(OversizeUnit { len })
+    } else {
+        Ok(())
+    }
+}
+
+/// A unit under construction would exceed [`MAX_UNIT_BYTES`]: signing
+/// refused — the result could never decode anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("unit of {len} bytes would exceed the 1 MiB cap")]
+pub struct OversizeUnit {
+    /// The would-be unit length.
+    pub len: usize,
+}
+
 /// A wire-level decode failure, independent of which unit or field it
 /// occurred in. Unit codecs wrap this with field context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

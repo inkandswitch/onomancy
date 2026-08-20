@@ -9,7 +9,7 @@
 
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     collections::{Map, Set},
     freshness::ChainWindow,
     time::UnixSeconds,
@@ -18,17 +18,17 @@ use onomancy_core::{
 use onomancy_protocol::{
     test_utils as proto_utils,
     verifier_state::{
+        VerifierState,
         judgment::{Acceptance, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         seam::ChainProof,
         store::{Item, Store},
-        VerifierState,
     },
 };
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{binding_chain, fixtures, txt_record, ChainWindows},
+    test_utils::{ChainWindows, binding_chain, fixtures, txt_record},
     validator::Validator,
 };
 
@@ -77,7 +77,7 @@ fn real_binding(
             chain: chain.clone(),
         },
         &SigningKey::from_bytes(&[200 ^ doc_seed; 32]),
-    );
+    )?;
 
     let proof = ChainProof {
         records: vec![record],

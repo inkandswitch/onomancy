@@ -14,9 +14,9 @@ use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator as _};
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{binding_chain, fixtures, link, txt_record, zone, ChainWindows, Zone},
+    test_utils::{ChainWindows, Zone, binding_chain, fixtures, link, txt_record, zone},
     validator::{Validator, WalkError},
-    wire::record::{Record, RrType, CLASS_IN},
+    wire::record::{CLASS_IN, Record, RrType},
 };
 
 fn hostname() -> TestResult<DnsName> {
@@ -202,11 +202,15 @@ fn the_seam_collapses_detail_to_invalid_chain() -> TestResult {
     let child = zone("expede.wtf", 2);
 
     let validator = Validator::new(vec![root.anchor()]);
-    assert!(validator
-        .validate(&hostname()?, &happy_chain(&root, &child)?)
-        .is_ok());
-    assert!(validator
-        .validate(&hostname()?, &DnssecChain::default())
-        .is_err());
+    assert!(
+        validator
+            .validate(&hostname()?, &happy_chain(&root, &child)?)
+            .is_ok()
+    );
+    assert!(
+        validator
+            .validate(&hostname()?, &DnssecChain::default())
+            .is_err()
+    );
     Ok(())
 }

@@ -13,7 +13,7 @@ use testresult::TestResult;
 
 use onomancy_dnssec::{
     test_utils::fixtures::{
-        all_fixtures, fixture_anchor, fixture_hostname, Expectation, FIXTURE_SERIAL,
+        Expectation, FIXTURE_SERIAL, all_fixtures, fixture_anchor, fixture_hostname,
     },
     validator::Validator,
 };

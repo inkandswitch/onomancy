@@ -63,7 +63,7 @@ use crate::{
         successor::{DecodeSuccessorError, SuccessorStatement},
     },
     time::UnixSeconds,
-    wire::{self, Reader, WireError},
+    wire::{self, OversizeUnit, Reader, WireError},
 };
 
 /// The signed fields: `hostname` is bound to `root_doc`, attested by
@@ -190,8 +190,12 @@ impl Certificate {
     /// `heads` are canonicalized (sorted, deduplicated) before
     /// encoding: signers may hold them in any order, but the wire has
     /// exactly one spelling.
-    #[must_use]
-    pub fn sign(params: CertificateParams, signer: &SigningKey) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OversizeUnit`] when the unit would exceed the 1 MiB
+    /// cap — encoders MUST NOT build units their own decoders reject.
+    pub fn sign(params: CertificateParams, signer: &SigningKey) -> Result<Self, OversizeUnit> {
         let CertificateParams {
             root_doc,
             issued_at,
@@ -221,14 +225,15 @@ impl Certificate {
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);
         encode_attached(&mut bytes, &delegation_chain, &lineage, &chain);
+        wire::check_unit_len(bytes.len())?;
 
-        Self {
+        Ok(Self {
             digest: Digest::hash(&bytes),
             signed: signed_unit,
             delegation_chain,
             lineage,
             chain,
-        }
+        })
     }
 
     /// Rederive the canonical wire bytes: `encode(decode(b)) = b`.
@@ -258,22 +263,28 @@ impl Certificate {
     /// The result is the [same certificate](Self::same_certificate)
     /// carrying different evidence — and a different store item with a
     /// different [digest](Self::digest).
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OversizeUnit`] when the refreshed unit would exceed
+    /// the 1 MiB cap.
     pub fn with_attachments(
         &self,
         delegation_chain: Vec<DelegationBytes>,
         lineage: Vec<RotationStatement>,
         chain: DnssecChain,
-    ) -> Self {
+    ) -> Result<Self, OversizeUnit> {
         let mut refreshed = Self {
             delegation_chain,
             lineage,
             chain,
             ..self.clone()
         };
-        refreshed.digest = Digest::hash(&refreshed.encode());
+        let bytes = refreshed.encode();
+        wire::check_unit_len(bytes.len())?;
+        refreshed.digest = Digest::hash(&bytes);
 
-        refreshed
+        Ok(refreshed)
     }
 
     /// The typed digest of the unit's canonical bytes — the store-item
@@ -530,26 +541,33 @@ mod tests {
             issued_at: UnixSeconds::from(1_755_500_000),
             hostname: host(),
             heads: vec![Head::from([9u8; 32]), Head::from([3u8; 32])],
-            predecessor: Some(SuccessorStatement::sign(
-                &doc(4),
-                &doc(1),
-                &host(),
-                &SigningKey::from_bytes(&[5; 32]),
-                vec![DelegationBytes::from(vec![1, 2, 3])],
-            )),
+            predecessor: Some(
+                SuccessorStatement::sign(
+                    &doc(4),
+                    &doc(1),
+                    &host(),
+                    &SigningKey::from_bytes(&[5; 32]),
+                    vec![DelegationBytes::from(vec![1, 2, 3])],
+                )
+                .expect("under the unit cap"),
+            ),
             delegation_chain: vec![DelegationBytes::from(vec![0xAA; 9])],
-            lineage: vec![RotationStatement::sign(
-                &doc(1),
-                &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
-                &SigningKey::from_bytes(&[7; 32]),
-                vec![],
-            )],
+            lineage: vec![
+                RotationStatement::sign(
+                    &doc(1),
+                    &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
+                    &SigningKey::from_bytes(&[7; 32]),
+                    vec![],
+                )
+                .expect("under the unit cap"),
+            ],
             chain: DnssecChain::from(vec![vec![0xBB; 17].into()]),
         }
     }
 
     fn sample() -> Certificate {
         Certificate::sign(sample_params(), &SigningKey::from_bytes(&[2; 32]))
+            .expect("under the unit cap")
     }
 
     #[test]
@@ -596,7 +614,8 @@ mod tests {
     fn absent_predecessor_is_length_zero_not_a_flag() {
         let mut params = sample_params();
         params.predecessor = None;
-        let cert = Certificate::sign(params, &SigningKey::from_bytes(&[2; 32]));
+        let cert = Certificate::sign(params, &SigningKey::from_bytes(&[2; 32]))
+            .expect("under the unit cap");
 
         let decoded = Certificate::decode(&cert.encode()).expect("decodes");
         assert!(decoded.predecessor().is_none());
@@ -605,11 +624,13 @@ mod tests {
     #[test]
     fn reattach_is_the_same_certificate_but_a_different_item() {
         let cert = sample();
-        let refreshed = cert.with_attachments(
-            vec![DelegationBytes::from(vec![0xCC; 4])],
-            vec![],
-            DnssecChain::from(vec![vec![0xDD; 5].into()]),
-        );
+        let refreshed = cert
+            .with_attachments(
+                vec![DelegationBytes::from(vec![0xCC; 4])],
+                vec![],
+                DnssecChain::from(vec![vec![0xDD; 5].into()]),
+            )
+            .expect("under the unit cap");
 
         assert!(cert.same_certificate(&refreshed));
         assert_ne!(cert.digest(), refreshed.digest());
@@ -645,12 +666,36 @@ mod tests {
             &SigningKey::from_bytes(&[3; 32]),
             vec![],
         )
+        .expect("under the unit cap")
         .encode();
 
         assert!(matches!(
             Certificate::decode(&statement_bytes),
             Err(DecodeCertificateError::Malformed(Malformed::WrongTag { got, .. }))
                 if got == *b"ONS\x00"
+        ));
+    }
+
+    #[test]
+    fn oversized_units_are_refused_at_signing() {
+        // A delegation blob past the cap: the encoder must refuse to
+        // build what its own decoder would reject.
+        let mut params = sample_params();
+        params.delegation_chain = vec![DelegationBytes::from(vec![0u8; wire::MAX_UNIT_BYTES + 1])];
+
+        assert!(matches!(
+            Certificate::sign(params, &SigningKey::from_bytes(&[2; 32])),
+            Err(OversizeUnit { .. })
+        ));
+
+        // Same rule on the keyless re-attach path.
+        assert!(matches!(
+            sample().with_attachments(
+                vec![DelegationBytes::from(vec![0u8; wire::MAX_UNIT_BYTES + 1])],
+                vec![],
+                DnssecChain::default(),
+            ),
+            Err(OversizeUnit { .. })
         ));
     }
 
@@ -692,7 +737,8 @@ mod tests {
                         chain: DnssecChain::default(),
                     };
 
-                    let cert = Certificate::sign(params, &SigningKey::from_bytes(&[*signer; 32]));
+                    let cert = Certificate::sign(params, &SigningKey::from_bytes(&[*signer; 32]))
+                        .expect("under the unit cap");
                     let bytes = cert.encode();
 
                     let decoded = Certificate::decode(&bytes).expect("own encoding decodes");

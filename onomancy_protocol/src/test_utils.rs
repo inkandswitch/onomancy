@@ -14,12 +14,13 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
+    wire::OversizeUnit,
 };
 
 use crate::verifier_state::seam::ChainProof;
@@ -85,7 +86,11 @@ pub struct Binding {
 }
 
 /// A binding record with an empty attached region beyond its chain.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap —
+/// propagate with `?` in `TestResult` tests.
 pub fn binding(
     doc_seed: u8,
     gen_seed: u8,
@@ -93,7 +98,7 @@ pub fn binding(
     serial: u64,
     window_span: (u64, u64),
     issued_at: u64,
-) -> Binding {
+) -> Result<Binding, OversizeUnit> {
     binding_carrying(
         doc_seed,
         gen_seed,
@@ -107,7 +112,10 @@ pub fn binding(
 
 /// A binding record whose certificate carries lineage statements —
 /// the extraction-closure input.
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
 pub fn binding_carrying(
     doc_seed: u8,
     gen_seed: u8,
@@ -116,7 +124,7 @@ pub fn binding_carrying(
     window_span: (u64, u64),
     issued_at: u64,
     lineage: Vec<RotationStatement>,
-) -> Binding {
+) -> Result<Binding, OversizeUnit> {
     let chain = chain(chain_tag);
     let cert = Certificate::sign(
         CertificateParams {
@@ -130,7 +138,7 @@ pub fn binding_carrying(
             chain: chain.clone(),
         },
         &signer(200 ^ doc_seed),
-    );
+    )?;
 
     let proof = ChainProof {
         records: vec![TxtRecord::new(
@@ -141,14 +149,21 @@ pub fn binding_carrying(
         window: window(window_span.0, window_span.1),
     };
 
-    Binding { cert, chain, proof }
+    Ok(Binding { cert, chain, proof })
 }
 
 /// A rotation statement retiring `generation(replaced_seed)` in favor
 /// of `generation(successor_seed)` — seed and signing key agree by
 /// construction.
-#[must_use]
-pub fn rotation(doc_seed: u8, replaced_seed: u8, successor_seed: u8) -> RotationStatement {
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
+pub fn rotation(
+    doc_seed: u8,
+    replaced_seed: u8,
+    successor_seed: u8,
+) -> Result<RotationStatement, OversizeUnit> {
     RotationStatement::sign(
         &doc(doc_seed),
         &generation(replaced_seed),
@@ -160,8 +175,15 @@ pub fn rotation(doc_seed: u8, replaced_seed: u8, successor_seed: u8) -> Rotation
 /// A successor statement migrating `doc(predecessor_seed)` to
 /// `doc(successor_seed)` under the test hostname, signed by
 /// `signer(signer_seed)`.
-#[must_use]
-pub fn succession(predecessor_seed: u8, successor_seed: u8, signer_seed: u8) -> SuccessorStatement {
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
+pub fn succession(
+    predecessor_seed: u8,
+    successor_seed: u8,
+    signer_seed: u8,
+) -> Result<SuccessorStatement, OversizeUnit> {
     SuccessorStatement::sign(
         &doc(predecessor_seed),
         &doc(successor_seed),

@@ -212,7 +212,9 @@ fn derive_host(
 
     // Stage 5: resolve the document.
     let graph = ProofGraph::for_hostname(evidence, hostname, excluded);
-    let resolution = resolve_document(&surviving, &graph, hostname, now, judgment, evidence);
+    let resolution = resolve_document(
+        &surviving, &graph, &lineage, hostname, now, judgment, evidence,
+    );
 
     // Stage 6: grade the binding.
     let accepted = resolution.accepted.map(|(document, generation)| {
@@ -239,13 +241,20 @@ fn derive_host(
             .collect();
 
         // The accepted record is the LADDER-winning record of the
-        // accepted document — fresh-first, then zone-state key — so a
-        // fresh record with a lower serial wins and its downward
-        // serial surfaces as a ratchet reset in the diff (D4a).
-        let serial = of_doc
-            .iter()
-            .max_by_key(|r| (freshness(r, now) == Freshness::Fresh, r.key))
-            .map(|r| r.key.serial);
+        // accepted document — fresh-first, then lineage descent, then
+        // zone-state key — so a fresh record with a lower serial wins
+        // and its downward serial surfaces as a ratchet reset in the
+        // diff (D4a).
+        let mut already_surfaced = false;
+        let serial = best_of_document(
+            &surviving,
+            binding.document,
+            &graph,
+            &lineage,
+            now,
+            &mut already_surfaced,
+        )
+        .map(|r| r.key.serial);
         let span = tenure_span(&of_doc);
 
         (serial, span)
@@ -558,11 +567,45 @@ pub(crate) fn is_deferred(record: &BindingEvidence, now: UnixSeconds) -> bool {
 /// heads rule (ADR-042 / Heads and the Protected Prefix).
 #[derive(Debug, Default)]
 struct LineageView {
+    /// The replaced → successor edges, per document (exclusion-
+    /// filtered and deduped): rung 1's same-document vocabulary.
+    edges: Vec<(DocAnchor, GenerationKey, GenerationKey)>,
     forks: Vec<Fork>,
     /// Fork-implicated generations, per document: D12a territory.
     implicated: Set<(DocAnchor, GenerationKey)>,
     /// The protected prefix, per document: D12 stays armed here.
     protected: Set<(DocAnchor, GenerationKey)>,
+}
+
+impl LineageView {
+    /// Whether `descendant` is strictly forward-reachable from
+    /// `ancestor` along the document's replaced → successor edges —
+    /// signed descent, rung 1's same-document half.
+    fn descends(
+        &self,
+        document: DocAnchor,
+        ancestor: GenerationKey,
+        descendant: GenerationKey,
+    ) -> bool {
+        let mut reached: Vec<GenerationKey> = vec![ancestor];
+        let mut frontier: Vec<GenerationKey> = vec![ancestor];
+
+        while let Some(key) = frontier.pop() {
+            for (doc, replaced, successor) in &self.edges {
+                if *doc == document && *replaced == key {
+                    if *successor == descendant {
+                        return true;
+                    }
+                    if !reached.contains(successor) {
+                        reached.push(*successor);
+                        frontier.push(*successor);
+                    }
+                }
+            }
+        }
+
+        false
+    }
 }
 
 fn build_lineage(evidence: &Evidence, excluded: &Set<ContentHash>) -> LineageView {
@@ -574,7 +617,13 @@ fn build_lineage(evidence: &Evidence, excluded: &Set<ContentHash>) -> LineageVie
     rotations.sort_unstable_by_key(|r| (r.root_doc, r.replaced, r.successor, r.hash));
     rotations.dedup_by_key(|r| (r.root_doc, r.replaced, r.successor));
 
-    let mut view = LineageView::default();
+    let mut view = LineageView {
+        edges: rotations
+            .iter()
+            .map(|r| (r.root_doc, r.replaced, r.successor))
+            .collect(),
+        ..LineageView::default()
+    };
 
     let mut documents: Vec<DocAnchor> = rotations.iter().map(|r| r.root_doc).collect();
     documents.sort_unstable();
@@ -849,13 +898,16 @@ impl ProofGraph {
 fn resolve_document(
     surviving: &[&BindingEvidence],
     graph: &ProofGraph,
+    lineage: &LineageView,
     hostname: &DnsName,
     now: UnixSeconds,
     judgment: &Judgment,
     evidence: &Evidence,
 ) -> DocumentResolution {
-    // Best record per candidate document (same-document zone-state
-    // order is total), in a deterministic order.
+    // Best record per candidate document, by the full within-document
+    // ladder (freshness, then lineage descent, then zone-state key),
+    // in a deterministic order.
+    let mut internally_contested = false;
     let best: Vec<&BindingEvidence> = {
         let mut documents: Vec<DocAnchor> = surviving.iter().map(|r| r.document).collect();
         documents.sort_unstable();
@@ -864,11 +916,14 @@ fn resolve_document(
         documents
             .into_iter()
             .filter_map(|document| {
-                surviving
-                    .iter()
-                    .filter(|r| r.document == document)
-                    .max_by_key(|r| r.key)
-                    .copied()
+                best_of_document(
+                    surviving,
+                    document,
+                    graph,
+                    lineage,
+                    now,
+                    &mut internally_contested,
+                )
             })
             .collect()
     };
@@ -886,13 +941,13 @@ fn resolve_document(
         .filter(|candidate| {
             !best.iter().any(|other| {
                 other.document != candidate.document
-                    && ladder_verdict(other, candidate, graph, now) == Verdict::Left
+                    && ladder_verdict(other, candidate, graph, lineage, now) == Verdict::Left
             })
         })
         .copied()
         .collect();
 
-    let mut contested = undominated.len() != 1;
+    let mut contested = undominated.len() != 1 || internally_contested;
     // Under a dominance cycle (undominated empty) the output is
     // contested and masked; the fallback feeds masked internals only,
     // deterministically (best is document-sorted).
@@ -947,11 +1002,11 @@ fn resolve_document(
     pending.dedup();
 
     // The accepted document's ladder-winning record carries the
-    // attested generation (fresh-first, then key — the D4a order).
-    let generation = surviving
+    // attested generation (fresh-first, then lineage descent, then
+    // key — the D4a order with rung 1's same-document half).
+    let generation = best
         .iter()
-        .filter(|r| r.document == accepted_document)
-        .max_by_key(|r| (freshness(r, now) == Freshness::Fresh, r.key))
+        .find(|r| r.document == accepted_document)
         .map(|r| r.generation);
 
     DocumentResolution {
@@ -961,17 +1016,77 @@ fn resolve_document(
     }
 }
 
-/// One pair's ladder verdict, with rung 1 computed from the proofs.
+/// The document's ladder-best record: the undominated set under the
+/// full within-document ladder (freshness, then lineage descent, then
+/// zone-state key). Exactly one undominated record is the winner;
+/// anything else (a lineage cycle, or a rung-1/rung-2 comparison
+/// cycle) marks the resolution contested and falls back to the
+/// highest-key record deterministically — surfaced, never silently
+/// picked.
+fn best_of_document<'e>(
+    surviving: &[&'e BindingEvidence],
+    document: DocAnchor,
+    graph: &ProofGraph,
+    lineage: &LineageView,
+    now: UnixSeconds,
+    contested: &mut bool,
+) -> Option<&'e BindingEvidence> {
+    let mut of_doc: Vec<&BindingEvidence> = surviving
+        .iter()
+        .filter(|r| r.document == document)
+        .copied()
+        .collect();
+
+    // Interchangeable spellings — same generation, same zone state —
+    // collapse to the smallest-hash representative.
+    of_doc.sort_unstable_by_key(|r| (r.key, r.generation, r.hash));
+    of_doc.dedup_by(|a, b| a.generation == b.generation && a.key == b.key);
+
+    let undominated: Vec<&BindingEvidence> = of_doc
+        .iter()
+        .filter(|candidate| {
+            !of_doc.iter().any(|other| {
+                other.hash != candidate.hash
+                    && ladder_verdict(other, candidate, graph, lineage, now) == Verdict::Left
+            })
+        })
+        .copied()
+        .collect();
+
+    match undominated.as_slice() {
+        [] | [_, _, ..] => {
+            if !of_doc.is_empty() {
+                *contested = true;
+            }
+            of_doc.last().copied()
+        }
+        [winner] => Some(*winner),
+    }
+}
+
+/// One pair's ladder verdict, with rung 1 computed from the pooled
+/// evidence: succession proofs across documents, signed lineage
+/// descent within one.
 fn ladder_verdict(
     left: &BindingEvidence,
     right: &BindingEvidence,
     graph: &ProofGraph,
+    lineage: &LineageView,
     now: UnixSeconds,
 ) -> Verdict {
-    let continuity = match (
-        graph.proves(left.document, right.document),
-        graph.proves(right.document, left.document),
-    ) {
+    let ordered = if left.document == right.document {
+        (
+            lineage.descends(left.document, left.generation, right.generation),
+            lineage.descends(left.document, right.generation, left.generation),
+        )
+    } else {
+        (
+            graph.proves(left.document, right.document),
+            graph.proves(right.document, left.document),
+        )
+    };
+
+    let continuity = match ordered {
         (true, true) => Continuity::Fork,
         (true, false) => Continuity::RightNewer,
         (false, true) => Continuity::LeftNewer,

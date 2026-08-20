@@ -148,6 +148,7 @@ mod tests {
         },
     };
     use alloc::{vec, vec::Vec};
+    use testresult::TestResult;
 
     const NOW: u64 = 1_755_000_000;
 
@@ -188,36 +189,38 @@ mod tests {
     }
 
     #[test]
-    fn dominated_records_are_dropped_and_derivation_is_preserved() {
+    fn dominated_records_are_dropped_and_derivation_is_preserved() -> TestResult {
         // Same document/generation, same inception (so tenure and
         // the leaf comparator lose nothing): a longer-lived sibling
         // with a higher serial and later issuance dominates.
-        let weak = binding(1, 11, 1, 50, (NOW - 5_000, NOW - 1_000), 10);
-        let strong = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20);
+        let weak = binding(1, 11, 1, 50, (NOW - 5_000, NOW - 1_000), 10)?;
+        let strong = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
 
         let (store, validator) = setup(&[&weak, &strong], vec![]);
         let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
 
         assert_eq!(pruned.items().len(), 1, "the dominated record is gone");
+        Ok(())
     }
 
     #[test]
-    fn incomparable_records_and_tenure_endpoints_survive() {
+    fn incomparable_records_and_tenure_endpoints_survive() -> TestResult {
         // Earlier inception vs higher serial: neither dominates, and
         // the earliest-inception record is tenure's left endpoint.
-        let early = binding(1, 11, 1, 100, (NOW - 9_000, NOW - 5_000), 10);
-        let late = binding(1, 11, 2, 200, (NOW - 4_000, NOW + 1_000), 20);
+        let early = binding(1, 11, 1, 100, (NOW - 9_000, NOW - 5_000), 10)?;
+        let late = binding(1, 11, 2, 200, (NOW - 4_000, NOW + 1_000), 20)?;
 
         let (store, validator) = setup(&[&early, &late], vec![]);
         let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
 
         assert_eq!(pruned.items().len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn statements_and_cited_receipts_are_never_pruned() {
-        let weak = binding(1, 11, 1, 50, (NOW - 4_000, NOW - 1_000), 10);
-        let strong = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20);
+    fn statements_and_cited_receipts_are_never_pruned() -> TestResult {
+        let weak = binding(1, 11, 1, 50, (NOW - 4_000, NOW - 1_000), 10)?;
+        let strong = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
 
         // An acceptance citing the WEAK record pins it in place.
         let mut cited = Set::default();
@@ -235,8 +238,10 @@ mod tests {
             ..Judgment::default()
         };
 
-        let (store, validator) =
-            setup(&[&weak, &strong], vec![Item::Rotation(rotation(1, 40, 41))]);
+        let (store, validator) = setup(
+            &[&weak, &strong],
+            vec![Item::Rotation(rotation(1, 40, 41)?)],
+        );
         let pruned = assert_prune_invariant(&store, &validator, &judgment);
 
         assert_eq!(
@@ -244,10 +249,11 @@ mod tests {
             3,
             "cited receipt + dominating record + statement all survive"
         );
+        Ok(())
     }
 
     #[test]
-    fn far_future_records_fall_past_the_horizon() {
+    fn far_future_records_fall_past_the_horizon() -> TestResult {
         // Serial more than a year (ms) past NOW: prunable even though
         // nothing dominates it.
         let poisoned = binding(
@@ -257,7 +263,7 @@ mod tests {
             NOW * 1000 + DEFERRAL_HORIZON_MS + 1,
             (NOW - 1_000, NOW + 1_000),
             10,
-        );
+        )?;
 
         let (store, validator) = setup(&[&poisoned], vec![]);
         let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
@@ -270,10 +276,11 @@ mod tests {
         // horizon drop applies — the one sanctioned exception to the
         // invariant (a derivation more than a year out could differ,
         // and that is accepted).
-        let anchor_record = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20);
+        let anchor_record = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
         let (store, validator) = setup(&[&poisoned, &anchor_record], vec![]);
         let pruned = assert_prune_invariant(&store, &validator, &Judgment::default());
 
         assert_eq!(pruned.items().len(), 1, "past the horizon: dropped");
+        Ok(())
     }
 }

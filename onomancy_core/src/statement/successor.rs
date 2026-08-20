@@ -31,7 +31,7 @@ use crate::{
         doc::DocAnchor,
     },
     signed::{Malformed, Payload, Signed},
-    wire::{self, Reader, WireError},
+    wire::{self, OversizeUnit, Reader, WireError},
 };
 
 /// The signed fields: `predecessor_doc` names `successor_doc` as its
@@ -118,14 +118,18 @@ impl SuccessorStatement {
 
     /// Construct and sign a successor statement with a delegated admin
     /// key of the predecessor document.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OversizeUnit`] when the unit would exceed the 1 MiB
+    /// cap — encoders MUST NOT build units their own decoders reject.
     pub fn sign(
         predecessor_doc: &DocAnchor,
         successor_doc: &DocAnchor,
         hostname: &DnsName,
         signer: &SigningKey,
         authority: Vec<DelegationBytes>,
-    ) -> Self {
+    ) -> Result<Self, OversizeUnit> {
         let signed_unit = Signed::sign(
             Succession {
                 predecessor_doc: *predecessor_doc,
@@ -139,12 +143,13 @@ impl SuccessorStatement {
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);
         delegation::write_entries(&mut bytes, &authority);
+        wire::check_unit_len(bytes.len())?;
 
-        Self {
+        Ok(Self {
             digest: Digest::hash(&bytes),
             signed: signed_unit,
             authority,
-        }
+        })
     }
 
     /// Rederive the canonical wire bytes: `encode(decode(b)) = b`.
@@ -276,6 +281,7 @@ mod tests {
             &SigningKey::from_bytes(&[3; 32]),
             vec![DelegationBytes::from(vec![0xCD; 7])],
         )
+        .expect("under the unit cap")
     }
 
     fn signed_len(statement: &SuccessorStatement) -> usize {
@@ -366,7 +372,8 @@ mod tests {
                         &host(),
                         &SigningKey::from_bytes(&[*c; 32]),
                         authority.clone(),
-                    );
+                    )
+                    .expect("under the unit cap");
                     let bytes = statement.encode();
 
                     let decoded = SuccessorStatement::decode(&bytes).expect("own encoding decodes");

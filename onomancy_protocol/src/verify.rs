@@ -185,12 +185,13 @@ mod tests {
         verifier_state::memory::{MemoryAuthority, MemoryValidator},
     };
     use alloc::vec;
+    use testresult::TestResult;
 
     const NOW: u64 = 1_755_000_000;
 
     #[test]
-    fn a_fresh_genuine_certificate_verifies() {
-        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50);
+    fn a_fresh_genuine_certificate_verifies() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
         let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
 
         let verdict = verify(
@@ -207,11 +208,12 @@ mod tests {
         assert_eq!(verdict.serial, Serial::from(100));
         assert_eq!(verdict.freshness, Freshness::Fresh);
         assert_eq!(verdict.generation_check, GenerationCheck::Threaded);
+        Ok(())
     }
 
     #[test]
-    fn stale_grades_rather_than_rejects() {
-        let b = binding(1, 11, 2, 100, (NOW - 9_000, NOW - 1_000), 50);
+    fn stale_grades_rather_than_rejects() -> TestResult {
+        let b = binding(1, 11, 2, 100, (NOW - 9_000, NOW - 1_000), 50)?;
         let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
 
         let verdict = verify(
@@ -224,12 +226,13 @@ mod tests {
         .expect("stale is a grade, not a rejection");
 
         assert_eq!(verdict.freshness, Freshness::Stale);
+        Ok(())
     }
 
     #[test]
-    fn d10_rejects_fresh_but_grades_stale_provisional() {
-        let fresh = binding(1, 11, 3, 100, (NOW - 1_000, NOW + 1_000), 50);
-        let stale = binding(1, 11, 4, 100, (NOW - 9_000, NOW - 1_000), 50);
+    fn d10_rejects_fresh_but_grades_stale_provisional() -> TestResult {
+        let fresh = binding(1, 11, 3, 100, (NOW - 1_000, NOW + 1_000), 50)?;
+        let stale = binding(1, 11, 4, 100, (NOW - 9_000, NOW - 1_000), 50)?;
         let authority = MemoryAuthority::default().without_thread(&generation(11));
 
         let validator = MemoryValidator::default()
@@ -256,10 +259,11 @@ mod tests {
         )
         .expect("stale + unthreaded is provisional");
         assert_eq!(verdict.generation_check, GenerationCheck::Provisional);
+        Ok(())
     }
 
     #[test]
-    fn far_future_serials_defer() {
+    fn far_future_serials_defer() -> TestResult {
         let b = binding(
             1,
             11,
@@ -267,7 +271,7 @@ mod tests {
             NOW * 1000 + 6 * 60 * 1000,
             (NOW - 1_000, NOW + 1_000),
             50,
-        );
+        )?;
         let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
 
         assert_eq!(
@@ -280,11 +284,12 @@ mod tests {
             ),
             Err(Rejection::Deferred)
         );
+        Ok(())
     }
 
     #[test]
-    fn unregistered_chains_are_rejected() {
-        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50);
+    fn unregistered_chains_are_rejected() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
         // Validator knows nothing about this chain.
         let validator = MemoryValidator::default();
 
@@ -298,14 +303,15 @@ mod tests {
             ),
             Err(Rejection::ChainRejected)
         );
+        Ok(())
     }
 
     #[test]
-    fn document_cross_check_rejects_mismatches() {
+    fn document_cross_check_rejects_mismatches() -> TestResult {
         // The chain proves a TXT attesting doc(2); the cert claims
         // doc(1).
-        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50);
-        let wrong = binding(2, 22, 5, 100, (NOW - 1_000, NOW + 1_000), 50);
+        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
+        let wrong = binding(2, 22, 5, 100, (NOW - 1_000, NOW + 1_000), 50)?;
         let validator = MemoryValidator::default().with(host(), &b.chain, wrong.proof.clone());
 
         assert_eq!(
@@ -318,11 +324,12 @@ mod tests {
             ),
             Err(Rejection::ChainRejected)
         );
+        Ok(())
     }
 
     #[test]
-    fn tampered_bytes_fail_at_decode() {
-        let b = binding_carrying(1, 11, 7, 100, (NOW - 1_000, NOW + 1_000), 50, vec![]);
+    fn tampered_bytes_fail_at_decode() -> TestResult {
+        let b = binding_carrying(1, 11, 7, 100, (NOW - 1_000, NOW + 1_000), 50, vec![])?;
         let mut bytes = b.cert.encode();
         if let Some(byte) = bytes.get_mut(40) {
             *byte ^= 0x01;
@@ -338,5 +345,6 @@ mod tests {
             ),
             Err(Rejection::Decode(_))
         ));
+        Ok(())
     }
 }

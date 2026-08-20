@@ -13,12 +13,12 @@ use onomancy_core::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
-use super::{binding_chain, link, txt_record, zone, ChainWindows, Zone};
+use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
 use crate::{
     anchor::TrustAnchor,
     wire::{
         name::Name,
-        record::{Record, RrType, CLASS_IN},
+        record::{CLASS_IN, Record, RrType},
     },
 };
 

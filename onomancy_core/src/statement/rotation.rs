@@ -29,7 +29,7 @@ use crate::{
     name::doc::DocAnchor,
     signed::{Malformed, Payload, Signed},
     txt::generation_key::GenerationKey,
-    wire::{Reader, WireError},
+    wire::{self, OversizeUnit, Reader, WireError},
 };
 
 /// The signed fields: `root_doc`'s generation `replaced` (Gₙ) is
@@ -105,13 +105,17 @@ impl RotationStatement {
 
     /// Construct and sign a rotation statement. The signer IS the
     /// successor generation key.
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OversizeUnit`] when the unit would exceed the 1 MiB
+    /// cap — encoders MUST NOT build units their own decoders reject.
     pub fn sign(
         root_doc: &DocAnchor,
         replaced: &GenerationKey,
         successor: &SigningKey,
         authority: Vec<DelegationBytes>,
-    ) -> Self {
+    ) -> Result<Self, OversizeUnit> {
         let signed = Signed::sign(
             Rotation {
                 root_doc: *root_doc,
@@ -124,12 +128,13 @@ impl RotationStatement {
         let mut bytes = Vec::new();
         signed.encode_into(&mut bytes);
         delegation::write_entries(&mut bytes, &authority);
+        wire::check_unit_len(bytes.len())?;
 
-        Self {
+        Ok(Self {
             digest: Digest::hash(&bytes),
             signed,
             authority,
-        }
+        })
     }
 
     /// Rederive the canonical wire bytes: `encode(decode(b)) = b`.
@@ -250,6 +255,7 @@ mod tests {
             &SigningKey::from_bytes(&[3; 32]),
             vec![DelegationBytes::from(vec![0xAB; 5])],
         )
+        .expect("under the unit cap")
     }
 
     #[test]
@@ -318,7 +324,8 @@ mod tests {
                         &gen_key(*b),
                         &SigningKey::from_bytes(&[*c; 32]),
                         authority.clone(),
-                    );
+                    )
+                    .expect("under the unit cap");
                     let bytes = statement.encode();
 
                     let decoded = RotationStatement::decode(&bytes).expect("own encoding decodes");
