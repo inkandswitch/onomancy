@@ -97,6 +97,36 @@ impl DnsName {
         }
     }
 
+    /// Parse a display-form name: Unicode U-labels are converted to
+    /// their Punycode A-labels (UTS-46 / [IDNA]), then handed to the
+    /// strict A-label parser. The core stays A-label-only — U-labels
+    /// exist purely at the display layer, which is where homograph
+    /// defenses live (design/security.md).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseDnsNameError::NotIdnaConvertible`] when UTS-46
+    /// processing rejects the input, or any [`ParseDnsNameError`] the
+    /// A-label parser reports for the converted form.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use onomancy_core::name::dns::DnsName;
+    ///
+    /// let display = DnsName::parse_display("münchen.de")?;
+    /// assert_eq!(display, DnsName::parse("xn--mnchen-3ya.de")?);
+    /// # Ok::<(), onomancy_core::name::dns::ParseDnsNameError>(())
+    /// ```
+    ///
+    /// [IDNA]: https://www.rfc-editor.org/rfc/rfc5890
+    #[cfg(feature = "idna")]
+    pub fn parse_display(raw: &str) -> Result<Self, ParseDnsNameError> {
+        let ascii =
+            idna::domain_to_ascii(raw).map_err(|_| ParseDnsNameError::NotIdnaConvertible)?;
+        Self::parse(&ascii)
+    }
+
     /// View the normalized name as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -180,9 +210,16 @@ pub enum ParseDnsNameError {
 
     /// A label contained something other than lowercase ASCII LDH
     /// characters. U-label (Unicode) input must be IDNA-encoded to
-    /// A-labels before parsing.
+    /// A-labels before parsing — [`DnsName::parse_display`] does so
+    /// under the `idna` feature.
     #[error("DNS labels are ASCII letters, digits, and hyphens (A-label form)")]
     NotALabel,
+
+    /// UTS-46 processing rejected the display-form input (the reasons
+    /// are deliberately opaque upstream).
+    #[cfg(feature = "idna")]
+    #[error("display-form name is not convertible to A-labels")]
+    NotIdnaConvertible,
 }
 
 #[cfg(test)]
@@ -224,6 +261,58 @@ mod tests {
             DnsName::parse("expede.wtf.."),
             Err(ParseDnsNameError::EmptyLabel)
         );
+    }
+
+    #[cfg(feature = "idna")]
+    mod display {
+        use super::*;
+        use testresult::TestResult;
+
+        #[test]
+        fn u_labels_convert_to_a_labels() -> TestResult {
+            assert_eq!(
+                DnsName::parse_display("münchen.de")?,
+                DnsName::parse("xn--mnchen-3ya.de")?
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn homographs_map_to_their_punycode_form() -> TestResult {
+            // Cyrillic а-р-р-ӏ-е: visually "apple", a different
+            // name entirely — confusable detection is the display
+            // layer's job, not the parser's.
+            assert_eq!(
+                DnsName::parse_display("аррӏе.com")?,
+                DnsName::parse("xn--80ak6aa92e.com")?
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn ascii_input_passes_through_normalized() -> TestResult {
+            assert_eq!(
+                DnsName::parse_display("ExAmPlE.CoM.")?,
+                DnsName::parse("example.com")?
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn unconvertible_display_input_errors() {
+            // Invalid Punycode is rejected by UTS-46 itself…
+            assert_eq!(
+                DnsName::parse_display("xn--0.com"),
+                Err(ParseDnsNameError::NotIdnaConvertible)
+            );
+
+            // …while characters UTS-46 merely passes through still
+            // die in the strict A-label parser: two layers, no gap.
+            assert_eq!(
+                DnsName::parse_display("ex ample.com"),
+                Err(ParseDnsNameError::NotALabel)
+            );
+        }
     }
 
     mod props {

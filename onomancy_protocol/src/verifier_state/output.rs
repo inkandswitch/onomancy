@@ -35,6 +35,11 @@ pub struct HostState {
     /// violations, per document. Surfaced, never auto-resolved.
     pub forks: Vec<Fork>,
 
+    /// Acceptance documents outranked under the receipts rule: the
+    /// receipts contest's losers, surfaced (stage 5: "the loser is
+    /// surfaced"). Badge, never a prompt.
+    pub losing_acceptances: Vec<DocAnchor>,
+
     /// Candidates quarantined by the pending doctrine: stale, unproven
     /// challengers to the incumbent. Badge, never a prompt.
     pub pending: Vec<DocAnchor>,
@@ -53,12 +58,43 @@ pub struct HostState {
 /// An accepted (document, generation) binding with its grade.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AcceptedBinding {
+    /// How continuity from the acceptance-backed document was
+    /// established.
+    pub continuity: ContinuityGrade,
     /// The bound root document.
     pub document: DocAnchor,
     /// The attested generation key of the winning record.
     pub generation: GenerationKey,
     /// Confirmed (fresh support) or provisional.
     pub grade: BindingGrade,
+}
+
+/// How the accepted document connects to the acceptance-backed one —
+/// per-hop proof grading (dns-anchor, Bridging History Gaps). A
+/// bridged continuity verdict MUST be distinguishable from a
+/// directly-proven one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ContinuityGrade {
+    /// No succession proof was consulted: the accepted document is
+    /// the acceptance-backed document itself, or no acceptance exists
+    /// to depart from.
+    #[default]
+    Unmoved,
+
+    /// Directly proven: one fully-checked hop departs the
+    /// acceptance-backed document — fresh support there, and the
+    /// statement's carriage threads its last-known generation.
+    Proven,
+
+    /// Continuity holds only through provisional hops: a multi-hop
+    /// bridge, or a departing hop without fresh support or generation
+    /// threading. Caps the binding grade at provisional and carries
+    /// the opportunistic re-check obligation.
+    Bridged,
+
+    /// The accepted document displaced the incumbent with no proof
+    /// path at all — a surfaced, unproven binding change (B4).
+    Unproven,
 }
 
 /// How well-supported the accepted binding is.

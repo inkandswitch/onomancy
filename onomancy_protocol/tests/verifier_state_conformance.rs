@@ -14,13 +14,13 @@ use onomancy_core::{
 use testresult::TestResult;
 
 use onomancy_protocol::{
-    test_utils::{binding, binding_carrying, doc, generation, host, rotation, succession, Binding},
+    test_utils::{Binding, binding, binding_carrying, doc, generation, host, rotation, succession},
     verifier_state::{
+        VerifierState,
         judgment::{Acceptance, Claim, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
-        output::{BindingGrade, HostState},
+        output::{BindingGrade, ContinuityGrade, HostState},
         store::{Item, Store},
-        VerifierState,
     },
 };
 
@@ -145,7 +145,86 @@ fn succession_proof_makes_a_stale_challenger_eligible() -> TestResult {
 
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(2), "proof chains from incumbent");
+    assert_eq!(
+        accepted.continuity,
+        ContinuityGrade::Bridged,
+        "the departing document has no fresh support: provisional hop"
+    );
     assert!(state.pending.is_empty());
+    Ok(())
+}
+
+#[test]
+fn directly_proven_migration_is_confirmed() -> TestResult {
+    // Fresh departure, one hop, threading intact: the fully-checked
+    // case. Continuity is directly proven and the fresh terminus
+    // confirms.
+    let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW + 1000), 50)?;
+    let successor = binding(2, 22, 2, 200, (NOW - 1000, NOW + 2000), 60)?;
+
+    let state = run(
+        &[&incumbent, &successor],
+        &accept(doc(1), &incumbent),
+        vec![Item::Successor(succession(1, 2, 9)?)],
+    );
+
+    let accepted = state.accepted.expect("accepted");
+    assert_eq!(accepted.document, doc(2));
+    assert_eq!(accepted.continuity, ContinuityGrade::Proven);
+    assert_eq!(accepted.grade, BindingGrade::Confirmed);
+    Ok(())
+}
+
+#[test]
+fn bridged_departure_caps_the_grade_at_provisional() -> TestResult {
+    // The departing document has only STALE support, so the hop
+    // cannot be fully checked — and a bridged verdict caps the grade
+    // even though the terminus itself has fresh, DNSSEC-vouched
+    // evidence. A bridged verdict under eclipse is exactly what a
+    // history-forging attacker wants a verifier to sit on.
+    let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
+    let successor = binding(2, 22, 2, 200, (NOW - 1000, NOW + 2000), 60)?;
+
+    let state = run(
+        &[&incumbent, &successor],
+        &accept(doc(1), &incumbent),
+        vec![Item::Successor(succession(1, 2, 9)?)],
+    );
+
+    let accepted = state.accepted.expect("accepted");
+    assert_eq!(accepted.document, doc(2));
+    assert_eq!(accepted.continuity, ContinuityGrade::Bridged);
+    assert_eq!(
+        accepted.grade,
+        BindingGrade::Provisional,
+        "fresh terminus evidence does not launder a provisional hop"
+    );
+    Ok(())
+}
+
+#[test]
+fn multi_hop_bridges_are_always_provisional() -> TestResult {
+    // R → S → T with everything fresh: only the hop departing the
+    // accepted binding can ever be fully checked — the S → T hop has
+    // no generation-key memory to check attestation against, so the
+    // verdict is bridged and the binding provisional.
+    let origin = binding(1, 11, 1, 100, (NOW - 5000, NOW + 1000), 50)?;
+    let terminus = binding(3, 33, 2, 300, (NOW - 1000, NOW + 2000), 60)?;
+
+    let state = run(
+        &[&origin, &terminus],
+        &accept(doc(1), &origin),
+        vec![
+            Item::Successor(succession(1, 2, 9)?),
+            Item::Successor(succession(2, 3, 9)?),
+        ],
+    );
+
+    let accepted = state.accepted.expect("accepted");
+    assert_eq!(accepted.document, doc(3), "incumbency extends along proofs");
+    assert_eq!(accepted.continuity, ContinuityGrade::Bridged);
+    assert_eq!(accepted.grade, BindingGrade::Provisional);
+    assert!(state.pending.is_empty(), "proven history is never pending");
     Ok(())
 }
 
@@ -236,6 +315,39 @@ fn b8_reset_excludes_the_challenger() -> TestResult {
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(1), "excluded evidence is inert");
     assert!(state.pending.is_empty(), "excluded ≠ pending");
+    Ok(())
+}
+
+#[test]
+fn outranked_acceptances_surface_as_losers() -> TestResult {
+    // Two acceptances for different documents: the receipts rule
+    // picks the one whose cited records carry the greater zone-state
+    // key — and the loser is surfaced, never silently dropped.
+    let older = binding(1, 11, 1, 100, (NOW - 9000, NOW - 5000), 10)?;
+    let newer = binding(2, 22, 2, 200, (NOW - 4000, NOW - 1000), 20)?;
+
+    let mut judgment = accept(doc(1), &older);
+    let mut cited = Set::default();
+    cited.insert(newer.cert.digest().into());
+    judgment
+        .acceptances
+        .get_mut(&host())
+        .expect("acceptance entry for the test hostname")
+        .push(Acceptance {
+            document: doc(2),
+            cited,
+        });
+
+    let state = run(&[&older, &newer], &judgment, vec![]);
+
+    let accepted = state.accepted.expect("accepted");
+    assert_eq!(accepted.document, doc(2), "greater receipts win");
+    assert_eq!(
+        state.losing_acceptances,
+        vec![doc(1)],
+        "the outranked acceptance is surfaced"
+    );
+    assert!(!state.contested, "an outranked loser is not a tie");
     Ok(())
 }
 

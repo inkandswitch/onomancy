@@ -81,6 +81,14 @@ pub enum EventKind {
         to: BindingGrade,
     },
 
+    /// A losing acceptance's badge cleared (its receipts now win, or
+    /// the acceptance left the judgment).
+    LosingAcceptanceCleared(DocAnchor),
+
+    /// An acceptance document was outranked under the receipts rule
+    /// (stage 5: "the loser is surfaced").
+    LosingAcceptanceSurfaced(DocAnchor),
+
     /// A pending candidate's badge cleared (confirmed or refuted —
     /// B2/B3).
     PendingCleared(DocAnchor),
@@ -105,6 +113,8 @@ impl EventKind {
             | Self::DivergenceCleared(_)
             | Self::DivergenceSurfaced(_)
             | Self::GradeChanged { .. }
+            | Self::LosingAcceptanceCleared(_)
+            | Self::LosingAcceptanceSurfaced(_)
             | Self::PendingCleared(_)
             | Self::PendingSurfaced(_) => false,
         }
@@ -174,6 +184,14 @@ pub(super) fn host_diff(before: &HostState, after: &HostState) -> Vec<EventKind>
         }
     }
 
+    // Losing-acceptance badge changes, per document.
+    for document in new_items(&before.losing_acceptances, &after.losing_acceptances) {
+        kinds.push(EventKind::LosingAcceptanceSurfaced(document));
+    }
+    for document in new_items(&after.losing_acceptances, &before.losing_acceptances) {
+        kinds.push(EventKind::LosingAcceptanceCleared(document));
+    }
+
     // Divergence badge changes.
     for divergence in new_items(&before.divergence, &after.divergence) {
         kinds.push(EventKind::DivergenceSurfaced(divergence));
@@ -198,7 +216,11 @@ fn new_items<T: Clone + PartialEq>(before: &[T], after: &[T]) -> Vec<T> {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::verifier_state::{VerifierState, output::AcceptedBinding};
+    use crate::verifier_state::{
+        VerifierState,
+        output::{AcceptedBinding, ContinuityGrade},
+    };
+    use alloc::vec;
     use onomancy_core::collections::Map;
 
     fn host() -> DnsName {
@@ -224,6 +246,7 @@ mod tests {
     fn accepted(doc_seed: u8, serial: u64, grade: BindingGrade) -> HostState {
         HostState {
             accepted: Some(AcceptedBinding {
+                continuity: ContinuityGrade::default(),
                 document: doc(doc_seed),
                 generation: generation(doc_seed + 10),
                 grade,
@@ -259,13 +282,25 @@ mod tests {
         let before = derivation(HostState::default());
         let after = derivation(HostState {
             contested: true,
+            losing_acceptances: vec![doc(4)],
             pending: vec![doc(3)],
             ..HostState::default()
         });
 
         let events = after.diff(&before);
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(events.iter().all(|event| !event.kind.may_prompt()));
+        assert!(events.iter().any(|event| matches!(
+            event.kind,
+            EventKind::LosingAcceptanceSurfaced(document) if document == doc(4)
+        )));
+
+        // The badge clears symmetrically.
+        let cleared = before.diff(&after);
+        assert!(cleared.iter().any(|event| matches!(
+            event.kind,
+            EventKind::LosingAcceptanceCleared(document) if document == doc(4)
+        )));
     }
 
     #[test]

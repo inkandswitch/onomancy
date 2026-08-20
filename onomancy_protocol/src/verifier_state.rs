@@ -49,6 +49,7 @@ use onomancy_core::{
     cert::Certificate,
     collections::{Map, Set},
     content_hash::ContentHash,
+    delegation::DelegationBytes,
     freshness::{ChainWindow, Freshness, Grade},
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
@@ -61,8 +62,8 @@ use self::{
     diff::Event,
     judgment::Judgment,
     output::{
-        AcceptedBinding, BindingGrade, Divergence, DivergenceSource, Fork, HostState,
-        SuccessionFork,
+        AcceptedBinding, BindingGrade, ContinuityGrade, Divergence, DivergenceSource, Fork,
+        HostState, SuccessionFork,
     },
     seam::{AuthorityVerifier, ChainProof, ChainValidator},
     store::{Item, Store},
@@ -115,7 +116,7 @@ impl VerifierState {
         let mut hosts: Map<DnsName, HostState> = Map::default();
 
         for hostname in hostnames {
-            let state = derive_host(&hostname, &evidence, now, judgment, pins);
+            let state = derive_host(&hostname, &evidence, now, judgment, pins, authority);
             hosts.insert(hostname, state);
         }
 
@@ -151,12 +152,13 @@ impl VerifierState {
 }
 
 /// Derive one hostname's state (stages 2–8 are per-hostname).
-fn derive_host(
+fn derive_host<A: AuthorityVerifier>(
     hostname: &DnsName,
     evidence: &Evidence,
     now: UnixSeconds,
     judgment: &Judgment,
     pins: &Map<DnsName, Vec<DocAnchor>>,
+    authority: &A,
 ) -> HostState {
     // Stage 2: exclude and defer.
     let empty = Set::default();
@@ -212,20 +214,28 @@ fn derive_host(
 
     // Stage 5: resolve the document.
     let graph = ProofGraph::for_hostname(evidence, hostname, excluded);
-    let resolution = resolve_document(
-        &surviving, &graph, &lineage, hostname, now, judgment, evidence,
-    );
+    let ctx = LadderContext {
+        authority,
+        graph: &graph,
+        lineage: &lineage,
+        now,
+    };
+    let resolution = resolve_document(&surviving, &ctx, hostname, judgment, evidence);
 
-    // Stage 6: grade the binding.
+    // Stage 6: grade the binding. Fresh support confirms — unless
+    // continuity to the accepted document holds only through
+    // provisional bridge hops, which caps the grade at provisional
+    // (the opportunistic re-check obligation).
     let accepted = resolution.accepted.map(|(document, generation)| {
         let fresh_support = surviving
             .iter()
             .any(|r| r.document == document && freshness(r, now) == Freshness::Fresh);
 
         AcceptedBinding {
+            continuity: resolution.continuity,
             document,
             generation,
-            grade: if fresh_support {
+            grade: if fresh_support && resolution.continuity != ContinuityGrade::Bridged {
                 BindingGrade::Confirmed
             } else {
                 BindingGrade::Provisional
@@ -246,15 +256,8 @@ fn derive_host(
         // and its downward serial surfaces as a ratchet reset in the
         // diff (D4a).
         let mut already_surfaced = false;
-        let serial = best_of_document(
-            &surviving,
-            binding.document,
-            &graph,
-            &lineage,
-            now,
-            &mut already_surfaced,
-        )
-        .map(|r| r.key.serial);
+        let serial = best_of_document(&surviving, binding.document, &ctx, &mut already_surfaced)
+            .map(|r| r.key.serial);
         let span = tenure_span(&of_doc);
 
         (serial, span)
@@ -271,6 +274,7 @@ fn derive_host(
         divergence,
         effective_serial: if masked { None } else { effective_serial },
         forks,
+        losing_acceptances: resolution.losing_acceptances,
         pending: resolution.pending,
         succession_forks: graph.forks,
         tenure,
@@ -350,6 +354,9 @@ struct RotationEvidence {
 /// A valid successor statement (hostname-scoped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SuccessorEvidence {
+    /// The statement's authority carriage, kept for stage 5's
+    /// departing-hop threading check (bridging-hop grading).
+    carriage: Vec<DelegationBytes>,
     hash: ContentHash,
     hostname: DnsName,
     predecessor: DocAnchor,
@@ -530,6 +537,7 @@ fn extract_successor<A: AuthorityVerifier>(
     provenance.record(carrier);
 
     evidence.successors.push(SuccessorEvidence {
+        carriage: statement.authority().to_vec(),
         hash,
         hostname: statement.hostname().clone(),
         predecessor: *statement.predecessor_doc(),
@@ -810,24 +818,38 @@ fn generation_rule(
 struct DocumentResolution {
     accepted: Option<(DocAnchor, GenerationKey)>,
     contested: bool,
+    continuity: ContinuityGrade,
+    losing_acceptances: Vec<DocAnchor>,
     pending: Vec<DocAnchor>,
 }
 
 /// The hostname's succession-proof graph, with D16 forks isolated:
 /// traversal never crosses a fork point.
 #[derive(Debug, Default)]
-struct ProofGraph {
+struct ProofGraph<'e> {
     edges: Vec<(DocAnchor, DocAnchor)>,
     forks: Vec<SuccessionFork>,
+    /// The filtered statements behind the edges, kept for stage 5's
+    /// departing-hop threading check (bridging-hop grading).
+    statements: Vec<&'e SuccessorEvidence>,
 }
 
-impl ProofGraph {
-    fn for_hostname(evidence: &Evidence, hostname: &DnsName, excluded: &Set<ContentHash>) -> Self {
-        let mut edges: Vec<(DocAnchor, DocAnchor)> = evidence
+impl<'e> ProofGraph<'e> {
+    fn for_hostname(
+        evidence: &'e Evidence,
+        hostname: &DnsName,
+        excluded: &Set<ContentHash>,
+    ) -> Self {
+        let mut statements: Vec<&'e SuccessorEvidence> = evidence
             .successors
             .iter()
             .filter(|s| s.hostname == *hostname)
             .filter(|s| !s.provenance.excluded(s.hash, excluded))
+            .collect();
+        statements.sort_unstable_by_key(|s| s.hash);
+
+        let mut edges: Vec<(DocAnchor, DocAnchor)> = statements
+            .iter()
             .map(|s| (s.predecessor, s.successor))
             .collect();
         edges.sort_unstable();
@@ -854,7 +876,11 @@ impl ProofGraph {
             }
         }
 
-        Self { edges, forks }
+        Self {
+            edges,
+            forks,
+            statements,
+        }
     }
 
     /// Whether `document` is a fork point (D16 stops traversal here).
@@ -895,12 +921,18 @@ impl ProofGraph {
     }
 }
 
-fn resolve_document(
-    surviving: &[&BindingEvidence],
-    graph: &ProofGraph,
-    lineage: &LineageView,
-    hostname: &DnsName,
+/// The ladder's pooled-evidence inputs, threaded through stage 5.
+struct LadderContext<'a, A> {
+    authority: &'a A,
+    graph: &'a ProofGraph<'a>,
+    lineage: &'a LineageView,
     now: UnixSeconds,
+}
+
+fn resolve_document<A: AuthorityVerifier>(
+    surviving: &[&BindingEvidence],
+    ctx: &LadderContext<'_, A>,
+    hostname: &DnsName,
     judgment: &Judgment,
     evidence: &Evidence,
 ) -> DocumentResolution {
@@ -916,14 +948,7 @@ fn resolve_document(
         documents
             .into_iter()
             .filter_map(|document| {
-                best_of_document(
-                    surviving,
-                    document,
-                    graph,
-                    lineage,
-                    now,
-                    &mut internally_contested,
-                )
+                best_of_document(surviving, document, ctx, &mut internally_contested)
             })
             .collect()
     };
@@ -941,7 +966,7 @@ fn resolve_document(
         .filter(|candidate| {
             !best.iter().any(|other| {
                 other.document != candidate.document
-                    && ladder_verdict(other, candidate, graph, lineage, now) == Verdict::Left
+                    && ladder_verdict(other, candidate, ctx) == Verdict::Left
             })
         })
         .copied()
@@ -953,14 +978,16 @@ fn resolve_document(
     // deterministically (best is document-sorted).
     let maximal = undominated.first().copied().unwrap_or(first_candidate);
 
-    // The winning acceptance, by the receipts rule.
-    let acceptance = winning_acceptance(hostname, judgment, evidence, &mut contested);
+    // The winning acceptance, by the receipts rule; its losers are
+    // surfaced through the output state.
+    let acceptance_resolution = winning_acceptance(hostname, judgment, evidence, &mut contested);
+    let acceptance = acceptance_resolution.winner;
 
     // Incumbency: acceptance-backed, extended along proofs up to the
     // first fork (D16); else the ladder-maximal candidate (graded
     // provisional at stage 6 when its support is stale — B10).
     let incumbent = acceptance.map_or(maximal.document, |document| {
-        *graph.chain_from(document).last().unwrap_or(&document)
+        *ctx.graph.chain_from(document).last().unwrap_or(&document)
     });
 
     // Eligibility: the pending doctrine (B1). Every stale, unproven
@@ -968,13 +995,33 @@ fn resolve_document(
     let accepted_document = if maximal.document == incumbent || contested {
         incumbent
     } else {
-        let eligible = freshness(maximal, now) == Freshness::Fresh
-            || graph.proves(incumbent, maximal.document);
+        let eligible = freshness(maximal, ctx.now) == Freshness::Fresh
+            || ctx.graph.proves(incumbent, maximal.document);
 
         if eligible {
             maximal.document
         } else {
             incumbent
+        }
+    };
+
+    // Bridging-hop grading (dns-anchor, Bridging History Gaps): only
+    // the hop DEPARTING the acceptance-backed document can ever be
+    // fully checked — every subsequent hop is provisional, with no
+    // generation-key memory to check attestation against.
+    let continuity = match acceptance {
+        None => ContinuityGrade::Unmoved,
+        Some(base) if base == accepted_document => ContinuityGrade::Unmoved,
+        Some(base) => {
+            let chain = ctx.graph.chain_from(base);
+
+            match chain.iter().position(|d| *d == accepted_document) {
+                None => ContinuityGrade::Unproven,
+                Some(1) if fully_checked_departure(base, accepted_document, surviving, ctx) => {
+                    ContinuityGrade::Proven
+                }
+                Some(_) => ContinuityGrade::Bridged,
+            }
         }
     };
 
@@ -987,14 +1034,14 @@ fn resolve_document(
         .filter(|candidate| {
             candidate.document != accepted_document && candidate.document != incumbent
         })
-        .filter(|candidate| freshness(candidate, now) == Freshness::Stale)
+        .filter(|candidate| freshness(candidate, ctx.now) == Freshness::Stale)
         // A valid proof in EITHER direction removes the badge: a
         // proven successor is routine continuation, and a proven
         // predecessor is superseded history — neither is an unproven
         // challenger.
         .filter(|candidate| {
-            !graph.proves(accepted_document, candidate.document)
-                && !graph.proves(candidate.document, accepted_document)
+            !ctx.graph.proves(accepted_document, candidate.document)
+                && !ctx.graph.proves(candidate.document, accepted_document)
         })
         .map(|candidate| candidate.document)
         .collect();
@@ -1012,8 +1059,41 @@ fn resolve_document(
     DocumentResolution {
         accepted: generation.map(|g| (accepted_document, g)),
         contested,
+        continuity,
+        losing_acceptances: acceptance_resolution.losers,
         pending,
     }
+}
+
+/// Whether the hop departing `base` toward `next` is fully checked:
+/// the departing document has fresh support in the pooled store, and
+/// some valid statement for the hop threads its last-known
+/// (ladder-best) generation. Anything less grades the hop
+/// provisional.
+fn fully_checked_departure<A: AuthorityVerifier>(
+    base: DocAnchor,
+    next: DocAnchor,
+    surviving: &[&BindingEvidence],
+    ctx: &LadderContext<'_, A>,
+) -> bool {
+    let fresh_support = surviving
+        .iter()
+        .any(|r| r.document == base && freshness(r, ctx.now) == Freshness::Fresh);
+
+    if !fresh_support {
+        return false;
+    }
+
+    let mut ignored = false;
+    let Some(last_known) = best_of_document(surviving, base, ctx, &mut ignored) else {
+        return false;
+    };
+
+    ctx.graph
+        .statements
+        .iter()
+        .filter(|s| s.predecessor == base && s.successor == next)
+        .any(|s| ctx.authority.threads(&s.carriage, &last_known.generation))
 }
 
 /// The document's ladder-best record: the undominated set under the
@@ -1023,12 +1103,10 @@ fn resolve_document(
 /// cycle) marks the resolution contested and falls back to the
 /// highest-key record deterministically — surfaced, never silently
 /// picked.
-fn best_of_document<'e>(
+fn best_of_document<'e, A: AuthorityVerifier>(
     surviving: &[&'e BindingEvidence],
     document: DocAnchor,
-    graph: &ProofGraph,
-    lineage: &LineageView,
-    now: UnixSeconds,
+    ctx: &LadderContext<'_, A>,
     contested: &mut bool,
 ) -> Option<&'e BindingEvidence> {
     let mut of_doc: Vec<&BindingEvidence> = surviving
@@ -1047,7 +1125,7 @@ fn best_of_document<'e>(
         .filter(|candidate| {
             !of_doc.iter().any(|other| {
                 other.hash != candidate.hash
-                    && ladder_verdict(other, candidate, graph, lineage, now) == Verdict::Left
+                    && ladder_verdict(other, candidate, ctx) == Verdict::Left
             })
         })
         .copied()
@@ -1067,22 +1145,22 @@ fn best_of_document<'e>(
 /// One pair's ladder verdict, with rung 1 computed from the pooled
 /// evidence: succession proofs across documents, signed lineage
 /// descent within one.
-fn ladder_verdict(
+fn ladder_verdict<A: AuthorityVerifier>(
     left: &BindingEvidence,
     right: &BindingEvidence,
-    graph: &ProofGraph,
-    lineage: &LineageView,
-    now: UnixSeconds,
+    ctx: &LadderContext<'_, A>,
 ) -> Verdict {
     let ordered = if left.document == right.document {
         (
-            lineage.descends(left.document, left.generation, right.generation),
-            lineage.descends(left.document, right.generation, left.generation),
+            ctx.lineage
+                .descends(left.document, left.generation, right.generation),
+            ctx.lineage
+                .descends(left.document, right.generation, left.generation),
         )
     } else {
         (
-            graph.proves(left.document, right.document),
-            graph.proves(right.document, left.document),
+            ctx.graph.proves(left.document, right.document),
+            ctx.graph.proves(right.document, left.document),
         )
     };
 
@@ -1094,8 +1172,8 @@ fn ladder_verdict(
     };
 
     ladder::compare(
-        &as_contender(left, now),
-        &as_contender(right, now),
+        &as_contender(left, ctx.now),
+        &as_contender(right, ctx.now),
         continuity,
     )
 }
@@ -1111,15 +1189,26 @@ fn as_contender(record: &BindingEvidence, now: UnixSeconds) -> Contender {
 /// Resolve possibly-concurrent acceptances by the receipts rule:
 /// greatest zone-state key among cited records held in evidence.
 /// Receipt ties for different documents are contested (B13).
+/// The receipts rule's outcome: the winner, and the losers it
+/// outranked — surfaced, never silently dropped (stage 5: "the loser
+/// is surfaced").
+#[derive(Debug, Default)]
+struct AcceptanceResolution {
+    winner: Option<DocAnchor>,
+    losers: Vec<DocAnchor>,
+}
+
 fn winning_acceptance(
     hostname: &DnsName,
     judgment: &Judgment,
     evidence: &Evidence,
     contested: &mut bool,
-) -> Option<DocAnchor> {
+) -> AcceptanceResolution {
     let empty = Set::default();
     let excluded = judgment.resets.get(hostname).unwrap_or(&empty);
-    let acceptances = judgment.acceptances.get(hostname)?;
+    let Some(acceptances) = judgment.acceptances.get(hostname) else {
+        return AcceptanceResolution::default();
+    };
 
     let mut ranked: Vec<(ZoneStateKey, DocAnchor)> = acceptances
         .iter()
@@ -1165,17 +1254,41 @@ fn winning_acceptance(
 
     ranked.sort_unstable();
 
-    let (best_key, winner) = *ranked.last()?;
+    let Some(&(best_key, winner)) = ranked.last() else {
+        return AcceptanceResolution::default();
+    };
+
+    // Strictly-outranked acceptance documents lose — and are
+    // surfaced. Documents tied at the best key are the contest
+    // itself, not losers.
+    let mut losers: Vec<DocAnchor> = ranked
+        .iter()
+        .filter(|(key, _)| *key < best_key)
+        .map(|(_, document)| *document)
+        .filter(|document| {
+            !ranked
+                .iter()
+                .any(|(key, doc)| *key == best_key && doc == document)
+        })
+        .collect();
+    losers.sort_unstable();
+    losers.dedup();
 
     if ranked
         .iter()
         .any(|(key, document)| *key == best_key && *document != winner)
     {
         *contested = true;
-        return None;
+        return AcceptanceResolution {
+            winner: None,
+            losers,
+        };
     }
 
-    Some(winner)
+    AcceptanceResolution {
+        winner: Some(winner),
+        losers,
+    }
 }
 
 // ————————————————————— stages 7 and 8 —————————————————————
