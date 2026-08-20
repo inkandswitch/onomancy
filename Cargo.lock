@@ -674,6 +674,7 @@ dependencies = [
  "bolero",
  "ed25519-dalek",
  "onomancy_core",
+ "onomancy_dnssec",
  "onomancy_proto",
  "p256",
  "rsa",

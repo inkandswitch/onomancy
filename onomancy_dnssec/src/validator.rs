@@ -37,7 +37,7 @@ use onomancy_core::{
     time::UnixSeconds,
     txt::record::{Classified, TxtRecord},
 };
-use onomancy_proto::derive::seam::{ChainProof, ChainValidator, InvalidChain};
+use onomancy_proto::verifier_state::seam::{ChainProof, ChainValidator, InvalidChain};
 
 use crate::{
     anchor::TrustAnchor,

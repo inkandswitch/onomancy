@@ -22,7 +22,7 @@ use onomancy_core::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
-use crate::derive::seam::ChainProof;
+use crate::verifier_state::seam::ChainProof;
 
 /// The fixed test hostname.
 ///

@@ -54,6 +54,23 @@ impl DnssecChain {
         &self.0
     }
 
+    /// Decode a standalone framed chain (the inverse of
+    /// [`write_framed`](Self::write_framed)), consuming the whole
+    /// input — the byte form fixtures and bare chain-refresh items
+    /// travel in.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError`] on truncation, length overrun, trailing
+    /// bytes, or the unit size cap.
+    pub fn read_framed(bytes: &[u8]) -> Result<Self, WireError> {
+        let mut reader = Reader::new(bytes)?;
+        let chain = Self::read(&mut reader)?;
+        reader.finish()?;
+
+        Ok(chain)
+    }
+
     /// Decode one count-prefixed chain. No count-sized pre-allocation:
     /// see `delegation::read_entries` for the rationale.
     pub(crate) fn read(reader: &mut Reader<'_>) -> Result<Self, WireError> {

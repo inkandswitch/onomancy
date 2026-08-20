@@ -26,12 +26,18 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
+onomancy_dnssec = { version = "0.1.0", path = ".", features = ["test_utils"] }
 onomancy_proto = { workspace = true, features = ["test_utils"] }
 testresult = { workspace = true }
 
 [features]
 default = []
 std = ["onomancy_core/std", "onomancy_proto/std", "thiserror/std"]
+test_utils = []                                                    # synthetic-zone factories
+
+[[example]]
+name = "generate_fixtures"
+required-features = ["test_utils", "std"]
 
 [lints]
 workspace = true

@@ -9,24 +9,27 @@
 //!
 //! # Crate Organization
 //!
-//! - [`derive`] — the binding-cache derivation: all verifier state as
+//! - [`verifier_state`] — the binding-cache derivation: all verifier state as
 //!   a pure function of `(store, now, judgment)`
 //! - [`ladder`] — the comparison ladder: freshness, then succession/
 //!   lineage, then the zone-state key (the offline-comparison rules)
 //! - [`resolve`] — the namestore walk: greedy longest-key matching
 //!   over local replicas (the path-resolution specification)
+//! - [`verify`] — one-shot certificate verification: graded verdicts
+//!   for a single unit at a single clock reading
 //!
-//! Planned: the full certificate verification pipeline and the
-//! `ChainProvider` fetch seam.
+//! Planned: the `ChainProvider` fetch seam (providers are IO and live
+//! in backend crates; the seam lands here when the first one does).
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
-pub mod derive;
 pub mod ladder;
 pub mod resolve;
+pub mod verifier_state;
+pub mod verify;
 
 #[cfg(feature = "test_utils")]
 pub mod test_utils;

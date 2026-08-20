@@ -10,7 +10,7 @@
 //!
 //! ```text
 //!            store ─┐
-//!              now ─┼─► derive ─► Derivation (state)
+//!              now ─┼─► derive ─► VerifierState (state)
 //!         judgment ─┤               │
 //!             pins ─┘               ▼ diff vs previous
 //!                                 events (surfacing — the caller's job)
@@ -35,9 +35,11 @@
 //! - [`output`] — the derived-state vocabulary
 //! - [`memory`] — table-driven fakes for conformance tests
 
+pub mod diff;
 pub mod judgment;
 pub mod memory;
 pub mod output;
+pub mod prune;
 pub mod seam;
 pub mod store;
 
@@ -56,9 +58,10 @@ use onomancy_core::{
 };
 
 use self::{
+    diff::Event,
     judgment::Judgment,
     output::{
-        AcceptedBinding, BindingGrade, Derivation, Divergence, DivergenceSource, Fork, HostState,
+        AcceptedBinding, BindingGrade, Divergence, DivergenceSource, Fork, HostState,
         SuccessionFork,
     },
     seam::{AuthorityVerifier, ChainProof, ChainValidator},
@@ -70,42 +73,82 @@ use crate::ladder::{self, Contender, Continuity, Verdict};
 /// millisecond convention.
 const SKEW_MS: u64 = 5 * 60 * 1000;
 
-/// Derive all verifier state from the evidence held.
-///
-/// Pure and total: the same `(store, now, judgment, pins)` yield the
-/// same outputs on any device, in any implementation — including under
-/// any permutation of the store. `pins` are the user's pinned targets,
-/// read by stage 8's divergence badges only.
-#[must_use]
-#[allow(clippy::implicit_hasher)] // house Map alias, not a hashing seam
-pub fn derive<V: ChainValidator, A: AuthorityVerifier>(
-    store: &Store,
-    now: UnixSeconds,
-    judgment: &Judgment,
-    pins: &Map<DnsName, Vec<DocAnchor>>,
-    validator: &V,
-    authority: &A,
-) -> Derivation {
-    // Stage 1: validate and extract.
-    let evidence = validate_and_extract(store, validator, authority);
+/// Everything the verifier believes, per hostname: the deterministic
+/// derivation of the binding-cache store, the clock reading, and the
+/// judgment document.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VerifierState {
+    /// Per-hostname conclusions.
+    pub hosts: Map<DnsName, HostState>,
+}
 
-    // Hostname universe: everything any input mentions.
-    let mut hostnames: Set<DnsName> = Set::default();
-    hostnames.extend(evidence.records.iter().map(|r| r.hostname.clone()));
-    hostnames.extend(evidence.absences.iter().map(|a| a.hostname.clone()));
-    hostnames.extend(evidence.successors.iter().map(|s| s.hostname.clone()));
-    hostnames.extend(judgment.claims.iter().map(|c| c.hostname.clone()));
-    hostnames.extend(judgment.acceptances.keys().cloned());
-    hostnames.extend(pins.keys().cloned());
+impl VerifierState {
+    /// Compute all verifier state from the evidence held — the spec's
+    /// `derive(store, now, judgment)`.
+    ///
+    /// Pure and total: the same `(store, now, judgment, pins)` yield
+    /// the same outputs on any device, in any implementation —
+    /// including under any permutation of the store. `pins` are the
+    /// user's pinned targets, read by stage 8's divergence badges
+    /// only.
+    #[must_use]
+    #[allow(clippy::implicit_hasher)] // house Map alias, not a hashing seam
+    pub fn compute<V: ChainValidator, A: AuthorityVerifier>(
+        store: &Store,
+        now: UnixSeconds,
+        judgment: &Judgment,
+        pins: &Map<DnsName, Vec<DocAnchor>>,
+        validator: &V,
+        authority: &A,
+    ) -> Self {
+        // Stage 1: validate and extract.
+        let evidence = validate_and_extract(store, validator, authority);
 
-    let mut hosts: Map<DnsName, HostState> = Map::default();
+        // Hostname universe: everything any input mentions.
+        let mut hostnames: Set<DnsName> = Set::default();
+        hostnames.extend(evidence.records.iter().map(|r| r.hostname.clone()));
+        hostnames.extend(evidence.absences.iter().map(|a| a.hostname.clone()));
+        hostnames.extend(evidence.successors.iter().map(|s| s.hostname.clone()));
+        hostnames.extend(judgment.claims.iter().map(|c| c.hostname.clone()));
+        hostnames.extend(judgment.acceptances.keys().cloned());
+        hostnames.extend(pins.keys().cloned());
 
-    for hostname in hostnames {
-        let state = derive_host(&hostname, &evidence, now, judgment, pins);
-        hosts.insert(hostname, state);
+        let mut hosts: Map<DnsName, HostState> = Map::default();
+
+        for hostname in hostnames {
+            let state = derive_host(&hostname, &evidence, now, judgment, pins);
+            hosts.insert(hostname, state);
+        }
+
+        Self { hosts }
     }
 
-    Derivation { hosts }
+    /// The surfaced changes from `previous` to `self`, in a
+    /// deterministic order (hostnames sorted, kinds in fixed
+    /// sequence).
+    #[must_use]
+    pub fn diff(&self, previous: &Self) -> Vec<Event> {
+        let mut hostnames: Vec<&DnsName> = self.hosts.keys().chain(previous.hosts.keys()).collect();
+        hostnames.sort_unstable();
+        hostnames.dedup();
+
+        let empty = HostState::default();
+        let mut events = Vec::new();
+
+        for hostname in hostnames {
+            let before = previous.hosts.get(hostname).unwrap_or(&empty);
+            let after = self.hosts.get(hostname).unwrap_or(&empty);
+
+            for kind in diff::host_diff(before, after) {
+                events.push(Event {
+                    hostname: hostname.clone(),
+                    kind,
+                });
+            }
+        }
+
+        events
+    }
 }
 
 /// Derive one hostname's state (stages 2–8 are per-hostname).
@@ -243,16 +286,16 @@ struct Evidence {
 
 /// One validated binding record's derivation-relevant facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BindingEvidence {
-    document: DocAnchor,
-    generation: GenerationKey,
-    hash: ContentHash,
-    hostname: DnsName,
-    key: ZoneStateKey,
-    leaf_inception: UnixSeconds,
+pub(crate) struct BindingEvidence {
+    pub(crate) document: DocAnchor,
+    pub(crate) generation: GenerationKey,
+    pub(crate) hash: ContentHash,
+    pub(crate) hostname: DnsName,
+    pub(crate) key: ZoneStateKey,
+    pub(crate) leaf_inception: UnixSeconds,
     /// Whether the delegation chain threads the attested `g=` (D10).
-    threads_generation: bool,
-    window: ChainWindow,
+    pub(crate) threads_generation: bool,
+    pub(crate) window: ChainWindow,
 }
 
 /// A validated proven-absence record.
@@ -416,7 +459,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
 
 /// Validate one certificate item into a binding record: chain proof,
 /// TXT cross-check, D10 threading input.
-fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
+pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     certificate: &Certificate,
     hash: ContentHash,
     validator: &V,
@@ -543,7 +586,7 @@ fn global_rotation_exclusions(judgment: &Judgment) -> Set<ContentHash> {
 /// serial's millisecond convention) and not-yet-begun windows are not
 /// considered until the clock reaches them. Deferral precedes
 /// everything, including freshness.
-fn is_deferred(record: &BindingEvidence, now: UnixSeconds) -> bool {
+pub(crate) fn is_deferred(record: &BindingEvidence, now: UnixSeconds) -> bool {
     let now_ms = now.value().saturating_mul(1000);
     let far_future = record.key.serial.value() > now_ms.saturating_add(SKEW_MS);
 
@@ -699,7 +742,7 @@ fn find_cycle(rotations: &[&&RotationEvidence]) -> Option<GenerationKey> {
 
 // ————————————————————————— stage 4 —————————————————————————
 
-fn freshness(record: &BindingEvidence, now: UnixSeconds) -> Freshness {
+pub(crate) fn freshness(record: &BindingEvidence, now: UnixSeconds) -> Freshness {
     match record.window.grade(now) {
         Grade::Fresh => Freshness::Fresh,
         // NotYetBegun was deferred at stage 2.

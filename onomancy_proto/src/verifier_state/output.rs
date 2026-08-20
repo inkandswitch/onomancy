@@ -1,24 +1,19 @@
-//! The derivation's output vocabulary.
+//! The derivation's per-hostname output vocabulary.
 //!
-//! State is what `derive` returns; **events are diffs** between
-//! derivations — surfacing is the caller's obligation, computed by
-//! comparing outputs, never a side channel of the derivation itself.
+//! The container — [`VerifierState`](super::VerifierState) — lives
+//! with its impls in the parent module; this module holds what it is
+//! made of. State is what the derivation returns; **events are
+//! diffs** between states — surfacing is the caller's obligation,
+//! computed by comparing outputs, never a side channel of the
+//! derivation itself.
 
 use alloc::vec::Vec;
 
 use onomancy_core::{
-    collections::Map,
     freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
+    name::doc::DocAnchor,
     txt::{generation_key::GenerationKey, serial::Serial},
 };
-
-/// Everything `derive` concludes, per hostname.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Derivation {
-    /// Per-hostname conclusions.
-    pub hosts: Map<DnsName, HostState>,
-}
 
 /// The derived state for one hostname.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

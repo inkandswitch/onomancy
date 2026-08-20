@@ -1,4 +1,4 @@
-//! Conformance scenarios for `derive(store, now, judgment)`, tagged
+//! Conformance scenarios for `VerifierState::compute(store, now, judgment)`, tagged
 //! with the binding-cache spec's condition table (B1, B12, B13, …) and
 //! the DNS-anchor decision rows (D4a, D10, D12/D12a), plus the
 //! permutation-determinism property (verification target 7).
@@ -12,17 +12,17 @@ use onomancy_core::{
     txt::serial::Serial,
 };
 use onomancy_proto::{
-    derive::{
-        derive,
+    test_utils::{
+        binding, binding_carrying, chain, doc, generation, host, rotation, succession, window,
+        Binding,
+    },
+    verifier_state::{
         judgment::{Acceptance, Claim, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         output::{BindingGrade, HostState},
         seam::ChainProof,
         store::{Item, Store},
-    },
-    test_utils::{
-        Binding, binding, binding_carrying, chain, doc, generation, host, rotation, succession,
-        window,
+        VerifierState,
     },
 };
 
@@ -40,7 +40,7 @@ fn run(bindings: &[&Binding], judgment: &Judgment, extra: Vec<Item>) -> HostStat
         store.insert(item);
     }
 
-    let derivation = derive(
+    let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
         judgment,
@@ -200,7 +200,7 @@ fn d10_fresh_record_not_threading_g_is_rejected() {
     let mut store = Store::default();
     store.insert(Item::Record(b.cert.clone()));
 
-    let derivation = derive(
+    let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
         &Judgment::default(),
@@ -271,7 +271,7 @@ fn b12_fresh_absence_with_later_leaf_inception_unbinds() {
         chain: absence_chain,
     });
 
-    let derivation = derive(
+    let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
         &Judgment::default(),
@@ -385,7 +385,7 @@ fn b9_unauthorized_statements_have_no_lineage_effect() {
     store.insert(Item::Record(old_gen.cert.clone()));
     store.insert(Item::Rotation(rotation(1, 11, 12)));
 
-    let derivation = derive(
+    let derivation = VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
         &Judgment::default(),
@@ -604,7 +604,7 @@ mod props {
                 };
 
                 let run = |store: &Store| {
-                    derive(
+                    VerifierState::compute(
                         store,
                         UnixSeconds::from(NOW),
                         &judgment,
