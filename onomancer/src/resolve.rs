@@ -30,6 +30,11 @@ pub(crate) struct Resolve {
     /// attached chain is what gets validated).
     #[arg(long)]
     cert: Option<PathBuf>,
+
+    /// Write the fetched chain (framed links) here — e.g. to capture
+    /// a fixture.
+    #[arg(long)]
+    chain_out: Option<PathBuf>,
 }
 
 impl Resolve {
@@ -52,6 +57,13 @@ impl Resolve {
         let chain = runtime.block_on(provider.assemble(&hostname))?;
 
         println!("chain: {} links fetched", chain.links().len());
+
+        if let Some(chain_out) = &self.chain_out {
+            let mut framed = Vec::new();
+            chain.write_framed(&mut framed);
+            std::fs::write(chain_out, framed)?;
+            println!("chain written: {}", chain_out.display());
+        }
 
         let proof = validator.validate_detailed(&hostname, &chain)?;
         let grade = match proof.window.grade(now) {

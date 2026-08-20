@@ -27,8 +27,9 @@ _Provisional._ The spec sources vectors from the Lean reference model
 (design/verification.md); until that toolchain lands, these are
 generated from the Rust implementation and gate against drift, not
 against an independent model. Mandated cases not yet covered here:
-maximal heads count, overlong-adjacent integer mutations, a
-multi-link DNSSEC chain crossing a zone cut (covered by
-`onomancy_dnssec/tests/fixtures/`), and the statement
-authority-carriage rejection set (validation-level, exercised in
-`onomancy_protocol` conformance tests).
+maximal heads count and overlong-adjacent integer mutations. Covered
+elsewhere: the multi-link DNSSEC chain crossing a zone cut lives in
+`onomancy_dnssec/tests/fixtures/` — including `real_brooklynzelenka.chain`,
+a production capture with real IANA-rooted signatures — and the
+statement authority-carriage rejection set is validation-level,
+exercised in `onomancy_protocol` conformance tests.
