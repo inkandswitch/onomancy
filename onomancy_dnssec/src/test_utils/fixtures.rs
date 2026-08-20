@@ -13,12 +13,12 @@ use onomancy_core::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
-use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
+use super::{binding_chain, link, txt_record, zone, ChainWindows, Zone};
 use crate::{
     anchor::TrustAnchor,
     wire::{
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{Record, RrType, CLASS_IN},
     },
 };
 
@@ -31,13 +31,12 @@ pub const FIXTURE_SERIAL: u64 = 1_755_000_000_000;
 /// What a fixture must produce under [`fixture_anchor`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expectation {
-    /// Validates to a binding proof carrying [`FIXTURE_SERIAL`].
+    /// Validates to a proof carrying [`FIXTURE_SERIAL`].
     Binding,
 
-    /// Validates to an absence proof.
-    Absence,
-
-    /// MUST fail validation (mutation vectors).
+    /// MUST fail validation (mutation vectors — including denial-only
+    /// and wildcard chains, since negative proofs are out at v0,
+    /// ADR-045).
     Invalid,
 }
 
@@ -88,17 +87,17 @@ pub fn fixture_txt_text() -> String {
 pub fn all_fixtures() -> Vec<(&'static str, DnssecChain, Expectation)> {
     vec![
         ("valid_binding", valid_binding(), Expectation::Binding),
-        ("valid_absence", valid_absence(), Expectation::Absence),
+        ("denial_only", denial_only(), Expectation::Invalid),
         ("tampered_leaf", tampered_leaf(), Expectation::Invalid),
         ("disjoint_windows", disjoint_windows(), Expectation::Invalid),
         ("ds_mismatch", ds_mismatch(), Expectation::Invalid),
         ("missing_leaf", missing_leaf(), Expectation::Invalid),
+        ("wildcard", wildcard(), Expectation::Invalid),
         (
-            "wildcard_unproven",
-            wildcard_unproven(),
+            "wildcard_with_denial",
+            wildcard_with_denial(),
             Expectation::Invalid,
         ),
-        ("wildcard_proven", wildcard_proven(), Expectation::Binding),
         ("misordered_links", misordered_links(), Expectation::Invalid),
     ]
 }
@@ -116,7 +115,8 @@ fn valid_binding() -> DnssecChain {
     )
 }
 
-/// An NSEC at the zone apex covering the `_onomancy` owner.
+/// An NSEC at the zone apex — a denial link, which the walk skips
+/// unverified at v0 (ADR-045).
 fn absence_nsec() -> Record {
     let mut rdata = Vec::new();
     // Never panics: the literal is valid.
@@ -134,7 +134,8 @@ fn absence_nsec() -> Record {
     }
 }
 
-fn valid_absence() -> DnssecChain {
+/// A chain whose leaf is only a denial: proves nothing at v0.
+fn denial_only() -> DnssecChain {
     let root = fixture_root();
     let child = fixture_child();
     let nsec = absence_nsec();
@@ -217,9 +218,10 @@ fn missing_leaf() -> DnssecChain {
     DnssecChain::from(links)
 }
 
-/// The leaf signed as `*.expede.wtf` (labels = 2) with no covering
-/// denial: D14 MUST reject.
-fn wildcard_unproven() -> DnssecChain {
+/// The leaf signed as `*.expede.wtf` (labels = 2): wildcard-expanded
+/// answers are rejected outright at v0 (their no-closer-match proof
+/// would be a negative proof, ADR-045).
+fn wildcard() -> DnssecChain {
     let root = fixture_root();
     let child = fixture_child();
     let txt = leaf();
@@ -242,8 +244,10 @@ fn wildcard_unproven() -> DnssecChain {
     ])
 }
 
-/// The same wildcard expansion WITH a covering denial: valid.
-fn wildcard_proven() -> DnssecChain {
+/// The same wildcard expansion WITH a (skipped, unverified) denial
+/// link present: still rejected — denials prove nothing at v0, and
+/// their mere presence must not soften the wildcard rule.
+fn wildcard_with_denial() -> DnssecChain {
     let root = fixture_root();
     let child = fixture_child();
     let txt = leaf();

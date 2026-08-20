@@ -13,7 +13,6 @@
 //!   endpoint, retained despite domination)
 //! - every statement (rotation and successor — potential fork
 //!   evidence and bridging receipts, ceremony-bounded anyway)
-//! - every absence record (denial comparators)
 //! - every record cited by an acceptance (pruning a receipt would
 //!   render the acceptance not-yet-evaluable)
 //!
@@ -112,10 +111,9 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
         .items()
         .iter()
         .filter(|item| match item {
-            // Statements and absence proofs are ceremony-bounded and
-            // always potentially relevant (forks, bridging, denial
-            // comparators).
-            Item::Rotation(_) | Item::Successor(_) | Item::Absence { .. } => true,
+            // Statements are ceremony-bounded and always potentially
+            // relevant (forks, bridging).
+            Item::Rotation(_) | Item::Successor(_) => true,
             Item::Record(_) | Item::ChainRefresh { .. } => keep.contains(&item.content_hash()),
         })
         .cloned()
@@ -135,7 +133,6 @@ fn dominates(other: &BindingEvidence, record: &BindingEvidence) -> bool {
         && other.window.expiration() >= record.window.expiration()
         && other.key.serial >= record.key.serial
         && other.key.issued_at >= record.key.issued_at
-        && other.leaf_inception >= record.leaf_inception
 }
 
 #[cfg(test)]

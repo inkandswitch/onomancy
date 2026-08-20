@@ -171,7 +171,7 @@ repeat chain_count times:
 
 - Each link MUST be the [RFC 4034] canonical wire form of one RRset together with its RRSIG(s) — the same bytes DNSSEC signature validation is defined over. This codec adds framing only; it never re-encodes DNS data.
 - Links MUST be ordered from the root zone toward the owner name (`_onomancy.<name>`), covering every zone cut and indirection en route.
-- NSEC/NSEC3 denial-of-existence records, where present, are links like any other.
+- NSEC/NSEC3 denial-of-existence records, where present, are framed like any other link — but verifiers skip them unverified: negative proofs are outside the protocol at v0 (ADR-045).
 
 # TXT Record Grammar
 [TXT Record Grammar]: #txt-record-grammar

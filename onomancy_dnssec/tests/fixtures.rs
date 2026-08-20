@@ -13,7 +13,7 @@ use testresult::TestResult;
 
 use onomancy_dnssec::{
     test_utils::fixtures::{
-        Expectation, FIXTURE_SERIAL, all_fixtures, fixture_anchor, fixture_hostname,
+        all_fixtures, fixture_anchor, fixture_hostname, Expectation, FIXTURE_SERIAL,
     },
     validator::Validator,
 };
@@ -52,27 +52,14 @@ fn every_fixture_produces_its_declared_outcome() -> TestResult {
 
         match expectation {
             Expectation::Binding => {
-                let proof = outcome.unwrap_or_else(|error| {
+                let ChainProof { records, .. } = outcome.unwrap_or_else(|error| {
                     panic!("{name}: expected a binding proof, got {error}")
                 });
-                let ChainProof::Binding { records, .. } = proof else {
-                    panic!("{name}: expected a binding proof");
-                };
                 assert_eq!(records.len(), 1, "{name}: one binding record");
                 assert_eq!(
                     records[0].serial(),
                     Serial::from(FIXTURE_SERIAL),
                     "{name}: fixture serial"
-                );
-            }
-
-            Expectation::Absence => {
-                let proof = outcome.unwrap_or_else(|error| {
-                    panic!("{name}: expected an absence proof, got {error}")
-                });
-                assert!(
-                    matches!(proof, ChainProof::Absence { .. }),
-                    "{name}: expected an absence proof"
                 );
             }
 

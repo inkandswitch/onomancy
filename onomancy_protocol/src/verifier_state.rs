@@ -2,7 +2,7 @@
 //!
 //! The store is the only state. Every piece of verifier state — the
 //! accepted binding, the effective serial, tenure, lineage forks,
-//! pending and contested sets, unbound status, divergence badges — is
+//! pending and contested sets, divergence badges — is
 //! a deterministic pure function of **what evidence you hold**, never
 //! of when it arrived: sync is set union, gossip races decide nothing,
 //! and where evidence is genuinely ambiguous the output is *contested*
@@ -107,7 +107,6 @@ impl VerifierState {
         // Hostname universe: everything any input mentions.
         let mut hostnames: Set<DnsName> = Set::default();
         hostnames.extend(evidence.records.iter().map(|r| r.hostname.clone()));
-        hostnames.extend(evidence.absences.iter().map(|a| a.hostname.clone()));
         hostnames.extend(evidence.successors.iter().map(|s| s.hostname.clone()));
         hostnames.extend(judgment.claims.iter().map(|c| c.hostname.clone()));
         hostnames.extend(judgment.acceptances.keys().cloned());
@@ -252,9 +251,8 @@ fn derive_host(
         (serial, span)
     });
 
-    // Stage 8: absence, then divergence against the POST-mask output.
-    let unbound = derive_unbound(hostname, evidence, &surviving, now, excluded);
-    let masked = resolution.contested || unbound;
+    // Stage 8: divergence against the POST-mask output.
+    let masked = resolution.contested;
     let output_binding = if masked { None } else { accepted };
     let divergence = derive_divergence(hostname, output_binding.as_ref(), judgment, pins);
 
@@ -267,7 +265,6 @@ fn derive_host(
         pending: resolution.pending,
         succession_forks: graph.forks,
         tenure,
-        unbound,
     }
 }
 
@@ -277,7 +274,6 @@ fn derive_host(
 /// provenance.
 #[derive(Debug, Default)]
 struct Evidence {
-    absences: Vec<AbsenceEvidence>,
     held: Set<ContentHash>,
     records: Vec<BindingEvidence>,
     rotations: Vec<RotationEvidence>,
@@ -292,19 +288,9 @@ pub(crate) struct BindingEvidence {
     pub(crate) hash: ContentHash,
     pub(crate) hostname: DnsName,
     pub(crate) key: ZoneStateKey,
-    pub(crate) leaf_inception: UnixSeconds,
     /// Whether the delegation chain threads the attested `g=` (D10).
     pub(crate) threads_generation: bool,
     pub(crate) window: ChainWindow,
-}
-
-/// A validated proven-absence record.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AbsenceEvidence {
-    hash: ContentHash,
-    hostname: DnsName,
-    leaf_inception: UnixSeconds,
-    window: ChainWindow,
 }
 
 /// Extraction provenance for a carried statement: excluded only when
@@ -393,12 +379,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
             }
 
             Item::ChainRefresh { hostname, chain } => {
-                let Ok(ChainProof::Binding {
-                    leaf_inception,
-                    records,
-                    window,
-                }) = validator.validate(hostname, chain)
-                else {
+                let Ok(ChainProof { records, window }) = validator.validate(hostname, chain) else {
                     continue;
                 };
 
@@ -419,29 +400,11 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                             // equal-serial certificate items.
                             issued_at: UnixSeconds::from(0),
                         },
-                        leaf_inception,
                         // No delegation chain to check: D10 is a
                         // certificate rule.
                         threads_generation: true,
                         window,
                     }));
-            }
-
-            Item::Absence { hostname, chain } => {
-                let Ok(ChainProof::Absence {
-                    leaf_inception,
-                    window,
-                }) = validator.validate(hostname, chain)
-                else {
-                    continue;
-                };
-
-                evidence.absences.push(AbsenceEvidence {
-                    hash,
-                    hostname: hostname.clone(),
-                    leaf_inception,
-                    window,
-                });
             }
 
             Item::Rotation(statement) => {
@@ -465,11 +428,8 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     validator: &V,
     authority: &A,
 ) -> Option<BindingEvidence> {
-    let Ok(ChainProof::Binding {
-        leaf_inception,
-        records,
-        window,
-    }) = validator.validate(certificate.hostname(), certificate.dnssec_chain())
+    let Ok(ChainProof { records, window }) =
+        validator.validate(certificate.hostname(), certificate.dnssec_chain())
     else {
         return None;
     };
@@ -495,7 +455,6 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
             serial: record.serial(),
             issued_at: certificate.issued_at(),
         },
-        leaf_inception,
         threads_generation,
         window,
     })
@@ -1115,29 +1074,6 @@ fn tenure_span(records: &[&&BindingEvidence]) -> Option<ChainWindow> {
     // Spanning valid windows is valid: min ≤ every inception ≤ its
     // own expiration ≤ max.
     ChainWindow::new(inception, expiration).ok()
-}
-
-/// B12: fresh ✓ proven absence whose leaf RRSIG inception is strictly
-/// later than every surviving binding record's yields unbound. Stale
-/// absence proofs prove only past absence.
-fn derive_unbound(
-    hostname: &DnsName,
-    evidence: &Evidence,
-    surviving: &[&BindingEvidence],
-    now: UnixSeconds,
-    excluded: &Set<ContentHash>,
-) -> bool {
-    evidence
-        .absences
-        .iter()
-        .filter(|a| a.hostname == *hostname)
-        .filter(|a| !excluded.contains(&a.hash))
-        .filter(|a| a.window.grade(now) == Grade::Fresh)
-        .any(|absence| {
-            surviving
-                .iter()
-                .all(|record| absence.leaf_inception > record.leaf_inception)
-        })
 }
 
 /// Stage 8's divergence badges: claims and pins that disagree with the

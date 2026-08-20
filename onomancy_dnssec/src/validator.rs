@@ -8,8 +8,7 @@
 //!             child DNSKEY RRset    (self-signed, DS-matched)
 //!                │
 //!                ▼  bounded CNAME indirection permitted
-//!             leaf TXT RRset ──────► ChainProof::Binding
-//!         or  leaf NSEC denial ────► ChainProof::Absence
+//!             leaf TXT RRset ──────► ChainProof
 //!
 //!             ∩-window accumulated over every RRSIG used;
 //!             empty intersection = invalid ✗ (never had joint validity)
@@ -20,13 +19,11 @@
 //! reports the window, not a verdict about the present), and the
 //! anchors are a constructor input.
 //!
-//! # v0 simplifications (tracked)
-//!
-//! - NSEC3 denial is not yet evaluated (needs SHA-1); chains relying
-//!   on it fail closed as invalid.
-//! - The wildcard no-closer-match check (D14) accepts any verified
-//!   NSEC whose range covers the query name, rather than the full
-//!   closest-encloser dance.
+//! Negative proofs are out of the protocol at v0 (ADR-045): NSEC and
+//! NSEC3 links are skipped unverified (they can prove nothing to this
+//! walk), a chain without a provable TXT leaf is invalid, and
+//! wildcard-expanded answers are rejected outright — the no-closer-
+//! match proof they would need is a negative proof.
 
 use alloc::{string::String, vec::Vec};
 
@@ -44,8 +41,7 @@ use crate::{
     crypto::{self, VerifyError},
     link::{Link, ParseLinkError},
     wire::{
-        cname::Cname, denial::Nsec, dnskey::Dnskey, ds::Ds, name::Name, record::RrType,
-        rrsig::Rrsig, txt::Txt,
+        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, record::RrType, rrsig::Rrsig, txt::Txt,
     },
 };
 
@@ -100,7 +96,6 @@ impl Validator {
         let mut target = Name::onomancy_owner(hostname);
         let mut pending_ds: Option<(Name, Vec<Ds>)> = None;
         let mut cname_hops = 0usize;
-        let mut denials: Vec<VerifiedDenial> = Vec::new();
 
         for link in links {
             match (link.rtype(), &pending_ds) {
@@ -123,18 +118,13 @@ impl Validator {
                     target = walk.follow_cname(&link, &target)?;
                 }
 
-                (RrType::NSEC, None) => {
-                    denials.push(walk.verify_denial(&link)?);
-                }
-
-                (RrType::NSEC3, None) => {
-                    // Fails closed until SHA-1-backed NSEC3 evaluation
-                    // lands.
-                    return Err(WalkError::Nsec3Unsupported);
+                (RrType::NSEC | RrType::NSEC3, None) => {
+                    // Denial links prove nothing at v0 (ADR-045):
+                    // skipped unverified, never chain-poisoning.
                 }
 
                 (RrType::TXT, None) => {
-                    return walk.finish_binding(&link, &target, &denials);
+                    return walk.finish_binding(&link, &target);
                 }
 
                 (rtype, _) => {
@@ -146,8 +136,9 @@ impl Validator {
             }
         }
 
-        // No TXT leaf: the chain must prove absence.
-        walk.finish_absence(&target, &denials)
+        // Without negative proofs there is no absence outcome: a
+        // chain that never reaches a TXT leaf proves nothing.
+        Err(WalkError::MissingLeaf)
     }
 }
 
@@ -171,13 +162,6 @@ struct WalkState {
     keys: Vec<Dnskey>,
     window_inception: UnixSeconds,
     window_expiration: UnixSeconds,
-}
-
-/// One verified NSEC denial, retained for absence and D14 decisions.
-struct VerifiedDenial {
-    owner: Name,
-    nsec: Nsec,
-    inception: UnixSeconds,
 }
 
 impl WalkState {
@@ -278,82 +262,28 @@ impl WalkState {
         Ok(cname.target().clone())
     }
 
-    /// Verify and retain one NSEC denial.
-    fn verify_denial(&mut self, link: &Link) -> Result<VerifiedDenial, WalkError> {
-        let rrsig = self.verify_signed_link(link)?;
-        let inception = rrsig.inception();
-
-        let record = link.rrset().first().ok_or(WalkError::MalformedRdata {
-            rtype: RrType::NSEC,
-        })?;
-        let nsec = Nsec::parse(&record.rdata).map_err(|_| WalkError::MalformedRdata {
-            rtype: RrType::NSEC,
-        })?;
-
-        Ok(VerifiedDenial {
-            owner: link.owner().clone(),
-            nsec,
-            inception,
-        })
-    }
-
     /// The leaf: a TXT `RRset` at the (possibly CNAME-followed) target.
-    fn finish_binding(
-        mut self,
-        link: &Link,
-        target: &Name,
-        denials: &[VerifiedDenial],
-    ) -> Result<ChainProof, WalkError> {
+    fn finish_binding(mut self, link: &Link, target: &Name) -> Result<ChainProof, WalkError> {
         if link.owner() != target {
             return Err(WalkError::WrongOwner);
         }
 
         let rrsig = self.verify_signed_link(link)?;
-        let leaf_inception = rrsig.inception();
 
-        // D14: a wildcard-expanded answer (RRSIG label count below the
-        // owner's) needs a verified denial covering the query name —
-        // otherwise a stripped exact-match answer is undetectable.
-        if usize::from(rrsig.labels()) < target.labels().len()
-            && !denials.iter().any(|denial| denial_covers(denial, target))
-        {
-            return Err(WalkError::WildcardWithoutDenial);
+        // A wildcard-expanded answer (RRSIG label count below the
+        // owner's) would need a no-closer-match proof — a negative
+        // proof, which v0 does not evaluate (ADR-045). Reject: a
+        // legitimate wildcard at `_onomancy` is pathological anyway,
+        // and accepting one unproven would let a stripped exact-match
+        // answer go undetected.
+        if usize::from(rrsig.labels()) < target.labels().len() {
+            return Err(WalkError::WildcardExpansion);
         }
 
         let records = parse_bindings(link);
         let window = self.window()?;
 
-        Ok(ChainProof::Binding {
-            leaf_inception,
-            records,
-            window,
-        })
-    }
-
-    /// No TXT leaf: the retained denials must prove absence at the
-    /// target.
-    fn finish_absence(
-        self,
-        target: &Name,
-        denials: &[VerifiedDenial],
-    ) -> Result<ChainProof, WalkError> {
-        let denial = denials
-            .iter()
-            .find(|denial| {
-                // Exact owner match with no TXT bit, or a covering
-                // range: both prove no binding record exists.
-                (denial.owner == *target && !denial.nsec.types().contains(RrType::TXT))
-                    || denial_covers(denial, target)
-            })
-            .ok_or(WalkError::MissingLeaf)?;
-
-        let leaf_inception = denial.inception;
-        let window = self.window()?;
-
-        Ok(ChainProof::Absence {
-            leaf_inception,
-            window,
-        })
+        Ok(ChainProof { records, window })
     }
 
     /// Verify a link signed by the CURRENT zone over its own owner
@@ -418,23 +348,6 @@ impl WalkState {
     }
 }
 
-/// Whether a verified NSEC denies existence of `target`: its range
-/// `(owner, next)` covers the name in canonical order, with the
-/// end-of-zone wraparound.
-fn denial_covers(denial: &VerifiedDenial, target: &Name) -> bool {
-    use core::cmp::Ordering;
-
-    let after_owner = denial.owner.canonical_cmp(target) == Ordering::Less;
-    let before_next = target.canonical_cmp(denial.nsec.next()) == Ordering::Less;
-    let wraps = denial.nsec.next().canonical_cmp(&denial.owner) != Ordering::Greater;
-
-    if wraps {
-        after_owner || before_next
-    } else {
-        after_owner && before_next
-    }
-}
-
 /// Parse a DNSKEY link's keys.
 fn parse_keys(link: &Link) -> Result<Vec<Dnskey>, WalkError> {
     link.rrset()
@@ -484,9 +397,9 @@ pub enum WalkError {
         rtype: RrType,
     },
 
-    /// The chain ended without a TXT leaf or a denial covering the
-    /// target.
-    #[error("no leaf: neither TXT nor covering denial")]
+    /// The chain ended without a TXT leaf: it proves nothing
+    /// (negative proofs are out of the protocol at v0, ADR-045).
+    #[error("no TXT leaf: the chain proves nothing")]
     MissingLeaf,
 
     /// No signature named the current zone and verified under its
@@ -497,10 +410,6 @@ pub enum WalkError {
     /// A DS owner outside the current zone's subtree.
     #[error("delegation does not descend")]
     NotDescending,
-
-    /// NSEC3 evaluation is not yet implemented; fails closed.
-    #[error("NSEC3 denial not yet supported")]
-    Nsec3Unsupported,
 
     /// A link failed to parse.
     #[error("link: {0}")]
@@ -532,9 +441,10 @@ pub enum WalkError {
     #[error(transparent)]
     Verify(#[from] VerifyError),
 
-    /// A wildcard-expanded answer without a covering denial (D14).
-    #[error("wildcard expansion without a no-closer-match proof")]
-    WildcardWithoutDenial,
+    /// A wildcard-expanded answer: its no-closer-match proof would be
+    /// a negative proof, which v0 does not evaluate (ADR-045).
+    #[error("wildcard-expanded answers are rejected at v0")]
+    WildcardExpansion,
 
     /// A leaf or CNAME at an owner other than the query target.
     #[error("link owner is not the query target")]

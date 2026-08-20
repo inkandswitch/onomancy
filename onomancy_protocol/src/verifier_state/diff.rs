@@ -33,8 +33,8 @@ pub struct Event {
 pub enum EventKind {
     // ————— event-class: may prompt —————
     /// The accepted document changed (including appearing or being
-    /// masked by contested/unbound). Graded by the displaced
-    /// binding's tenure at the UI layer.
+    /// masked by contested). Graded by the displaced binding's tenure
+    /// at the UI layer.
     BindingChanged {
         /// The previously accepted document, if any.
         from: Option<DocAnchor>,
@@ -58,9 +58,6 @@ pub enum EventKind {
     /// A newly surfaced succession fork (D16): competing valid
     /// successor statements from one predecessor.
     SuccessionForkSurfaced(SuccessionFork),
-
-    /// Fresh proven absence displaced the binding (B12).
-    Unbound,
 
     // ————— badge-class: MUST NOT prompt —————
     /// The hostname left the contested state.
@@ -101,8 +98,7 @@ impl EventKind {
             Self::BindingChanged { .. }
             | Self::LineageForkSurfaced(_)
             | Self::RatchetReset { .. }
-            | Self::SuccessionForkSurfaced(_)
-            | Self::Unbound => true,
+            | Self::SuccessionForkSurfaced(_) => true,
 
             Self::ContestedCleared
             | Self::ContestedEntered
@@ -146,11 +142,6 @@ pub(super) fn host_diff(before: &HostState, after: &HostState) -> Vec<EventKind>
             from: prior.grade,
             to: current.grade,
         });
-    }
-
-    // Unbinding fires on the transition only.
-    if after.unbound && !before.unbound {
-        kinds.push(EventKind::Unbound);
     }
 
     // Forks: newly surfaced only — forks are permanent history, so a

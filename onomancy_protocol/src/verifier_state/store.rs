@@ -8,7 +8,7 @@
 use alloc::vec::Vec;
 
 use onomancy_core::{
-    cert::{Certificate, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate},
     collections::Set,
     content_hash::ContentHash,
     name::dns::DnsName,
@@ -16,17 +16,11 @@ use onomancy_core::{
 };
 
 /// One store item: an exact byte unit, identified by content hash.
+///
+/// Deliberately no absence-proof item: negative proofs are out of the
+/// protocol at v0 (ADR-045).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {
-    /// A proven-absence record: a chain whose leaf is an NSEC/NSEC3
-    /// denial for the hostname's `_onomancy` owner name.
-    Absence {
-        /// The hostname whose binding is denied.
-        hostname: DnsName,
-        /// The denial chain.
-        chain: DnssecChain,
-    },
-
     /// A bare chain refresh ingested without its certificate. Its
     /// zone-state `issued_at` component is zero, sorting below an
     /// equal-window, equal-serial certificate item.
@@ -53,20 +47,19 @@ impl Item {
     /// The item's content hash.
     ///
     /// Certificate and statement units hash their verbatim wire bytes
-    /// (the spec's content-addressing rule). Chain items — which have
-    /// no self-describing unit encoding — hash a **domain-separated**
-    /// composite of kind tag, hostname, and chain framing: without the
-    /// tag and hostname, `Absence{h, X}` and `ChainRefresh{h', X}`
-    /// would collide, and set-union dedup would let whichever spelling
-    /// arrived first silently suppress the others — an order-dependent
-    /// evidence drop.
+    /// (the spec's content-addressing rule). Chain-refresh items —
+    /// which have no self-describing unit encoding — hash a
+    /// **domain-separated** composite of kind tag, hostname, and chain
+    /// framing: without the tag and hostname, differently-labeled
+    /// wrappers of one chain would collide, and set-union dedup would
+    /// let whichever spelling arrived first silently suppress the
+    /// others — an order-dependent evidence drop.
     #[must_use]
     pub fn content_hash(&self) -> ContentHash {
         match self {
             Self::Record(certificate) => certificate.digest().into(),
             Self::Rotation(statement) => statement.digest().into(),
             Self::Successor(statement) => statement.digest().into(),
-            Self::Absence { hostname, chain } => chain_item_hash(b'A', hostname, chain),
             Self::ChainRefresh { hostname, chain } => chain_item_hash(b'R', hostname, chain),
         }
     }

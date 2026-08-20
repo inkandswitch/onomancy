@@ -14,7 +14,7 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
@@ -132,8 +132,7 @@ pub fn binding_carrying(
         &signer(200 ^ doc_seed),
     );
 
-    let proof = ChainProof::Binding {
-        leaf_inception: UnixSeconds::from(window_span.0),
+    let proof = ChainProof {
         records: vec![TxtRecord::new(
             Serial::from(serial),
             generation(gen_seed),

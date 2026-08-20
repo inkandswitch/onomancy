@@ -33,7 +33,7 @@ testresult = { workspace = true }
 [features]
 default = []
 std = ["onomancy_core/std", "onomancy_protocol/std", "thiserror/std"]
-test_utils = []                                                    # synthetic-zone factories
+test_utils = []                                                       # synthetic-zone factories
 
 [[example]]
 name = "generate_fixtures"

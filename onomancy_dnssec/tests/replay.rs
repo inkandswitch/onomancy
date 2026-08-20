@@ -9,7 +9,7 @@
 
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     collections::{Map, Set},
     freshness::ChainWindow,
     time::UnixSeconds,
@@ -18,19 +18,18 @@ use onomancy_core::{
 use onomancy_protocol::{
     test_utils as proto_utils,
     verifier_state::{
-        VerifierState,
         judgment::{Acceptance, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         seam::ChainProof,
         store::{Item, Store},
+        VerifierState,
     },
 };
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{ChainWindows, binding_chain, fixtures, link, txt_record},
+    test_utils::{binding_chain, fixtures, txt_record, ChainWindows},
     validator::Validator,
-    wire::record::{CLASS_IN, Record, RrType},
 };
 
 /// The derivation clock: inside the "fresh" windows below.
@@ -80,8 +79,7 @@ fn real_binding(
         &SigningKey::from_bytes(&[200 ^ doc_seed; 32]),
     );
 
-    let proof = ChainProof::Binding {
-        leaf_inception: UnixSeconds::from(u64::from(window.0)),
+    let proof = ChainProof {
         records: vec![record],
         window: ChainWindow::new(
             UnixSeconds::from(u64::from(window.0)),
@@ -198,78 +196,5 @@ fn d4a_ratchet_reset_derives_identically() -> TestResult {
         .unwrap_or_default();
 
     assert_eq!(state.effective_serial, Some(Serial::from(7)));
-    Ok(())
-}
-
-#[test]
-fn b12_absence_unbinds_identically() -> TestResult {
-    // A stale binding, then a fresh NSEC absence whose leaf inception
-    // is strictly later: unbound.
-    let binding = real_binding(1, 11, 100, (1_744_000_000, 1_748_000_000), 50)?;
-
-    let child = fixtures::fixture_child();
-    let root = fixtures::fixture_root();
-    let absence_window = (1_754_000_000u32, 1_756_000_000u32);
-
-    let mut nsec_rdata = Vec::new();
-    let next: onomancy_dnssec::wire::name::Name = "zzz.expede.wtf".parse()?;
-    next.write(&mut nsec_rdata);
-    nsec_rdata.extend_from_slice(&[0, 1, 0x40]);
-    let nsec = Record {
-        owner: child.name.clone(),
-        rtype: RrType::NSEC,
-        class: CLASS_IN,
-        ttl: 900,
-        rdata: nsec_rdata,
-    };
-    let ds = onomancy_dnssec::test_utils::Zone::ds_record_for(&child);
-
-    let absence_chain = DnssecChain::from(vec![
-        link(&[
-            root.dnskey_record.clone(),
-            root.rrsig(core::slice::from_ref(&root.dnskey_record), absence_window),
-        ]),
-        link(&[ds.clone(), root.rrsig(&[ds], absence_window)]),
-        link(&[
-            child.dnskey_record.clone(),
-            child.rrsig(core::slice::from_ref(&child.dnskey_record), absence_window),
-        ]),
-        link(&[nsec.clone(), child.rrsig(&[nsec], absence_window)]),
-    ]);
-
-    let absence_proof = ChainProof::Absence {
-        leaf_inception: UnixSeconds::from(u64::from(absence_window.0)),
-        window: ChainWindow::new(
-            UnixSeconds::from(u64::from(absence_window.0)),
-            UnixSeconds::from(u64::from(absence_window.1)),
-        )?,
-    };
-
-    let hostname = proto_utils::host();
-
-    let mut store = Store::default();
-    store.insert(Item::Record(binding.cert.clone()));
-    store.insert(Item::Absence {
-        hostname: hostname.clone(),
-        chain: absence_chain.clone(),
-    });
-
-    let memory = MemoryValidator::default()
-        .with(hostname.clone(), &binding.chain, binding.proof.clone())
-        .with(hostname.clone(), &absence_chain, absence_proof);
-    let real = Validator::new(fixtures::fixture_anchor());
-
-    let judgment = Judgment::default();
-    let pins = Map::default();
-    let now = UnixSeconds::from(NOW);
-    let authority = MemoryAuthority::default();
-
-    let with_real = VerifierState::compute(&store, now, &judgment, &pins, &real, &authority);
-    let with_fake = VerifierState::compute(&store, now, &judgment, &pins, &memory, &authority);
-    assert_eq!(with_real, with_fake, "absence must replay identically");
-
-    let state = with_real.hosts.get(&hostname).cloned().unwrap_or_default();
-    assert!(state.unbound);
-    assert!(state.accepted.is_none());
     Ok(())
 }

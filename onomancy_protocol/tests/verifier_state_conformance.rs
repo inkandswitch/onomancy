@@ -12,17 +12,13 @@ use onomancy_core::{
     txt::serial::Serial,
 };
 use onomancy_protocol::{
-    test_utils::{
-        Binding, binding, binding_carrying, chain, doc, generation, host, rotation, succession,
-        window,
-    },
+    test_utils::{binding, binding_carrying, doc, generation, host, rotation, succession, Binding},
     verifier_state::{
-        VerifierState,
         judgment::{Acceptance, Claim, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         output::{BindingGrade, HostState},
-        seam::ChainProof,
         store::{Item, Store},
+        VerifierState,
     },
 };
 
@@ -81,7 +77,7 @@ fn sole_fresh_record_is_accepted_confirmed() {
     assert_eq!(accepted.generation, generation(11));
     assert_eq!(accepted.grade, BindingGrade::Confirmed);
     assert_eq!(state.effective_serial, Some(Serial::from(100)));
-    assert!(!state.contested && !state.unbound && state.pending.is_empty());
+    assert!(!state.contested && state.pending.is_empty());
 }
 
 #[test]
@@ -245,44 +241,6 @@ fn far_future_serials_are_deferred() {
 
     let state = run(&[&poisoned], &Judgment::default(), vec![]);
     assert!(state.accepted.is_none(), "deferred, not considered");
-}
-
-#[test]
-fn b12_fresh_absence_with_later_leaf_inception_unbinds() {
-    let b = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50);
-
-    let absence_chain = chain(9);
-    let validator = MemoryValidator::default()
-        .with(host(), &b.chain, b.proof.clone())
-        .with(
-            host(),
-            &absence_chain,
-            ChainProof::Absence {
-                // Strictly later than the binding's leaf inception.
-                leaf_inception: UnixSeconds::from(NOW - 500),
-                window: window(NOW - 500, NOW + 500),
-            },
-        );
-
-    let mut store = Store::default();
-    store.insert(Item::Record(b.cert.clone()));
-    store.insert(Item::Absence {
-        hostname: host(),
-        chain: absence_chain,
-    });
-
-    let derivation = VerifierState::compute(
-        &store,
-        UnixSeconds::from(NOW),
-        &Judgment::default(),
-        &Map::default(),
-        &validator,
-        &MemoryAuthority::default(),
-    );
-
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
-    assert!(state.unbound);
-    assert!(state.accepted.is_none(), "unbound output is empty");
 }
 
 #[test]

@@ -14,9 +14,9 @@ use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator as _};
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{ChainWindows, Zone, binding_chain, fixtures, link, txt_record, zone},
+    test_utils::{binding_chain, fixtures, link, txt_record, zone, ChainWindows, Zone},
     validator::{Validator, WalkError},
-    wire::record::{CLASS_IN, Record, RrType},
+    wire::record::{Record, RrType, CLASS_IN},
 };
 
 fn hostname() -> TestResult<DnsName> {
@@ -48,23 +48,14 @@ fn a_genuine_chain_walks_to_a_binding_proof() -> TestResult {
     let child = zone("expede.wtf", 2);
     let validator = Validator::new(vec![root.anchor()]);
 
-    let proof = validator.validate_detailed(&hostname()?, &happy_chain(&root, &child)?)?;
-
-    let ChainProof::Binding {
-        leaf_inception,
-        records,
-        window,
-    } = proof
-    else {
-        panic!("expected a binding proof");
-    };
+    let ChainProof { records, window } =
+        validator.validate_detailed(&hostname()?, &happy_chain(&root, &child)?)?;
 
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].serial(), Serial::from(fixtures::FIXTURE_SERIAL));
     // ∩-window: max inception 1500, min expiration 4000.
     assert_eq!(window.inception(), UnixSeconds::from(1_500));
     assert_eq!(window.expiration(), UnixSeconds::from(4_000));
-    assert_eq!(leaf_inception, UnixSeconds::from(1_500));
     Ok(())
 }
 
@@ -162,7 +153,10 @@ fn mismatched_ds_blocks_the_descent() -> TestResult {
 }
 
 #[test]
-fn nsec_denial_proves_absence() -> TestResult {
+fn denial_only_chains_prove_nothing() -> TestResult {
+    // Negative proofs are out at v0 (ADR-045): a chain whose leaf is
+    // an NSEC denial — even validly signed — is not a proof of
+    // anything, and the denial link itself is skipped unverified.
     let root = zone(".", 1);
     let child = zone("expede.wtf", 2);
 
@@ -195,19 +189,10 @@ fn nsec_denial_proves_absence() -> TestResult {
     ]);
 
     let validator = Validator::new(vec![root.anchor()]);
-    let proof = validator.validate_detailed(&hostname()?, &chain)?;
-
-    let ChainProof::Absence {
-        leaf_inception,
-        window,
-    } = proof
-    else {
-        panic!("expected an absence proof");
-    };
-
-    assert_eq!(leaf_inception, UnixSeconds::from(2_000));
-    assert_eq!(window.inception(), UnixSeconds::from(2_000));
-    assert_eq!(window.expiration(), UnixSeconds::from(4_500));
+    assert_eq!(
+        validator.validate_detailed(&hostname()?, &chain),
+        Err(WalkError::MissingLeaf)
+    );
     Ok(())
 }
 
@@ -217,15 +202,11 @@ fn the_seam_collapses_detail_to_invalid_chain() -> TestResult {
     let child = zone("expede.wtf", 2);
 
     let validator = Validator::new(vec![root.anchor()]);
-    assert!(
-        validator
-            .validate(&hostname()?, &happy_chain(&root, &child)?)
-            .is_ok()
-    );
-    assert!(
-        validator
-            .validate(&hostname()?, &DnssecChain::default())
-            .is_err()
-    );
+    assert!(validator
+        .validate(&hostname()?, &happy_chain(&root, &child)?)
+        .is_ok());
+    assert!(validator
+        .validate(&hostname()?, &DnssecChain::default())
+        .is_err());
     Ok(())
 }

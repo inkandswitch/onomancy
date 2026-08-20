@@ -18,7 +18,7 @@ use onomancy_core::{
 /// The derived state for one hostname.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostState {
-    /// The accepted binding, if any. Empty while contested or unbound.
+    /// The accepted binding, if any. Empty while contested.
     pub accepted: Option<AcceptedBinding>,
 
     /// Contested state: zone equivocation or receipt-tied acceptances.
@@ -48,10 +48,6 @@ pub struct HostState {
     /// chain-window evidence in this store. Grades the severity of a
     /// later unproven displacement.
     pub tenure: Option<ChainWindow>,
-
-    /// Fresh proven absence displaced the binding. The previously
-    /// accepted binding remains derivable as the succession anchor.
-    pub unbound: bool,
 }
 
 /// An accepted (document, generation) binding with its grade.

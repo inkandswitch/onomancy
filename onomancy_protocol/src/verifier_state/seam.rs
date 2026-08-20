@@ -14,39 +14,30 @@ use onomancy_core::{
     delegation::DelegationBytes,
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord},
 };
 
 /// What a DNSSEC chain, once validated from the verifier's own trust
-/// anchor, proves about a hostname's `_onomancy` owner name.
+/// anchor, proves about a hostname's `_onomancy` owner name: a TXT
+/// `RRset` carrying binding records.
+///
+/// Deliberately no absence variant: negative proofs are out of the
+/// protocol at v0 (ADR-045) — a chain without a provable TXT leaf is
+/// simply invalid, and unbinding awaits the future owner-signed
+/// unbind statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChainProof {
-    /// NSEC/NSEC3 proven absence of the binding record.
-    Absence {
-        /// The chain's ∩-window.
-        window: ChainWindow,
-        /// Inception of the denial records' own RRSIG — the absence
-        /// comparator (the chain ∩-window start moves with unrelated
-        /// parent re-signing).
-        leaf_inception: UnixSeconds,
-    },
+pub struct ChainProof {
+    /// Every parseable `ONO0` record in the proven `RRset`, in
+    /// `RRset` order. Several is normal during migration
+    /// dual-publish; SELECTION is the derivation's job (zone-state
+    /// key), not the validator's — the validator only proves what
+    /// the zone said. Unknown-version and unknown-record strings
+    /// are already dispositioned out; per-record grammar rejections
+    /// (D5) drop only the offending record.
+    pub records: Vec<TxtRecord>,
 
-    /// A proven TXT `RRset` carrying binding records.
-    Binding {
-        /// Inception of the TXT `RRset`'s own RRSIG.
-        leaf_inception: UnixSeconds,
-        /// Every parseable `ONO0` record in the proven `RRset`, in
-        /// `RRset` order. Several is normal during migration
-        /// dual-publish; SELECTION is the derivation's job (zone-state
-        /// key), not the validator's — the validator only proves what
-        /// the zone said. Unknown-version and unknown-record strings
-        /// are already dispositioned out; per-record grammar
-        /// rejections (D5) drop only the offending record.
-        records: Vec<TxtRecord>,
-        /// The chain's ∩-window.
-        window: ChainWindow,
-    },
+    /// The chain's ∩-window.
+    pub window: ChainWindow,
 }
 
 /// Validates DNSSEC chains against the baked-in trust anchor.

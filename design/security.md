@@ -27,7 +27,7 @@ Threat model, mitigations, and accepted residual risks. Read alongside [assumpti
 | Homograph/confusable DNS names (Cyrillic lookalikes) | Layered: A-label canonicalization + petname pinning + display-layer confusable detection (below) | attentive-user gap until display layer built |
 | Key borrowing via TXT (attacker's zone points at victim's pubkey) | Certificate binds `hostname` and is signed by the key owner — no valid cert for the attacker's hostname can exist | none |
 | Replay of superseded TXT record                      | Serial ratchet (stale must exceed; fresh may reset, surfaced)                         | ratchet poisoning (below) |
-| Stripped-record downgrade ("no binding here")        | NSEC/NSEC3 denial-of-existence validation (not yet built)                                      | open until built          |
+| Stripped-record downgrade ("no binding here")        | Absence is never provable at v0 (ADR-045): a missing record is always a possible downgrade, never "no binding" — fails toward retention | closed by doctrine |
 | Forged certificate                                   | Ed25519 sig + chain from baked-in KSK + TXT pubkey match                              | KSK compromise (below)    |
 | Malicious gossip peer                                | Records are self-authenticating; receiver verifies from own KSK                       | DoS only                  |
 | Malicious onomancer server                           | Serves signed records it cannot forge; delegation revocation cuts it off    | DoS only                  |

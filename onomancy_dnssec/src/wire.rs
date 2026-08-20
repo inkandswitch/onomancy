@@ -9,8 +9,8 @@
 //! two implementations disagree about what bytes were signed, which is
 //! the exact differential class the strict codecs exist to kill.
 //!
-//! This is deliberately not a general DNS library. Seven RR types, one
-//! class, no compression, no EDNS, no message envelopes.
+//! This is deliberately not a general DNS library. Five interpreted
+//! RR types, one class, no compression, no EDNS, no message envelopes.
 //!
 //! # Module Organization
 //!
@@ -20,12 +20,14 @@
 //!   [`RrType`](record::RrType)
 //! - [`algorithm`] — [`Algorithm`](algorithm::Algorithm) codes and the
 //!   D13 supported-set
-//! - RDATA views: [`rrsig`], [`dnskey`], [`ds`], [`txt`], [`denial`]
-//!   (NSEC/NSEC3 + type bitmaps), [`cname`]
+//! - RDATA views: [`rrsig`], [`dnskey`], [`ds`], [`txt`], [`cname`]
+//!
+//! Deliberately absent: NSEC/NSEC3 views. Negative proofs are out of
+//! the protocol at v0 (ADR-045) — denial links in a chain are skipped
+//! unverified, since they can prove nothing to this walk.
 
 pub mod algorithm;
 pub mod cname;
-pub mod denial;
 pub mod dnskey;
 pub mod ds;
 pub mod name;

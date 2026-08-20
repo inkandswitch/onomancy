@@ -91,10 +91,10 @@ flowchart TD
 
 Validation requirements:
 
-- _Denial of existence_ — NSEC/NSEC3 processing, to distinguish "this zone has no binding" from a stripped-record downgrade attack.
+- _Denial of existence_ — REMOVED at v0 (ADR-045): negative proofs are outside the protocol. A missing record is always "absence not proven" (possible downgrade, fails toward retention), and deliberate unbinding awaits a future owner-signed unbind statement — the statement-vouched mechanism, consistent with every other lifecycle event.
 - _CNAME and zone-cut coverage_ — the chain must cover every indirection, not just the final owner name.
 - _Multiple TXT records_ — policy: highest understood format tag, then highest serial `n`; overlap is expected during migration.
-- _Wildcard synthesis_ — wildcard-derived TXT answers are valid only with the no-closer-match NSEC/NSEC3 proof; a wildcard binding binds every matching subname to one document (owner's choice), though each subname still needs its own exactly-matching certificate — wildcards bind names, never certificates.
+- _Wildcard synthesis_ — wildcard-derived TXT answers are REJECTED at v0: their no-closer-match proof would be a negative proof (ADR-045). Publishers MUST NOT rely on wildcard bindings.
 - _Unknown algorithms are invalid, not insecure_ — a chain needing an unimplemented signature algorithm yields ✗; the resolver-world "treat as insecure" downgrade has no analogue for a KSK-rooted binding.
 - _Hand-rolled vs. hickory's validator_ — undecided for native; the wasm path needs its own validation regardless.
 
