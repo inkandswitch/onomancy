@@ -1,7 +1,7 @@
 # onomancy_dnssec
 
 Sans-IO DNSSEC chain validation for [Onomancy]: RFC 4034/4035 signature
-validation over _supplied bytes_, behind `onomancy_proto`'s
+validation over _supplied bytes_, behind `onomancy_protocol`'s
 `ChainValidator` seam.
 
 This crate never fetches anything. Chains arrive as framed wire bytes

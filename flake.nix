@@ -153,7 +153,7 @@
           ci-wasm = mkCheck "ci-wasm" ''
             cargo check --target wasm32-unknown-unknown -p onomancy_wasm
             cargo check --target wasm32-unknown-unknown --no-default-features \
-              -p onomancy_core -p onomancy_proto -p onomancy_dnssec
+              -p onomancy_core -p onomancy_protocol -p onomancy_dnssec
           '';
 
           ci-no-std = mkCheck "ci-no-std" ''

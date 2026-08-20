@@ -675,7 +675,7 @@ dependencies = [
  "ed25519-dalek",
  "onomancy_core",
  "onomancy_dnssec",
- "onomancy_proto",
+ "onomancy_protocol",
  "p256",
  "rsa",
  "sha2",
@@ -685,13 +685,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "onomancy_proto"
+name = "onomancy_protocol"
 version = "0.1.0"
 dependencies = [
  "bolero",
  "ed25519-dalek",
  "onomancy_core",
- "onomancy_proto",
+ "onomancy_protocol",
  "testresult",
  "thiserror",
  "tracing",

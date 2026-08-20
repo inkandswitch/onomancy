@@ -30,7 +30,7 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 | Crate                                  | Purpose                                                                              |
 |----------------------------------------|--------------------------------------------------------------------------------------|
 | [`onomancy_core`](./onomancy_core)   | `no_std`-leaning vocabulary: name grammar, TXT codec, certificate & statement units  |
-| [`onomancy_proto`](./onomancy_proto) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
+| [`onomancy_protocol`](./onomancy_protocol) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
 | [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings for browsers and Node.js                                    |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
@@ -39,7 +39,7 @@ Libraries implement the protocol (`onomancy_*`); agents that practice it are ono
 graph TD
     subgraph pure ["sans-IO: pure functions (native + Wasm)"]
         core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
-        proto["onomancy_proto<br/><i>machines: resolve · ladder · derive</i>"]
+        proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
         dnssec["onomancy_dnssec†<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
         publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
 

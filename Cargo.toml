@@ -3,7 +3,7 @@ resolver = "3"
 members = [
   "onomancy_core",
   "onomancy_dnssec",
-  "onomancy_proto",
+  "onomancy_protocol",
   "onomancy_wasm",
 ]
 
@@ -18,7 +18,7 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 # Internal crates
 onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = false }
 onomancy_dnssec = { version = "0.1.0", path = "onomancy_dnssec", default-features = false }
-onomancy_proto = { version = "0.1.0", path = "onomancy_proto", default-features = false }
+onomancy_protocol = { version = "0.1.0", path = "onomancy_protocol", default-features = false }
 onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = false }
 
 # External crates

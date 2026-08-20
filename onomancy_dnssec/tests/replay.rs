@@ -9,28 +9,28 @@
 
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     collections::{Map, Set},
     freshness::ChainWindow,
     time::UnixSeconds,
     txt::{record::TxtRecord, serial::Serial},
 };
-use onomancy_proto::{
+use onomancy_protocol::{
     test_utils as proto_utils,
     verifier_state::{
+        VerifierState,
         judgment::{Acceptance, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         seam::ChainProof,
         store::{Item, Store},
-        VerifierState,
     },
 };
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{binding_chain, fixtures, link, txt_record, ChainWindows},
+    test_utils::{ChainWindows, binding_chain, fixtures, link, txt_record},
     validator::Validator,
-    wire::record::{Record, RrType, CLASS_IN},
+    wire::record::{CLASS_IN, Record, RrType},
 };
 
 /// The derivation clock: inside the "fresh" windows below.

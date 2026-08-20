@@ -1,7 +1,7 @@
 //! Sans-IO DNSSEC chain validation for Onomancy.
 //!
-//! Implements `onomancy_proto`'s `ChainValidator` seam: framed chain
-//! bytes in, [`ChainProof`](onomancy_proto::verifier_state::seam::ChainProof)
+//! Implements `onomancy_protocol`'s `ChainValidator` seam: framed chain
+//! bytes in, [`ChainProof`](onomancy_protocol::verifier_state::seam::ChainProof)
 //! out, verified from a caller-supplied trust-anchor set. No sockets,
 //! no resolver, no clock access — verification time enters as a value.
 //!

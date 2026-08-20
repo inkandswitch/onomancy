@@ -10,7 +10,7 @@ use onomancy_core::{
     time::UnixSeconds,
     txt::serial::Serial,
 };
-use onomancy_proto::verifier_state::seam::{ChainProof, ChainValidator as _};
+use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator as _};
 use testresult::TestResult;
 
 use onomancy_dnssec::{

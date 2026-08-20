@@ -11,7 +11,7 @@
 //! signer-claimed and breaks ties only **within a single document** —
 //! cross-document equality at `(window_end, serial)` is zone
 //! equivocation, which a signer-claimed field must never resolve. That
-//! scoping rule lives in the comparison ladder (`onomancy_proto`); this
+//! scoping rule lives in the comparison ladder (`onomancy_protocol`); this
 //! type is just the key.
 
 use crate::{time::UnixSeconds, txt::serial::Serial};

@@ -11,18 +11,18 @@ use onomancy_core::{
     time::UnixSeconds,
     txt::serial::Serial,
 };
-use onomancy_proto::{
+use onomancy_protocol::{
     test_utils::{
-        binding, binding_carrying, chain, doc, generation, host, rotation, succession, window,
-        Binding,
+        Binding, binding, binding_carrying, chain, doc, generation, host, rotation, succession,
+        window,
     },
     verifier_state::{
+        VerifierState,
         judgment::{Acceptance, Claim, Judgment},
         memory::{MemoryAuthority, MemoryValidator},
         output::{BindingGrade, HostState},
         seam::ChainProof,
         store::{Item, Store},
-        VerifierState,
     },
 };
 
