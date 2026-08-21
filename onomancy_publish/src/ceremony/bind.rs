@@ -3,7 +3,7 @@
 use alloc::{format, vec};
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     name::{
         dns::DnsName,
         doc::{DocAnchor, Head},
@@ -14,7 +14,7 @@ use onomancy_core::{
 };
 
 use crate::{
-    ceremony::{CeremonyError, Intent, simulate},
+    ceremony::{simulate, CeremonyError, Intent},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -41,6 +41,12 @@ pub struct Bind {
     /// Existing lineage to carry, oldest first (usually empty on a
     /// first binding).
     pub lineage: alloc::vec::Vec<RotationStatement>,
+
+    /// The authority carriage to attach: delegation proof that
+    /// `generation` lies on `document`'s path (D10). Opaque here —
+    /// minted by `onomancy_keyhive::mint`, verified by the agent's
+    /// authority.
+    pub carriage: alloc::vec::Vec<onomancy_core::delegation::DelegationBytes>,
 }
 
 impl Bind {
@@ -72,7 +78,7 @@ impl Bind {
                 hostname: self.hostname.clone(),
                 heads: self.heads.clone(),
                 predecessor: None,
-                delegation_chain: vec![],
+                delegation_chain: self.carriage.clone(),
                 lineage: self.lineage.clone(),
                 chain: DnssecChain::default(),
             },

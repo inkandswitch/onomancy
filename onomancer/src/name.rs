@@ -10,7 +10,7 @@ use std::{cell::Cell, net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
-use onomancy_core::name::{anchor::Anchor, doc::DocAnchor, Name};
+use onomancy_core::name::{Name, anchor::Anchor, doc::DocAnchor};
 use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_protocol::resolve::{

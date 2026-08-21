@@ -37,12 +37,14 @@ impl Keygen {
         match &self.out {
             Some(path) => {
                 write_key_file(path, &seed::to_hex(&bytes))?;
-                say(&format!("key file (SECRET):   {}", path.display()));
+                eprintln!("key file (SECRET):   {}", path.display());
             }
-            None => say(&format!("seed (hex, SECRET):  {}", seed::to_hex(&bytes))),
+            // Bare seed on stdout, commentary on stderr: redirecting
+            // (`keygen > doc.key`) produces a valid key file.
+            None => say(&seed::to_hex(&bytes)),
         }
-        say(&format!("verifying key:       {anchor}"));
-        say(&format!("as automerge URL:    automerge:{anchor}"));
+        eprintln!("verifying key:       {anchor}");
+        eprintln!("as automerge URL:    automerge:{anchor}");
         Ok(())
     }
 }

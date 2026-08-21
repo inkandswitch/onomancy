@@ -9,6 +9,7 @@ use onomancy_core::{
     name::{dns::DnsName, doc::DocAnchor},
     txt::generation_key::GenerationKey,
 };
+use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::rotate::Rotate as RotateCeremony, signer::Signer};
 
 use crate::{
@@ -81,11 +82,16 @@ impl Rotate {
             None => vec![],
         };
 
+        // One carriage serves both: the statement's signing authority
+        // (terminates at Gₙ₊₁) and the certificate's D10 path proof.
+        let carriage = mint::generation_carriage(&doc_key, &successor)?;
+
         let plan = RotateCeremony {
             hostname,
             document: DocAnchor::from(doc_key.verifying_key()),
             replaced,
             prior_lineage,
+            carriage,
         }
         .plan(now_ms(), &Signer::new(successor), &Signer::new(doc_key))?;
 
@@ -113,6 +119,10 @@ pub(crate) enum RotateError {
     /// The ceremony refused to emit a Plan.
     #[error(transparent)]
     Ceremony(#[from] onomancy_publish::ceremony::CeremonyError),
+
+    /// The authority carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
 
     /// The prior certificate did not decode.
     #[error("prior certificate: {0}")]

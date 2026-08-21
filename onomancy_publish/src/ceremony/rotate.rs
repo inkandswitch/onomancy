@@ -8,7 +8,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     name::{dns::DnsName, doc::DocAnchor},
     statement::rotation::RotationStatement,
     time::UnixSeconds,
@@ -16,7 +16,7 @@ use onomancy_core::{
 };
 
 use crate::{
-    ceremony::{CeremonyError, Intent, simulate},
+    ceremony::{simulate, CeremonyError, Intent},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -39,6 +39,13 @@ pub struct Rotate {
     /// The document's accumulated lineage, oldest first (complete
     /// from the first rotation, per the spec's SHOULD).
     pub prior_lineage: Vec<RotationStatement>,
+
+    /// The authority carriage: delegation proof terminating at Gₙ₊₁
+    /// (dns-anchor §Statement validity item 3). Rides BOTH the
+    /// rotation statement (its signing authority) and the refreshed
+    /// certificate (D10 path membership for the new `g=`). Opaque
+    /// here — minted by `onomancy_keyhive::mint`.
+    pub carriage: Vec<onomancy_core::delegation::DelegationBytes>,
 }
 
 impl Rotate {
@@ -72,8 +79,12 @@ impl Rotate {
             return Err(CeremonyError::GenerationReuse);
         }
 
-        let statement =
-            RotationStatement::sign(&self.document, &self.replaced, successor.key(), vec![])?;
+        let statement = RotationStatement::sign(
+            &self.document,
+            &self.replaced,
+            successor.key(),
+            self.carriage.clone(),
+        )?;
 
         let mut lineage = self.prior_lineage.clone();
         lineage.push(statement.clone());
@@ -89,7 +100,7 @@ impl Rotate {
                 hostname: self.hostname.clone(),
                 heads: vec![],
                 predecessor: None,
-                delegation_chain: vec![],
+                delegation_chain: self.carriage.clone(),
                 lineage,
                 chain: DnssecChain::default(),
             },

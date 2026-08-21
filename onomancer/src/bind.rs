@@ -7,6 +7,7 @@ use onomancy_core::{
     name::{dns::DnsName, doc::DocAnchor},
     txt::generation_key::GenerationKey,
 };
+use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::bind::Bind as BindCeremony, signer::Signer};
 
 use crate::{
@@ -59,12 +60,16 @@ impl Bind {
             self.generation_key.as_deref(),
         )?;
 
+        // The D10 proof: the document delegates the generation key.
+        let carriage = mint::generation_carriage(&doc_key, &generation_key)?;
+
         let plan = BindCeremony {
             hostname,
             document: DocAnchor::from(doc_key.verifying_key()),
             generation: GenerationKey::from(generation_key.verifying_key()),
             heads: vec![],
             lineage: vec![],
+            carriage,
         }
         .plan(now_ms(), &Signer::new(doc_key))?;
 
@@ -79,6 +84,10 @@ pub(crate) enum BindError {
     /// The ceremony refused to emit a Plan.
     #[error(transparent)]
     Ceremony(#[from] onomancy_publish::ceremony::CeremonyError),
+
+    /// The authority carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]

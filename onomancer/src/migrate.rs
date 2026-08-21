@@ -9,15 +9,16 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::Args;
 use onomancy_core::{
     name::{dns::DnsName, doc::DocAnchor},
-    txt::record::TxtRecord,
+    txt::{generation_key::GenerationKey, record::TxtRecord},
 };
 use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::migrate::Migrate as MigrateCeremony, signer::Signer};
 
 use crate::{
     now_ms, plan_io,
-    rotate::{NotAGenerationKey, parse_generation},
+    rotate::NotAGenerationKey,
     seed::{self, SeedError},
 };
 
@@ -47,10 +48,14 @@ pub(crate) struct Migrate {
     #[arg(long, conflicts_with = "successor_key")]
     successor_seed: Option<String>,
 
-    /// The successor document's generation key, in its TXT `g=`
-    /// spelling (base64).
+    /// The successor document's generation key file (needed to mint
+    /// its D10 path proof).
     #[arg(long)]
-    successor_generation: String,
+    successor_generation_key: Option<PathBuf>,
+
+    /// The successor generation seed, hex (INSECURE: shell history).
+    #[arg(long, conflicts_with = "successor_generation_key")]
+    successor_generation_seed: Option<String>,
 
     /// Recursive resolver (default: system resolvers, then 1.1.1.1).
     #[arg(long)]
@@ -78,7 +83,11 @@ impl Migrate {
             self.successor_seed.as_deref(),
             self.successor_key.as_deref(),
         )?;
-        let successor_generation = parse_generation(&self.successor_generation)?;
+        let successor_generation_key = seed::load(
+            self.successor_generation_seed.as_deref(),
+            self.successor_generation_key.as_deref(),
+        )?;
+        let successor_generation = GenerationKey::from(successor_generation_key.verifying_key());
 
         let predecessor = DocAnchor::from(predecessor_key.verifying_key());
 
@@ -92,6 +101,7 @@ impl Migrate {
             retained,
             successor_generation,
             lineage: vec![],
+            carriage: mint::generation_carriage(&successor_key, &successor_generation_key)?,
         }
         .plan(
             now_ms(),
@@ -129,6 +139,10 @@ pub(crate) enum MigrateError {
     /// The ceremony refused to emit a Plan.
     #[error(transparent)]
     Ceremony(#[from] onomancy_publish::ceremony::CeremonyError),
+
+    /// The authority carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
 
     /// The live chain could not be assembled.
     #[error(transparent)]

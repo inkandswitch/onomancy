@@ -17,12 +17,12 @@ use onomancy_core::{
 };
 use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::{
     verifier_state::{
         VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
-        memory::MemoryAuthority,
         store::Item,
     },
     verify::{self, Rejection},
@@ -120,11 +120,10 @@ impl Resolve {
         };
         let bytes = std::fs::read(cert_path)?;
 
-        // KEYHIVE PENDING: delegation carriages are not yet verified —
-        // MemoryAuthority is permissive by default, so D10 path-membership
-        // and carriage checks pass vacuously until onomancy_keyhive
-        // lands. The DNSSEC walk above is fully real.
-        let authority = MemoryAuthority::default();
+        // Real authority (ADR-056): carriages replay into a Keyhive
+        // delegation graph; doc-key-signed certificates pass by the
+        // identity rule.
+        let authority = KeyhiveAuthority;
 
         let verdict = verify::verify(&bytes, &hostname, now, &validator, &authority)?;
 
@@ -133,9 +132,7 @@ impl Resolve {
             Freshness::Stale => "stale \u{26a0}",
         };
         let generation = match verdict.generation_check {
-            verify::GenerationCheck::OnPath => {
-                "on delegation path — VACUOUSLY: delegation checks are permissive until onomancy_keyhive"
-            }
+            verify::GenerationCheck::OnPath => "on delegation path",
             verify::GenerationCheck::Provisional => {
                 "provisional ⚠ (stale evidence; re-checked when fresher evidence arrives)"
             }
@@ -160,8 +157,7 @@ pub(crate) fn stateful_pass(
 ) -> Result<(), ResolveError> {
     let now = UnixSeconds::from(now_seconds());
     let validator = Validator::iana();
-    // KEYHIVE PENDING: permissive authority — see the one-shot path.
-    let authority = MemoryAuthority::default();
+    let authority = KeyhiveAuthority;
     let pins: Map<DnsName, Vec<onomancy_core::name::doc::DocAnchor>> = Map::default();
     let decisions = Decisions::default();
 

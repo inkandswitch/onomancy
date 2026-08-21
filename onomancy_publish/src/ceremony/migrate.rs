@@ -9,7 +9,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     time::UnixSeconds,
@@ -17,7 +17,7 @@ use onomancy_core::{
 };
 
 use crate::{
-    ceremony::{CeremonyError, Intent, simulate},
+    ceremony::{simulate, CeremonyError, Intent},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -45,6 +45,11 @@ pub struct Migrate {
     /// The successor document's lineage, oldest first (usually
     /// empty for a fresh document).
     pub lineage: Vec<RotationStatement>,
+
+    /// The successor document's authority carriage: D10 path proof
+    /// for the new `g=`, attached to the successor certificate.
+    /// Opaque here — minted by `onomancy_keyhive::mint`.
+    pub carriage: Vec<onomancy_core::delegation::DelegationBytes>,
 }
 
 impl Migrate {
@@ -83,7 +88,7 @@ impl Migrate {
                 hostname: self.hostname.clone(),
                 heads: vec![],
                 predecessor: Some(proof.clone()),
-                delegation_chain: vec![],
+                delegation_chain: self.carriage.clone(),
                 lineage: self.lineage.clone(),
                 chain: DnssecChain::default(),
             },

@@ -42,6 +42,7 @@ fn bind_emits_a_verified_plan() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(1))?;
 
@@ -63,6 +64,7 @@ fn rotate_emits_statement_and_certificate() -> TestResult {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(3), &signer(1))?;
 
@@ -89,6 +91,7 @@ fn rotate_refuses_generation_reuse() {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(3), &signer(1))
     .expect("first rotation plans");
@@ -109,6 +112,7 @@ fn rotate_refuses_generation_reuse() {
         document: doc(1),
         replaced: generation(3),
         prior_lineage: vec![statement],
+        carriage: vec![],
     }
     .plan(NOW_MS + 1000, &signer(2), &signer(1)); // signer(2) = retired G
 
@@ -133,6 +137,7 @@ fn rotate_catches_forks_the_reuse_check_cannot_see() -> TestResult {
         document: doc(1),
         replaced: generation(2), // second replacement of G2
         prior_lineage: vec![earlier],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(4), &signer(1));
 
@@ -151,6 +156,7 @@ fn migrate_dual_publishes_and_proves_continuity() -> TestResult {
         retained,
         successor_generation: generation(6),
         lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(1), &signer(5))?;
 
@@ -177,6 +183,7 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
+        carriage: vec![],
     };
     let bound = bind.plan(NOW_MS, &signer(1))?;
 
@@ -207,6 +214,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS, &signer(1))?;
 
@@ -216,6 +224,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS + 1_000, &signer(3), &signer(1))?;
     let rotated_record = *rotated.dns_ops[0].record();
@@ -228,6 +237,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         retained: rotated_record,
         successor_generation: generation(6),
         lineage: vec![],
+        carriage: vec![],
     }
     .plan(NOW_MS + 2_000, &signer(1), &signer(5))?;
 

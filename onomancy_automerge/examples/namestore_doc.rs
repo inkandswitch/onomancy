@@ -6,7 +6,7 @@
 //!   out.automerge pics=automerge:VDTcix… "docs/current=automerge:8W3teP…"
 //! ```
 
-use automerge::{transaction::Transactable, Automerge, ObjType};
+use automerge::{Automerge, ObjType, transaction::Transactable};
 use onomancy_automerge::RESERVED_KEY;
 use onomancy_core::name::doc::DocAnchor;
 

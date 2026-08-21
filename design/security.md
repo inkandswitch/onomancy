@@ -180,3 +180,24 @@ The protocol cannot outrun a hijacked registrar login. Boring hygiene carries re
 - _No authority in caches_ — nothing trusted can be planted in unsigned local state
 - _No borrowed authority in your root doc_ — you never sign attestations about DNS you can't back ([anchors.md](./anchors.md#consequence-1-dns-bindings-are-not-edges-in-your-root-doc))
 - _No expiration_ — revocation is explicit; freshness is advisory
+
+## Leaked generation keys (analysis 2026-08-21, ADR-057)
+
+The signing bar (dns-anchor §Who Signs) is the _delegating hop_, so a
+root-granted generation key can sign certificates. What a leaked
+current generation key enables — and does not:
+
+| Capability | Outcome |
+|------------|---------|
+| Rebind the hostname | No — `p=`/`g=` are zone-attested |
+| Forge document content | No — writes need Edit on the doc graph |
+| Forge a rotation to an attacker key | No — the attacker key has no admin-hop delegation |
+| Sign certificates (attacker heads, `issued_at` games) | Yes — until rotation |
+
+Rotation heals fully: post-rotation the attacker's carriage proves
+only the retired `g=`, so D10 rejects fresh records, and grafting the
+owner's new carriage fails (it terminates at the wrong key). Since a
+leaked generation key already demands immediate rotation, its
+cert-signing ability changes neither the response nor the blast
+radius. Admins hold the lineage pen but never the zone: rotation takes
+effect only when DNS control moves `g=`.
