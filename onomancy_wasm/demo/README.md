@@ -1,8 +1,6 @@
 # Live verifier demo
 
-The whole Onomancy verifier in a browser tab: DoH fetch → DNSSEC walk
-from the baked-in IANA root keys → graded verdict. No certificate
-authority, no trusted resolver, no server component.
+The whole Onomancy verifier in a browser tab: DoH fetch → DNSSEC walk from the baked-in IANA root keys → graded verdict. No certificate authority, no trusted resolver, no server component.
 
 `pkg/` is generated (gitignored). Rebuild it with:
 

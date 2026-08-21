@@ -183,9 +183,7 @@ The protocol cannot outrun a hijacked registrar login. Boring hygiene carries re
 
 ## Leaked generation keys (analysis 2026-08-21, ADR-057)
 
-The signing bar (dns-anchor §Who Signs) is the _delegating hop_, so a
-root-granted generation key can sign certificates. What a leaked
-current generation key enables — and does not:
+The signing bar (dns-anchor §Who Signs) is the _delegating hop_, so a root-granted generation key can sign certificates. What a leaked current generation key enables — and does not:
 
 | Capability | Outcome |
 |------------|---------|
@@ -194,10 +192,4 @@ current generation key enables — and does not:
 | Forge a rotation to an attacker key | No — the attacker key has no admin-hop delegation |
 | Sign certificates (attacker heads, `issued_at` games) | Yes — until rotation |
 
-Rotation heals fully: post-rotation the attacker's carriage proves
-only the retired `g=`, so D10 rejects fresh records, and grafting the
-owner's new carriage fails (it terminates at the wrong key). Since a
-leaked generation key already demands immediate rotation, its
-cert-signing ability changes neither the response nor the blast
-radius. Admins hold the lineage pen but never the zone: rotation takes
-effect only when DNS control moves `g=`.
+Rotation heals fully: post-rotation the attacker's carriage proves only the retired `g=`, so D10 rejects fresh records, and grafting the owner's new carriage fails (it terminates at the wrong key). Since a leaked generation key already demands immediate rotation, its cert-signing ability changes neither the response nor the blast radius. Admins hold the lineage pen but never the zone: rotation takes effect only when DNS control moves `g=`.

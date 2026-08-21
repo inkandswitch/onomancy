@@ -1,8 +1,6 @@
 # onomancer
 
-The Onomancy agent: publisher and verifier glue over the pure crates.
-Argument parsing, byte moving, and printing live here; everything
-cryptographic lives in the libraries.
+The Onomancy agent: publisher and verifier glue over the pure crates. Argument parsing, byte moving, and printing live here; everything cryptographic lives in the libraries.
 
 ## Publish a binding
 
@@ -37,10 +35,5 @@ onomancer resolve --hostname example.com --cert example.onc
 
 ## Caveats (v0)
 
-- **Keyhive pending**: delegation carriages are not verified —
-  certificates are self-signed by the document key, and the verifier
-  runs a permissive `AuthorityVerifier`. The DNSSEC walk is fully
-  real; the delegation half of the trust story lands with
-  `onomancy_keyhive`.
-- Seeds on the command line are a dev-tool convenience, not key
-  management. Shells keep history.
+- **Keyhive pending**: delegation carriages are not verified — certificates are self-signed by the document key, and the verifier runs a permissive `AuthorityVerifier`. The DNSSEC walk is fully real; the delegation half of the trust story lands with `onomancy_keyhive`.
+- Seeds on the command line are a dev-tool convenience, not key management. Shells keep history.

@@ -30,8 +30,7 @@ automerge:2nBeEMDj…/blog#4NMNn…
 
 ## Parse Rules
 
-Each spelling family is exactly one anchor kind; there is no
-fallback between families:
+Each spelling family is exactly one anchor kind; there is no fallback between families:
 
 ```mermaid
 flowchart TD

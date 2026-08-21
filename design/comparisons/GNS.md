@@ -1,7 +1,6 @@
 # GNS (GNU Name System)
 
-**System:** [GNU Name System](https://www.rfc-editor.org/rfc/rfc9498), RFC 9498; part of the GNUnet P2P framework.
-**Relationship:** Closest living relative. Both are SDSI-descended petname systems over self-certifying keys; nearly every layer _around_ that shared core made the opposite bet. The [path-resolution spec](../../specs/path-resolution.md) borrows the term _namestore_ from GNS.
+**System:** [GNU Name System](https://www.rfc-editor.org/rfc/rfc9498), RFC 9498; part of the GNUnet P2P framework. **Relationship:** Closest living relative _structurally_, and philosophical opposite nearly everywhere else. The skeleton is shared — both are SDSI-descended petname systems over self-certifying keys, and a concept map between them is almost mechanical — but every layer built on that skeleton answers to a different worldview. The [path-resolution spec](../../specs/path-resolution.md) borrows the term _namestore_ from GNS.
 
 ## How GNS Works
 
@@ -14,23 +13,33 @@
 
 ## Concept Map
 
-| GNS | Onomancy |
-|-----|-----------|
-| Zone (key pair) | Namestore reference (Keyhive doc ID = ed25519 vk) |
-| Namestore (your zones' record DB) | Namestore (every node in the walked graph) |
-| `PKEY`/`EDKEY` delegation record | Edge record (`target` reference) |
-| Start zone | `~` (your root namestore) |
-| zTLD | `automerge:` doc anchor |
-| Record expiration | None — graded freshness instead |
-| DHT publication | CRDT replication |
-| Zone-key revocation flood | Delegation revocation inside the doc |
+| GNS                               | Onomancy                                          |
+|-----------------------------------|---------------------------------------------------|
+| Zone (key pair)                   | Namestore reference (Keyhive doc ID = ed25519 vk) |
+| Namestore (your zones' record DB) | Namestore (every node in the walked graph)        |
+| `PKEY`/`EDKEY` delegation record  | Edge record (`target` reference)                  |
+| Start zone                        | `~` (your root namestore)                         |
+| zTLD                              | `automerge:` doc anchor                           |
+| Record expiration                 | None — graded freshness instead                   |
+| DHT publication                   | CRDT replication                                  |
+| Zone-key revocation flood         | Delegation revocation inside the doc              |
 
-## Shared Ground
+## Shared Skeleton
 
 - Linked local namespaces; trust never flows through a label
 - Self-certifying identities; anyone can verify records regardless of the transport that delivered them
 - Petname-first: offline introductions work immediately and upgrade later
 - Resolution = one delegation-follow per label (our greedy multi-segment match generalizes this)
+
+## One Skeleton, Two Philosophies
+
+The divergences below are not independent choices; each system placed one upstream bet, and the rest of its layers are forced moves.
+
+**GNS bet on the network.** Records live in a DHT, so resolution is a sequence of live queries. That premise demands expiry (DHT hygiene — stale records must die), demands the privacy machinery (observable queries ⇒ encrypted records, blinded storage, unenumerable zones — genuinely GNS's crown jewel), and demands a flooded proof-of-work revocation, because no other channel reaches everyone holding your key.
+
+**Onomancy bet on the replica.** Records live in documents you sync, so resolution is a local read. Offline resolution falls out for free; partition is a designed state (`Partial(UnsyncedTarget)`, not a timeout); expiry becomes anti-local-first (a death clock on data you legitimately hold); privacy stops being the naming layer's job (you sync only with chosen peers — confidentiality belongs to the access-control layer); and revocation is just another edge in the delegation graph, because the document _is_ the propagation channel.
+
+In one line each: GNS says _memorable-global names aren't worth a coercible root_; Onomancy says _they are, exactly once, if the root can be fired without taking your identity with it_.
 
 ## Deliberate Divergences
 
