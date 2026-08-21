@@ -5,7 +5,7 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     name::{dns::DnsName, doc::DocAnchor},
     time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},

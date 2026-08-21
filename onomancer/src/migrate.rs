@@ -17,7 +17,7 @@ use onomancy_publish::{ceremony::migrate::Migrate as MigrateCeremony, signer::Si
 
 use crate::{
     now_ms, plan_io,
-    rotate::{parse_generation, NotAGenerationKey},
+    rotate::{NotAGenerationKey, parse_generation},
     seed::{self, SeedError},
 };
 

@@ -9,6 +9,8 @@
 //! onomancer refresh                     keyless chain re-attach → Plan
 //! onomancer record                      low-level TXT/cert emission
 //! onomancer resolve                     live fetch → walk → verdict
+//!                                       (--store: stateful, diffs surface)
+//! onomancer watch                       the stateful pass on an interval
 //! ```
 //!
 //! Everything cryptographic happens in the libraries; this binary
@@ -26,6 +28,8 @@ mod refresh;
 mod resolve;
 mod rotate;
 mod seed;
+mod store_dir;
+mod watch;
 
 use std::{
     io::Write as _,
@@ -61,6 +65,10 @@ enum Command {
 
     /// Plan a generation rotation (ceremony: statement + TXT + cert).
     Rotate(rotate::Rotate),
+
+    /// Re-judge a hostname's evidence on an interval, surfacing
+    /// changes as events.
+    Watch(watch::Watch),
 }
 
 fn main() -> ExitCode {
@@ -72,6 +80,7 @@ fn main() -> ExitCode {
         Command::Refresh(command) => command.run().map_err(Into::into),
         Command::Resolve(command) => command.run().map_err(Into::into),
         Command::Rotate(command) => command.run().map_err(Into::into),
+        Command::Watch(command) => command.run().map_err(Into::into),
     };
 
     match outcome {
