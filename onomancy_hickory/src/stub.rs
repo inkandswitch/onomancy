@@ -9,14 +9,10 @@
 //! when the upstream's validator calls them bogus: judging is not the
 //! resolver's job here.
 
-// Foreign-enum wildcards are deliberate: any response code but
-// NoError/NXDomain is a refusal, whatever hickory adds later.
-#![allow(clippy::wildcard_enum_match_arm)]
-
 use std::{net::SocketAddr, time::Duration};
 
 use hickory_proto::{
-    op::{Edns, Message, MessageType, OpCode, Query, ResponseCode},
+    op::Message,
     rr::{Name, Record, RecordType},
 };
 use tokio::{
@@ -24,8 +20,7 @@ use tokio::{
     net::{TcpStream, UdpSocket},
 };
 
-/// EDNS advertised payload size (the DNS-flag-day value).
-const EDNS_PAYLOAD: u16 = 1232;
+use crate::chain_assembly::{self, Query, Refused};
 
 /// UDP receive buffer: generous for signed `RRsets` under the payload cap.
 const UDP_BUFFER: usize = 4096;
@@ -65,7 +60,7 @@ impl StubResolver {
     /// Returns [`QueryError`] for transport failures, timeouts,
     /// malformed responses, and non-`NoError`/`NXDomain` rcodes.
     pub async fn query(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
-        let request = build_query(name, rtype);
+        let request = chain_assembly::build_query(name, rtype, weak_id());
         let id = request.metadata.id;
         let wire = request.to_vec().map_err(|_| QueryError::Encode)?;
 
@@ -74,10 +69,7 @@ impl StubResolver {
             UdpOutcome::Truncated => self.exchange_tcp(&wire, id).await?,
         };
 
-        match response.metadata.response_code {
-            ResponseCode::NoError | ResponseCode::NXDomain => Ok(response.answers),
-            code => Err(QueryError::Refused { code }),
-        }
+        Ok(chain_assembly::accepted_answers(response)?)
     }
 
     async fn exchange_udp(&self, wire: &[u8], id: u16) -> Result<UdpOutcome, QueryError> {
@@ -132,23 +124,12 @@ impl StubResolver {
     }
 }
 
-/// A recursion-desired, checking-disabled, DNSSEC-OK query.
-fn build_query(name: &Name, rtype: RecordType) -> Message {
-    let mut edns = Edns::new();
-    edns.set_dnssec_ok(true);
-    edns.set_max_payload(EDNS_PAYLOAD);
-    edns.set_version(0);
+impl Query for StubResolver {
+    type Error = QueryError;
 
-    let mut message = Message::query();
-    message.metadata.id = weak_id();
-    message.metadata.message_type = MessageType::Query;
-    message.metadata.op_code = OpCode::Query;
-    message.metadata.recursion_desired = true;
-    message.metadata.checking_disabled = true;
-    message
-        .add_query(Query::query(name.clone(), rtype))
-        .set_edns(edns);
-    message
+    async fn answers(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
+        self.query(name, rtype).await
+    }
 }
 
 /// A weak query ID: fine here because transport is untrusted anyway —
@@ -197,11 +178,8 @@ pub enum QueryError {
     MalformedResponse,
 
     /// The upstream refused the query (SERVFAIL, REFUSED, …).
-    #[error("upstream returned {code}")]
-    Refused {
-        /// The response code.
-        code: ResponseCode,
-    },
+    #[error(transparent)]
+    Refused(#[from] Refused),
 
     /// No response within the configured timeout.
     #[error("query timed out")]

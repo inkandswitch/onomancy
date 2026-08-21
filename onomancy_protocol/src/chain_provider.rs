@@ -3,10 +3,10 @@
 //! Everything downstream of this trait is pure — the fetched bytes go
 //! to `ChainValidator` (sans-IO validation against the caller's own
 //! trust anchor) and then into the store as evidence. Backends:
-//! `onomancy_hickory` natively, a `DoH` `fetch()` provider on Wasm.
+//! `onomancy_hickory` on hosts, a `DoH` `fetch()` provider on Wasm.
 //!
 //! The future is deliberately not `Send`-bound: Wasm fetch futures
-//! are `!Send`, and native callers that need `Send` can require it at
+//! are `!Send`, and host callers that need `Send` can require it at
 //! their own usage sites.
 
 use core::future::Future;

@@ -20,7 +20,7 @@ ed25519-dalek = { workspace = true }
 getrandom = { workspace = true }
 onomancy_core = { workspace = true, features = ["idna", "std"] }
 onomancy_dnssec = { workspace = true, features = ["std"] }
-onomancy_hickory = { workspace = true }
+onomancy_hickory = { workspace = true, features = ["sockets"] }
 onomancy_protocol = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

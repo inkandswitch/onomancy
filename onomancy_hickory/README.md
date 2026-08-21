@@ -1,6 +1,6 @@
 # onomancy_hickory
 
-The native DNSSEC chain courier: `ChainProvider` over real DNS, built
+The host DNSSEC chain courier: `ChainProvider` over real DNS, built
 on [hickory-proto]'s message types with a deliberately minimal stub
 transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`).
 

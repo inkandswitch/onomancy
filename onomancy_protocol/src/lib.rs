@@ -5,7 +5,7 @@
 //! functions that turn evidence into verdicts. Nothing here performs
 //! IO. Networks, clocks, and storage enter only as values and trait
 //! seams, so every machine is deterministic, testable without mocks,
-//! and shared verbatim between native and Wasm builds.
+//! and shared verbatim between host and Wasm builds.
 //!
 //! # Crate Organization
 //!
@@ -19,7 +19,7 @@
 //!   for a single unit at a single clock reading
 //! - [`chain_provider`] — the fetch seam: the one place IO enters.
 //!   Providers are byte couriers in backend crates (`onomancy_hickory`
-//!   natively, `DoH` on Wasm); everything downstream is pure.
+//!   on hosts, `DoH` on Wasm); everything downstream is pure.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]

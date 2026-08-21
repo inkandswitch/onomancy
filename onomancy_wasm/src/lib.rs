@@ -3,6 +3,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "doh")]
+pub mod doh;
+
 use onomancy_core::name::{Name, anchor::Anchor};
 use wasm_bindgen::prelude::*;
 

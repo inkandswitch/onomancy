@@ -37,7 +37,7 @@ Libraries implement the protocol (`onomancy_*`); agents that practice it are ono
 
 ```mermaid
 graph TD
-    subgraph pure ["sans-IO: pure functions (native + Wasm)"]
+    subgraph pure ["sans-IO: pure functions (host + Wasm)"]
         core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
         proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
         dnssec["onomancy_dnssec†<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
@@ -50,7 +50,7 @@ graph TD
     end
 
     subgraph network ["network IO (untrusted byte couriers)"]
-        hickory["onomancy_hickory†<br/><i>native chain fetching</i>"]
+        hickory["onomancy_hickory†<br/><i>host chain fetching</i>"]
         wasm["onomancy_wasm<br/><i>browser bindings · DoH fetch</i>"]
     end
 

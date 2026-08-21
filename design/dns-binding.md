@@ -96,7 +96,7 @@ Validation requirements:
 - _Multiple TXT records_ — policy: highest understood format tag, then highest serial `n`; overlap is expected during migration.
 - _Wildcard synthesis_ — wildcard-derived TXT answers are REJECTED at v0: their no-closer-match proof would be a negative proof (ADR-045). Publishers MUST NOT rely on wildcard bindings.
 - _Unknown algorithms are invalid, not insecure_ — a chain needing an unimplemented signature algorithm yields ✗; the resolver-world "treat as insecure" downgrade has no analogue for a KSK-rooted binding.
-- _Hand-rolled vs. hickory's validator_ — undecided for native; the wasm path needs its own validation regardless.
+- _Hand-rolled vs. hickory's validator_ — undecided for the host path; the wasm path needs its own validation regardless.
 
 ## Graded Freshness
 
@@ -136,7 +136,7 @@ pub trait ChainProvider {
 
 | Implementation | Crate | Mechanism |
 |----------------|-------|-----------|
-| Native | `onomancy_hickory` | hickory resolver |
+| Host | `onomancy_hickory` | hickory resolver |
 | Browser | `onomancy_wasm` | DoH via `fetch()` |
 
 The provider is an untrusted byte-fetcher: all verification runs in core against the baked-in KSK, so a malicious provider can cause denial of service but never a false `Verified`.

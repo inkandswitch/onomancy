@@ -1,4 +1,4 @@
-//! The native DNSSEC chain courier: `ChainProvider` over real DNS.
+//! The host DNSSEC chain courier: `ChainProvider` over real DNS.
 //!
 //! This crate is a byte courier and nothing more (ADR-006/ADR-040):
 //! it asks a recursive resolver for the records a chain needs — root
@@ -24,5 +24,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod chain_assembly;
+#[cfg(feature = "sockets")]
 pub mod provider;
+#[cfg(feature = "sockets")]
 pub mod stub;

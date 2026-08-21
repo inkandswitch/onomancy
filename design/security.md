@@ -150,7 +150,7 @@ Resolution leaks metadata; verification does not require trust but does require 
 | Receive a binding via gossip | none | the gossiping peer (who already had it) |
 | First fetch / stale-refresh of a binding | one `_onomancy` lookup + one endpoint fetch | resolver, network, and server learn interest in that _name_ |
 
-- DNS lookups reveal which names you refresh — DoH narrows the on-path observer in wasm/browsers (while shifting that visibility to the DoH resolver); the native hickory path leaks to the configured resolver.
+- DNS lookups reveal which names you refresh — DoH narrows the on-path observer in wasm/browsers (while shifting that visibility to the DoH resolver); the host hickory path leaks to the configured resolver.
 - The certificate-endpoint fetch reveals interest to the server and network. It is integrity-safe over plain HTTP (the record is self-authenticating) but not private.
 - P2P gossip reveals your binding set to peers you gossip with.
 

@@ -16,7 +16,7 @@ Onomancy certificates, root document edges, and (transitively) the entire key-an
 
 > **Assumption:** Signing keys are generated from a cryptographically secure source.
 
-`getrandom` on native platforms; `crypto.getRandomValues()` in browsers (via the `wasm_js` backend).
+`getrandom` on host platforms; `crypto.getRandomValues()` in browsers (via the `wasm_js` backend).
 
 **Consequence of violation:** Predictable keys, identity takeover.
 
@@ -90,7 +90,7 @@ Everything must degrade: offline introductions root as petnames and upgrade late
 
 > **Assumption:** DNS lookups and certificate-endpoint fetches leak metadata to resolvers and networks.
 
-DoH narrows this in browsers; native resolver traffic leaks. The certificate fetch is integrity-safe even over plain HTTP (the record is self-authenticating) but is not private.
+DoH narrows this in browsers; host resolver traffic leaks. The certificate fetch is integrity-safe even over plain HTTP (the record is self-authenticating) but is not private.
 
 ## Storage
 

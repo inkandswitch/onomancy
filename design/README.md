@@ -18,6 +18,7 @@ Global names could be rooted in pure DNS, but the thing we actually want is shar
 | [`resolution`](./resolution.md)   | Petname store, binding cache, and resolution semantics |
 | [`security`](./security.md)       | Threat model and accepted risks                        |
 | [`verification`](./verification.md) | Lean 4 model, theorems, and conformance-vector pipeline |
+| [`keyhive-coordination`](./keyhive-coordination.md) | Upstream asks blocking `onomancy_keyhive` (the last stubbed seam) |
 | [`limitations`](./limitations.md)   | What Onomancy does NOT fix (phishing, custody, DNS politics, …) |
 | [`comparisons/`](./comparisons/README.md) | How Onomancy relates to prior naming systems |
 
