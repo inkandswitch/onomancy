@@ -14,7 +14,9 @@ use onomancy_core::{
 use testresult::TestResult;
 
 use onomancy_protocol::{
-    test_utils::{Binding, binding, binding_carrying, doc, generation, host, rotation, succession},
+    test_utils::{
+        Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
+    },
     verifier_state::{
         VerifierState,
         decisions::{Acceptance, Claim, Decisions},
@@ -775,4 +777,36 @@ mod props {
                 assert_eq!(baseline, run(&rotated), "rotation changed the verdict");
             });
     }
+}
+
+// ───── seam parity: certificate signers are authority-checked ─────
+
+#[test]
+fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
+    // Same shape as B9 for statements: a certificate whose signer the
+    // authority refuses for its own document is discarded entirely —
+    // no binding evidence, no accepted state. Vacuous under the
+    // permissive default; the check that makes delegation graphs bite.
+    let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+    let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+    let mut store = Store::default();
+    store.insert(Item::Record(b.cert.clone()));
+
+    let derivation = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        // The cert builder signs with `signer(200 ^ doc_seed)`.
+        &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
+    );
+
+    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    assert!(
+        state.accepted.is_none(),
+        "an unauthorized signer's certificate must be inert"
+    );
+    Ok(())
 }

@@ -19,6 +19,8 @@ clap = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 getrandom = { workspace = true }
+automerge = { workspace = true }
+onomancy_automerge = { workspace = true }
 onomancy_core = { workspace = true, features = ["idna", "std"] }
 onomancy_dnssec = { workspace = true, features = ["std"] }
 onomancy_hickory = { workspace = true, features = ["sockets"] }

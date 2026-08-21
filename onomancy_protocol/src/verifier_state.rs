@@ -450,6 +450,17 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
         return None;
     };
 
+    // Seam parity with statements (B9): a certificate whose signer is
+    // not authorized by its own document contributes nothing. Vacuous
+    // under the permissive default; real once delegation graphs land.
+    if !authority.authorizes(
+        certificate.root_doc(),
+        certificate.signer(),
+        certificate.delegation_chain(),
+    ) {
+        return None;
+    }
+
     // Cross-check: the chain-proven RRset must attest the
     // certificate's own document. Among matching records — several is
     // legal within one window (migration dual-publish) — the highest

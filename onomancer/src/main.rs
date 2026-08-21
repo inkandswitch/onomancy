@@ -22,6 +22,7 @@
 mod bind;
 mod keygen;
 mod migrate;
+mod name;
 mod plan_io;
 mod record;
 mod refresh;
@@ -54,6 +55,9 @@ enum Command {
     /// Plan a document migration (ceremony: dual-publish + proof).
     Migrate(migrate::Migrate),
 
+    /// Resolve a full onomancy name through held documents.
+    Name(name::NameWalk),
+
     /// Emit the DNS-publishable TXT record for a binding, and
     /// optionally a signed ONC certificate (low-level; prefer bind).
     Record(record::Record),
@@ -78,6 +82,7 @@ fn main() -> ExitCode {
         Command::Bind(command) => command.run().map_err(Into::into),
         Command::Keygen(command) => command.run().map_err(Into::into),
         Command::Migrate(command) => command.run().map_err(Into::into),
+        Command::Name(command) => command.run().map_err(Into::into),
         Command::Record(command) => command.run().map_err(Into::into),
         Command::Refresh(command) => command.run().map_err(Into::into),
         Command::Resolve(command) => command.run().map_err(Into::into),

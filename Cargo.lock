@@ -1184,10 +1184,12 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 name = "onomancer"
 version = "0.1.0"
 dependencies = [
+ "automerge",
  "base64",
  "clap",
  "ed25519-dalek",
  "getrandom 0.2.17",
+ "onomancy_automerge",
  "onomancy_core",
  "onomancy_dnssec",
  "onomancy_hickory",
