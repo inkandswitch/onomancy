@@ -165,6 +165,29 @@
           '';
         };
 
+        # Real-browser wasm tests (chromedriver + geckodriver). Not in
+        # the `ci` aggregate: pulls whole browsers — run deliberately.
+        browser-pkgs = pkgs.lib.optionals pkgs.stdenv.isLinux [
+          pkgs.chromedriver
+          pkgs.chromium
+          pkgs.firefox
+          pkgs.geckodriver
+        ];
+
+        ci-browser = pkgs.writeShellApplication {
+          name = "onomancy-ci-browser";
+          runtimeInputs = [ rust-toolchain unstable.wasm-bindgen-cli ] ++ browser-pkgs;
+          text = ''
+            set -x
+            # One engine at a time: the runner picks whichever driver
+            # variable is set.
+            env -u GECKODRIVER CHROMEDRIVER="$(command -v chromedriver)" \
+              cargo test -p onomancy_wasm --target wasm32-unknown-unknown
+            env -u CHROMEDRIVER GECKODRIVER="$(command -v geckodriver)" \
+              cargo test -p onomancy_wasm --target wasm32-unknown-unknown
+          '';
+        };
+
         ci-all = pkgs.writeShellApplication {
           name = "onomancy-ci";
           runtimeInputs = pkgs.lib.attrValues ci-checks;
@@ -209,6 +232,9 @@
               pkgs.wasm-pack
               wasm-bodge
             ]
+            ++ browser-pkgs
+            ++ [
+            ]
             ++ format-pkgs
             ++ cargo-installs
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
@@ -229,7 +255,7 @@
             type = "app";
             program = "${check}/bin/onomancy-${name}";
           })
-          (ci-checks // { ci = ci-all; });
+          (ci-checks // { ci = ci-all; ci-browser = ci-browser; });
 
         formatter = pkgs.alejandra;
       }
