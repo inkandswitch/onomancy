@@ -6,6 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::say;
 use clap::Args;
 use onomancy_core::{freshness::Freshness, name::dns::DnsName, time::UnixSeconds};
 use onomancy_dnssec::validator::{Validator, WalkError};
@@ -50,19 +51,16 @@ impl Resolve {
         let validator = Validator::iana();
 
         // The live zone: fetch → walk from the baked-in IANA anchors.
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
         let provider = HickoryProvider::new(self.resolver);
-        let chain = runtime.block_on(provider.assemble(&hostname))?;
+        let chain = crate::block_on(provider.assemble(&hostname))??;
 
-        println!("chain: {} links fetched", chain.links().len());
+        say(&format!("chain: {} links fetched", chain.links().len()));
 
         if let Some(chain_out) = &self.chain_out {
             let mut framed = Vec::new();
             chain.write_framed(&mut framed);
             std::fs::write(chain_out, framed)?;
-            println!("chain written: {}", chain_out.display());
+            say(&format!("chain written: {}", chain_out.display()));
         }
 
         let proof = validator.validate_detailed(&hostname, &chain)?;
@@ -71,10 +69,10 @@ impl Resolve {
             onomancy_core::freshness::Grade::Stale => "stale \u{26a0}",
             onomancy_core::freshness::Grade::NotYetBegun => "not yet begun (deferred)",
         };
-        println!("DNSSEC: valid, window {grade}");
+        say(&format!("DNSSEC: valid, window {grade}"));
 
         for record in &proof.records {
-            println!("zone says: {record}");
+            say(&format!("zone says: {record}"));
         }
 
         // A certificate makes it a full graded verdict.
@@ -104,10 +102,10 @@ impl Resolve {
             }
         };
 
-        println!("verdict: {freshness}");
-        println!("  document:   {}", verdict.document);
-        println!("  serial:     {}", verdict.serial);
-        println!("  generation: {generation}");
+        say(&format!("verdict: {freshness}"));
+        say(&format!("  document:   {}", verdict.document));
+        say(&format!("  serial:     {}", verdict.serial));
+        say(&format!("  generation: {generation}"));
         Ok(())
     }
 }

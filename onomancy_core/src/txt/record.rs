@@ -1,4 +1,11 @@
 //! The TXT binding record itself, and its `RRset` dispositions.
+//!
+//! Deliberately NO expiration field (ruled 2026-08-21, closing a
+//! long-open question): freshness is graded from the chain's RRSIG
+//! windows, and revocation lives in the document's delegation graph
+//! (`g=` rotation) — a record-level expiry would fight local-first
+//! offline semantics (dns-anchor spec, "Why no expiration on the
+//! binding record?").
 
 use alloc::{boxed::Box, string::String};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};

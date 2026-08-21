@@ -24,6 +24,7 @@
 
 use alloc::{vec, vec::Vec};
 use core::cmp::Ordering;
+use p256::ecdsa::signature::Verifier as _;
 use sha2::{Digest as _, Sha256};
 
 use crate::{
@@ -176,8 +177,6 @@ fn verify_ed25519(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result
 /// RFC 6605: the key is the uncompressed point WITHOUT the 0x04
 /// prefix (64 bytes); the signature is `r ‖ s` (64 bytes).
 fn verify_p256(public_key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), VerifyError> {
-    use p256::ecdsa::signature::Verifier as _;
-
     if public_key.len() != 64 {
         return Err(VerifyError::MalformedKey);
     }

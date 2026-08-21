@@ -1,15 +1,11 @@
 //! `onomancer record`: the DNS-publishable TXT record, and optionally
 //! a signed ONC certificate.
 
-use std::{
-    net::SocketAddr,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    cert::{chain::DnssecChain, Certificate, CertificateParams},
     name::{dns::DnsName, doc::DocAnchor},
     time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
@@ -17,7 +13,10 @@ use onomancy_core::{
 };
 use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
 
-use crate::seed::{self, SeedError};
+use crate::{
+    say,
+    seed::{self, SeedError},
+};
 
 /// Emit the TXT record (and optionally a certificate) for a binding.
 #[derive(Debug, Args)]
@@ -27,13 +26,23 @@ pub(crate) struct Record {
     #[arg(long)]
     hostname: String,
 
-    /// Seed of the root document key (hex, 32 bytes).
-    #[arg(long)]
-    doc_seed: String,
+    /// Seed of the root document key (hex, 32 bytes). Prefer
+    /// --doc-key: inline seeds land in shell history.
+    #[arg(long, conflicts_with = "doc_key")]
+    doc_seed: Option<String>,
 
-    /// Seed of the current generation key (hex, 32 bytes).
+    /// Key file holding the root document seed (from `keygen --out`).
     #[arg(long)]
-    generation_seed: String,
+    doc_key: Option<PathBuf>,
+
+    /// Seed of the current generation key (hex, 32 bytes). Prefer
+    /// --generation-key.
+    #[arg(long, conflicts_with = "generation_key")]
+    generation_seed: Option<String>,
+
+    /// Key file holding the generation seed.
+    #[arg(long)]
+    generation_key: Option<PathBuf>,
 
     /// Record serial; defaults to the current time in milliseconds
     /// (the serial-as-timestamp convention).
@@ -44,10 +53,15 @@ pub(crate) struct Record {
     #[arg(long)]
     cert_out: Option<PathBuf>,
 
-    /// Seed of the certificate signer (defaults to the doc seed —
-    /// self-signed until Keyhive delegation lands).
-    #[arg(long)]
+    /// Seed of the certificate signer (defaults to the doc key —
+    /// self-signed until Keyhive delegation lands). Prefer
+    /// --signer-key.
+    #[arg(long, conflicts_with = "signer_key")]
     signer_seed: Option<String>,
+
+    /// Key file holding the signer seed.
+    #[arg(long)]
+    signer_key: Option<PathBuf>,
 
     /// Fetch the live DNSSEC chain and attach it to the certificate
     /// (requires the TXT record to already be published).
@@ -68,16 +82,19 @@ impl Record {
     /// fetches, oversize units, and IO failures.
     pub(crate) fn run(&self) -> Result<(), RecordError> {
         let hostname = DnsName::parse_display(&self.hostname)?;
-        let doc_key = seed::signing_key(&self.doc_seed)?;
-        let generation_key = seed::signing_key(&self.generation_seed)?;
+        let doc_key = seed::load(self.doc_seed.as_deref(), self.doc_key.as_deref())?;
+        let generation_key = seed::load(
+            self.generation_seed.as_deref(),
+            self.generation_key.as_deref(),
+        )?;
 
         let document = DocAnchor::from(doc_key.verifying_key());
         let generation = GenerationKey::from(generation_key.verifying_key());
-        let serial = Serial::from(self.serial.unwrap_or_else(now_ms));
+        let serial = Serial::from(self.serial.unwrap_or_else(crate::now_ms));
 
         let record = TxtRecord::new(serial, generation, document);
-        println!("; publish this record (then re-sign the zone):");
-        println!("_onomancy.{hostname}. IN TXT \"{record}\"");
+        say("; publish this record (then re-sign the zone):");
+        say(&format!("_onomancy.{hostname}. IN TXT \"{record}\""));
 
         let Some(cert_out) = &self.cert_out else {
             return Ok(());
@@ -89,15 +106,16 @@ impl Record {
             DnssecChain::default()
         };
 
-        let signer = match &self.signer_seed {
-            Some(hex) => seed::signing_key(hex)?,
-            None => doc_key,
+        let signer = if self.signer_seed.is_some() || self.signer_key.is_some() {
+            seed::load(self.signer_seed.as_deref(), self.signer_key.as_deref())?
+        } else {
+            doc_key
         };
 
         let certificate = Certificate::sign(
             CertificateParams {
                 root_doc: document,
-                issued_at: UnixSeconds::from(now_ms() / 1000),
+                issued_at: UnixSeconds::from(crate::now_ms() / 1000),
                 hostname: hostname.clone(),
                 heads: vec![],
                 predecessor: None,
@@ -111,28 +129,15 @@ impl Record {
         )?;
 
         std::fs::write(cert_out, certificate.encode())?;
-        println!("; wrote certificate: {}", cert_out.display());
+        say(&format!("; wrote certificate: {}", cert_out.display()));
         Ok(())
     }
 }
 
 /// Fetch the live chain on a scratch runtime.
 fn fetch_chain(resolver: SocketAddr, hostname: &DnsName) -> Result<DnssecChain, RecordError> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
     let provider = HickoryProvider::new(resolver);
-
-    Ok(runtime.block_on(provider.assemble(hostname))?)
-}
-
-/// Milliseconds since the Unix epoch.
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
+    Ok(crate::block_on(provider.assemble(hostname))??)
 }
 
 /// Record generation failed.

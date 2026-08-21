@@ -16,7 +16,7 @@ use js_sys::{Reflect, Uint8Array};
 use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
 use onomancy_hickory::chain_assembly::{self, AssembleError, Query, Refused};
 use onomancy_protocol::chain_provider::ChainProvider;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, Request, RequestInit, Response};
 
@@ -188,12 +188,7 @@ pub enum DohError {
 /// Rejects (as a JS error) on malformed hostnames, transport
 /// failures, and invalid chains.
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveHostname)]
-pub async fn resolve_hostname(
-    hostname: &str,
-    doh_url: Option<String>,
-) -> Result<JsValue, wasm_bindgen::JsError> {
-    use wasm_bindgen::JsError;
-
+pub async fn resolve_hostname(hostname: &str, doh_url: Option<String>) -> Result<JsValue, JsError> {
     let hostname =
         DnsName::parse_display(hostname).map_err(|error| JsError::new(&error.to_string()))?;
     let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);

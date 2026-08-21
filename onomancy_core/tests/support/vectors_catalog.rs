@@ -26,6 +26,7 @@
     unreachable_pub
 )]
 
+use core::fmt::Write as _;
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
     cert::{Certificate, CertificateParams, chain::DnssecChain},
@@ -306,8 +307,6 @@ fn concat(left: &[u8; 32], right: &[u8; 32]) -> Vec<u8> {
 
 /// Lowercase hex, the vector files' on-disk form.
 pub fn to_hex(bytes: &[u8]) -> String {
-    use core::fmt::Write as _;
-
     let mut hex = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         write!(hex, "{byte:02x}").expect("writing to a String cannot fail");

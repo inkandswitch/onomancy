@@ -1,0 +1,33 @@
+[package]
+name = "onomancy_publish"
+version = "0.1.0"
+description = "Publisher ceremonies for Onomancy: Plans that verify by construction"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["data-structures"]
+keywords = ["dns", "names", "onomancy", "publishing"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+onomancy_core = { workspace = true }
+onomancy_protocol = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+onomancy_protocol = { workspace = true, features = ["test_utils"] }
+testresult = { workspace = true }
+
+[features]
+default = []
+std = ["onomancy_core/std", "onomancy_protocol/std", "thiserror/std"]
+
+[lints]
+workspace = true

@@ -31,7 +31,11 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 |----------------------------------------|--------------------------------------------------------------------------------------|
 | [`onomancy_core`](./onomancy_core)   | `no_std`-leaning vocabulary: name grammar, TXT codec, certificate & statement units  |
 | [`onomancy_protocol`](./onomancy_protocol) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
-| [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings for browsers and Node.js                                    |
+| [`onomancy_dnssec`](./onomancy_dnssec) | Sans-IO RFC 4034/4035 chain validation, IANA trust anchors baked in                  |
+| [`onomancy_automerge`](./onomancy_automerge) | Automerge substrate adapter: namestores, decision documents, petnames                |
+| [`onomancy_hickory`](./onomancy_hickory) | Host chain courier: stub DNS transport + chain assembly                              |
+| [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
+| [`onomancer`](./onomancer)           | The agent (binary): keygen · record · resolve                                        |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
 
@@ -40,21 +44,21 @@ graph TD
     subgraph pure ["sans-IO: pure functions (host + Wasm)"]
         core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
         proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
-        dnssec["onomancy_dnssec†<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
+        dnssec["onomancy_dnssec<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
         publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
 
         subgraph adapters ["substrate adapters (pure over held documents)"]
-            automerge["onomancy_automerge†<br/><i>namestores · decision view ·<br/>Head ⇄ ChangeHash</i>"]
+            automerge["onomancy_automerge<br/><i>namestores · decision view ·<br/>Head ⇄ ChangeHash</i>"]
             keyhive["onomancy_keyhive†<br/><i>delegation-chain verification</i>"]
         end
     end
 
     subgraph network ["network IO (untrusted byte couriers)"]
-        hickory["onomancy_hickory†<br/><i>host chain fetching</i>"]
+        hickory["onomancy_hickory<br/><i>host chain fetching</i>"]
         wasm["onomancy_wasm<br/><i>browser bindings · DoH fetch</i>"]
     end
 
-    onomancer["onomancer† (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
+    onomancer["onomancer (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
 
     proto --> core
     dnssec -- "implements ChainValidator" --> proto
@@ -72,7 +76,7 @@ graph TD
     onomancer --> keyhive
 ```
 
-† planned — the crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, decision state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
+† planned (onomancy_publish, onomancy_keyhive — the latter gated on upstream coordination, see design/keyhive-coordination.md). The crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, decision state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
 
 ## Development
 

@@ -7,6 +7,7 @@ members = [
   "onomancy_dnssec",
   "onomancy_hickory",
   "onomancy_protocol",
+  "onomancy_publish",
   "onomancy_wasm",
 ]
 
@@ -14,7 +15,7 @@ members = [
 edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/expede/onomancer"
+repository = "https://github.com/expede/onomancy"
 authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 
 [workspace.dependencies]
@@ -24,6 +25,7 @@ onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = 
 onomancy_dnssec = { version = "0.1.0", path = "onomancy_dnssec", default-features = false }
 onomancy_hickory = { version = "0.1.0", path = "onomancy_hickory", default-features = false }
 onomancy_protocol = { version = "0.1.0", path = "onomancy_protocol", default-features = false }
+onomancy_publish = { version = "0.1.0", path = "onomancy_publish", default-features = false }
 onomancy_wasm = { version = "0.1.0", path = "onomancy_wasm", default-features = false }
 
 # External crates
