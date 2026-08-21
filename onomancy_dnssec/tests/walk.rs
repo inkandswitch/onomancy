@@ -14,9 +14,12 @@ use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator as _};
 use testresult::TestResult;
 
 use onomancy_dnssec::{
-    test_utils::{ChainWindows, Zone, binding_chain, fixtures, link, txt_record, zone},
+    test_utils::{binding_chain, fixtures, link, txt_record, zone, ChainWindows, Zone},
     validator::{Validator, WalkError},
-    wire::record::{CLASS_IN, Record, RrType},
+    wire::{
+        name::Name,
+        record::{Record, RrType, CLASS_IN},
+    },
 };
 
 fn hostname() -> TestResult<DnsName> {
@@ -202,15 +205,111 @@ fn the_seam_collapses_detail_to_invalid_chain() -> TestResult {
     let child = zone("expede.wtf", 2);
 
     let validator = Validator::new(vec![root.anchor()]);
-    assert!(
-        validator
-            .validate(&hostname()?, &happy_chain(&root, &child)?)
-            .is_ok()
-    );
-    assert!(
-        validator
-            .validate(&hostname()?, &DnssecChain::default())
-            .is_err()
-    );
+    assert!(validator
+        .validate(&hostname()?, &happy_chain(&root, &child)?)
+        .is_ok());
+    assert!(validator
+        .validate(&hostname()?, &DnssecChain::default())
+        .is_err());
+    Ok(())
+}
+
+/// A CNAME record at `owner` pointing at `target`.
+fn cname_record(owner: Name, target: &Name) -> Record {
+    let mut rdata = Vec::new();
+    target.write(&mut rdata);
+
+    Record {
+        owner,
+        rtype: RrType::CNAME,
+        class: CLASS_IN,
+        ttl: 900,
+        rdata,
+    }
+}
+
+/// A CNAME into a *sibling* zone: the walk re-enters at the anchored
+/// root and descends the target's own branch. This is the chain shape
+/// `chain_assembly` emits for cross-zone indirection.
+#[test]
+fn a_cross_zone_cname_reroots_and_walks_to_the_target_branch() -> TestResult {
+    let root = zone(".", 1);
+    let source = zone("expede.wtf", 2);
+    let target_zone = zone("example.net", 3);
+    let validator = Validator::new(vec![root.anchor()]);
+
+    let target_owner: Name = "binding.example.net".parse()?;
+    let cname = cname_record(Name::onomancy_owner(&hostname()?), &target_owner);
+    let txt = Record {
+        owner: target_owner,
+        ..txt_record(&hostname()?, &fixtures::fixture_txt_text())
+    };
+
+    let source_ds = Zone::ds_record_for(&source);
+    let target_ds = Zone::ds_record_for(&target_zone);
+    let window = (1_000, 5_000);
+
+    let chain = DnssecChain::from(vec![
+        link(&[
+            root.dnskey_record.clone(),
+            root.rrsig(core::slice::from_ref(&root.dnskey_record), window),
+        ]),
+        link(&[source_ds.clone(), root.rrsig(&[source_ds], window)]),
+        link(&[
+            source.dnskey_record.clone(),
+            source.rrsig(core::slice::from_ref(&source.dnskey_record), window),
+        ]),
+        // The hop out of the subtree, signed by the source zone…
+        link(&[cname.clone(), source.rrsig(&[cname], window)]),
+        // …then the target's branch, descended from the ROOT again.
+        link(&[target_ds.clone(), root.rrsig(&[target_ds], window)]),
+        link(&[
+            target_zone.dnskey_record.clone(),
+            target_zone.rrsig(core::slice::from_ref(&target_zone.dnskey_record), window),
+        ]),
+        link(&[txt.clone(), target_zone.rrsig(&[txt], window)]),
+    ]);
+
+    let ChainProof { records, .. } = validator.validate_detailed(&hostname()?, &chain)?;
+    assert_eq!(records.len(), 1);
+    Ok(())
+}
+
+/// Without the target branch's cuts, the cross-zone TXT must NOT
+/// verify — re-rooting alone confers nothing.
+#[test]
+fn a_cross_zone_cname_without_target_cuts_is_rejected() -> TestResult {
+    let root = zone(".", 1);
+    let source = zone("expede.wtf", 2);
+    let target_zone = zone("example.net", 3);
+    let validator = Validator::new(vec![root.anchor()]);
+
+    let target_owner: Name = "binding.example.net".parse()?;
+    let cname = cname_record(Name::onomancy_owner(&hostname()?), &target_owner);
+    let txt = Record {
+        owner: target_owner,
+        ..txt_record(&hostname()?, &fixtures::fixture_txt_text())
+    };
+
+    let source_ds = Zone::ds_record_for(&source);
+    let window = (1_000, 5_000);
+
+    let chain = DnssecChain::from(vec![
+        link(&[
+            root.dnskey_record.clone(),
+            root.rrsig(core::slice::from_ref(&root.dnskey_record), window),
+        ]),
+        link(&[source_ds.clone(), root.rrsig(&[source_ds], window)]),
+        link(&[
+            source.dnskey_record.clone(),
+            source.rrsig(core::slice::from_ref(&source.dnskey_record), window),
+        ]),
+        link(&[cname.clone(), source.rrsig(&[cname], window)]),
+        // No DS/DNSKEY for example.net: the TXT is signed by keys the
+        // walk has never anchored.
+        link(&[txt.clone(), target_zone.rrsig(&[txt], window)]),
+    ]);
+
+    assert!(validator.validate_detailed(&hostname()?, &chain).is_err());
     Ok(())
 }

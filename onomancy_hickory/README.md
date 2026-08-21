@@ -26,13 +26,24 @@ precisely because judging is not the resolver's job here: the
 verifier wants the bytes even when the upstream's validator calls
 them bogus.
 
+## Cross-zone aliases
+
+A CNAME hop out of the descended subtree triggers a fresh root-down
+cut descent for the target's branch, mirroring the validator's
+re-root rule: the chain reads *root keys → source cuts → CNAME →
+target cuts → TXT*, every link verified from the same trust anchors.
+
+## Upstreams
+
+`HickoryProvider::system()` discovers resolvers from
+`/etc/resolv.conf` (falling back to a public resolver when none
+parse); explicit constructors take one server, `.or(addr)` appends
+fallbacks. Assembly tries upstreams in order and returns the last
+failure only when all fail.
+
 ## Known limitations
 
-- CNAME hops that leave the already-descended zone hierarchy are
-  framed but will fail validation (their zone cuts are not fetched).
-  Cross-zone alias support means descending the target's cuts too —
-  tracked, not yet built.
-- One upstream, no failover, no cookies/0x20 — a stub, not a
-  full-service resolver.
+- No cookies/0x20 — a stub, not a full-service resolver (deliberate:
+  transport is untrusted; DNSSEC is the boundary).
 
 [hickory-proto]: https://github.com/hickory-dns/hickory-dns

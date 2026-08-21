@@ -16,14 +16,14 @@ use onomancy_core::{
     time::UnixSeconds,
 };
 use onomancy_dnssec::validator::{Validator, WalkError};
-use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
+use onomancy_hickory::provider::FetchChainError;
 use onomancy_protocol::{
     verifier_state::{
+        VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
         memory::MemoryAuthority,
         store::Item,
-        VerifierState,
     },
     verify::{self, Rejection},
 };
@@ -40,9 +40,9 @@ pub(crate) struct Resolve {
     #[arg(long)]
     hostname: String,
 
-    /// Recursive resolver to fetch through.
-    #[arg(long, default_value = "1.1.1.1:53")]
-    resolver: SocketAddr,
+    /// Recursive resolver (default: system resolvers, then 1.1.1.1).
+    #[arg(long)]
+    resolver: Option<SocketAddr>,
 
     /// A gossiped/fetched ONC certificate to verify fully (its own
     /// attached chain is what gets validated).
@@ -90,7 +90,7 @@ impl Resolve {
         let validator = Validator::iana();
 
         // The live zone: fetch → walk from the baked-in IANA anchors.
-        let provider = HickoryProvider::new(self.resolver);
+        let provider = crate::provider(self.resolver);
         let chain = crate::block_on(provider.assemble(&hostname))??;
 
         say(&format!("chain: {} links fetched", chain.links().len()));
@@ -152,7 +152,7 @@ impl Resolve {
 /// One stateful pass: load the store, judge it, ingest live + gossiped
 /// evidence, judge again, surface the difference, persist.
 pub(crate) fn stateful_pass(
-    resolver: SocketAddr,
+    resolver: Option<SocketAddr>,
     store_path: &Path,
     hostname: &DnsName,
     cert: Option<&Path>,
@@ -175,7 +175,7 @@ pub(crate) fn stateful_pass(
         .map(|path| decode_unit(path))
         .collect::<Result<_, _>>()?;
 
-    let provider = HickoryProvider::new(resolver);
+    let provider = crate::provider(resolver);
     match crate::block_on(provider.assemble(hostname))? {
         Ok(chain) => {
             say(&format!("chain: {} links fetched", chain.links().len()));

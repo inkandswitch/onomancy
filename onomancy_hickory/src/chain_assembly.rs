@@ -74,9 +74,56 @@ pub async fn assemble<Q: Query>(
         .map_err(AssembleError::Transport)?;
     links.push(frame_rrset(&root_keys, &Name::root(), RecordType::DNSKEY)?);
 
-    // Per suffix, root-outward: a DS RRset marks a signed cut.
-    for depth in 1..=owner.num_labels() {
-        let zone = owner.trim_to(usize::from(depth));
+    let mut current_zone = descend_cuts(query, &owner, &mut links).await?;
+
+    // The leaf: TXT at the owner, CNAME hops framed along the way. A
+    // hop out of the deepest descended zone re-descends the target's
+    // branch root-down, matching the validator's re-root rule.
+    let leaf_answer = query
+        .answers(&owner, RecordType::TXT)
+        .await
+        .map_err(AssembleError::Transport)?;
+
+    let mut current = owner;
+    for _ in 0..=MAX_CNAME_HOPS {
+        if has_data(&leaf_answer, &current, RecordType::TXT) {
+            links.push(frame_rrset(&leaf_answer, &current, RecordType::TXT)?);
+            return Ok(DnssecChain::from(links));
+        }
+
+        let Some(target) = leaf_answer.iter().find_map(|r| match &r.data {
+            RData::CNAME(cname) if r.name == current => Some(cname.0.clone()),
+            _ => None,
+        }) else {
+            return Err(AssembleError::MissingRrset {
+                owner: current.to_ascii(),
+                rtype: RecordType::TXT,
+            });
+        };
+
+        links.push(frame_rrset(&leaf_answer, &current, RecordType::CNAME)?);
+
+        if !current_zone.zone_of(&target) {
+            current_zone = descend_cuts(query, &target, &mut links).await?;
+        }
+        current = target;
+    }
+
+    Err(AssembleError::TooManyCnames)
+}
+
+/// Probe every suffix of `name` root-outward, framing a DS + DNSKEY
+/// link pair per signed cut. Returns the deepest cut descended (the
+/// root when there is none).
+async fn descend_cuts<Q: Query>(
+    query: &Q,
+    name: &Name,
+    links: &mut Vec<ChainLink>,
+) -> Result<Name, AssembleError<Q::Error>> {
+    let mut deepest = Name::root();
+
+    for depth in 1..=name.num_labels() {
+        let zone = name.trim_to(usize::from(depth));
 
         let ds_answer = query
             .answers(&zone, RecordType::DS)
@@ -93,16 +140,11 @@ pub async fn assemble<Q: Query>(
             .await
             .map_err(AssembleError::Transport)?;
         links.push(frame_rrset(&keys, &zone, RecordType::DNSKEY)?);
+
+        deepest = zone;
     }
 
-    // The leaf: TXT at the owner, CNAME hops framed along the way.
-    let leaf_answer = query
-        .answers(&owner, RecordType::TXT)
-        .await
-        .map_err(AssembleError::Transport)?;
-    links.extend(leaf_links(&owner, &leaf_answer)?);
-
-    Ok(DnssecChain::from(links))
+    Ok(deepest)
 }
 
 /// A recursion-desired, checking-disabled, DNSSEC-OK query message.
@@ -187,34 +229,6 @@ fn frame_rrset<E>(
     Ok(ChainLink::from(bytes))
 }
 
-/// The CNAME hops (in follow order) and the TXT leaf, one link each.
-fn leaf_links<E>(owner: &Name, answers: &[Record]) -> Result<Vec<ChainLink>, AssembleError<E>> {
-    let mut links = Vec::new();
-    let mut current = owner.clone();
-
-    for _ in 0..=MAX_CNAME_HOPS {
-        if has_data(answers, &current, RecordType::TXT) {
-            links.push(frame_rrset(answers, &current, RecordType::TXT)?);
-            return Ok(links);
-        }
-
-        let Some(target) = answers.iter().find_map(|r| match &r.data {
-            RData::CNAME(cname) if r.name == current => Some(cname.0.clone()),
-            _ => None,
-        }) else {
-            return Err(AssembleError::MissingRrset {
-                owner: current.to_ascii(),
-                rtype: RecordType::TXT,
-            });
-        };
-
-        links.push(frame_rrset(answers, &current, RecordType::CNAME)?);
-        current = target;
-    }
-
-    Err(AssembleError::TooManyCnames)
-}
-
 /// The type an RRSIG record covers (the first two RDATA octets),
 /// `None` for non-RRSIG records.
 ///
@@ -286,7 +300,13 @@ pub enum AssembleError<E> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use core::convert::Infallible;
+    use core::{
+        convert::Infallible,
+        future::{self, Future},
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+    use std::collections::HashMap;
 
     use super::*;
     use hickory_proto::rr::rdata::{NULL, TXT};
@@ -296,8 +316,94 @@ mod tests {
     /// The tests never hit a transport: pin the error parameter.
     type TestError = AssembleError<Infallible>;
 
+    /// A canned-answer transport: every query is answered from the
+    /// map, unlisted queries answer empty.
+    struct MapQuery(HashMap<(Name, RecordType), Vec<Record>>);
+
+    impl Query for MapQuery {
+        type Error = Infallible;
+
+        fn answers(
+            &self,
+            name: &Name,
+            rtype: RecordType,
+        ) -> impl Future<Output = Result<Vec<Record>, Infallible>> {
+            future::ready(Ok(self
+                .0
+                .get(&(name.clone(), rtype))
+                .cloned()
+                .unwrap_or_default()))
+        }
+    }
+
+    /// Drive an always-ready future to completion (`MapQuery` never
+    /// suspends).
+    fn run<F: Future>(future: F) -> F::Output {
+        let mut future = pin!(future);
+        let mut context = Context::from_waker(Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => unreachable!("MapQuery futures are always ready"),
+        }
+    }
+
     fn owner() -> Name {
         Name::from_ascii("_onomancy.example.com.").expect("valid name")
+    }
+
+    fn hostname() -> TestResult<DnsName> {
+        Ok(DnsName::parse("example.com")?)
+    }
+
+    /// A structurally valid DNSKEY record at `at` (RFC 3597 bytes).
+    fn dnskey_record(at: &Name) -> Record {
+        let mut rdata: Vec<u8> = Vec::new();
+        rdata.extend(257u16.to_be_bytes()); // flags: KSK
+        rdata.push(3); // protocol
+        rdata.push(13); // algorithm
+        rdata.extend([0xCD; 64]); // key material
+
+        Record::from_rdata(
+            at.clone(),
+            300,
+            RData::Unknown {
+                code: RecordType::DNSKEY,
+                rdata: NULL::with(rdata),
+            },
+        )
+    }
+
+    /// A structurally valid DS record at `at`.
+    fn ds_record(at: &Name) -> Record {
+        let mut rdata: Vec<u8> = Vec::new();
+        rdata.extend(4242u16.to_be_bytes()); // key tag
+        rdata.push(13); // algorithm
+        rdata.push(2); // digest type: SHA-256
+        rdata.extend([0xEF; 32]); // digest
+
+        Record::from_rdata(
+            at.clone(),
+            300,
+            RData::Unknown {
+                code: RecordType::DS,
+                rdata: NULL::with(rdata),
+            },
+        )
+    }
+
+    /// The minimal transport: a signed root DNSKEY plus `extra`
+    /// canned answers.
+    fn transport(extra: Vec<((Name, RecordType), Vec<Record>)>) -> MapQuery {
+        let root = Name::root();
+        let mut map = HashMap::from([(
+            (root.clone(), RecordType::DNSKEY),
+            vec![
+                dnskey_record(&root),
+                rrsig_record(&root, RecordType::DNSKEY),
+            ],
+        )]);
+        map.extend(extra);
+        MapQuery(map)
     }
 
     fn txt_record(at: &Name) -> Record {
@@ -353,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn leaf_links_follow_cnames_in_order() -> TestResult {
+    fn assembled_leaves_follow_cnames_in_order() -> TestResult {
         let at = owner();
         let target = Name::from_ascii("alias.example.net.").expect("valid name");
 
@@ -365,12 +471,84 @@ mod tests {
             cname_record(&at, &target),
             rrsig_record(&target, RecordType::TXT),
         ];
+        let query = transport(vec![((at, RecordType::TXT), answers)]);
 
-        let links = leaf_links::<Infallible>(&at, &answers)?;
-        assert_eq!(links.len(), 2, "one CNAME hop, one TXT leaf");
+        let chain = run(assemble(&query, &hostname()?))?;
+        let links = chain.links();
+        assert_eq!(links.len(), 3, "root keys, one CNAME hop, one TXT leaf");
 
-        assert_eq!(Link::parse(&links[0])?.rtype(), RrType::CNAME);
-        assert_eq!(Link::parse(&links[1])?.rtype(), RrType::TXT);
+        assert_eq!(Link::parse(&links[1])?.rtype(), RrType::CNAME);
+        assert_eq!(Link::parse(&links[2])?.rtype(), RrType::TXT);
+        Ok(())
+    }
+
+    #[test]
+    fn cross_zone_cnames_redescend_the_target_branch() -> TestResult {
+        let at = owner();
+        let source_zone = Name::from_ascii("example.com.").expect("valid name");
+        let target = Name::from_ascii("binding.example.net.").expect("valid name");
+        let target_zone = Name::from_ascii("example.net.").expect("valid name");
+
+        let leaf_answers = vec![
+            cname_record(&at, &target),
+            rrsig_record(&at, RecordType::CNAME),
+            txt_record(&target),
+            rrsig_record(&target, RecordType::TXT),
+        ];
+        let query = transport(vec![
+            (
+                (source_zone.clone(), RecordType::DS),
+                vec![
+                    ds_record(&source_zone),
+                    rrsig_record(&source_zone, RecordType::DS),
+                ],
+            ),
+            (
+                (source_zone.clone(), RecordType::DNSKEY),
+                vec![
+                    dnskey_record(&source_zone),
+                    rrsig_record(&source_zone, RecordType::DNSKEY),
+                ],
+            ),
+            (
+                (target_zone.clone(), RecordType::DS),
+                vec![
+                    ds_record(&target_zone),
+                    rrsig_record(&target_zone, RecordType::DS),
+                ],
+            ),
+            (
+                (target_zone.clone(), RecordType::DNSKEY),
+                vec![
+                    dnskey_record(&target_zone),
+                    rrsig_record(&target_zone, RecordType::DNSKEY),
+                ],
+            ),
+            ((at, RecordType::TXT), leaf_answers),
+        ]);
+
+        let chain = run(assemble(&query, &hostname()?))?;
+        let types: Vec<RrType> = chain
+            .links()
+            .iter()
+            .map(|link| Ok(Link::parse(link)?.rtype()))
+            .collect::<Result<_, onomancy_dnssec::link::ParseLinkError>>()?;
+
+        // Root keys, the source branch, the hop, then the TARGET
+        // branch re-descended from the root — the validator's re-root
+        // shape.
+        assert_eq!(
+            types,
+            vec![
+                RrType::DNSKEY,
+                RrType::DS,
+                RrType::DNSKEY,
+                RrType::CNAME,
+                RrType::DS,
+                RrType::DNSKEY,
+                RrType::TXT,
+            ],
+        );
         Ok(())
     }
 
@@ -386,28 +564,31 @@ mod tests {
     }
 
     #[test]
-    fn missing_leaves_are_unframeable() {
+    fn missing_leaves_are_unframeable() -> TestResult {
         // ADR-045: no negative proofs — a courier cannot fabricate a
         // chain for a name without a TXT RRset, and says so.
-        let at = owner();
+        let query = transport(vec![]);
 
         assert!(matches!(
-            leaf_links::<Infallible>(&at, &[]),
+            run(assemble(&query, &hostname()?)),
             Err(TestError::MissingRrset { .. })
         ));
+        Ok(())
     }
 
     #[test]
-    fn cname_loops_hit_the_hop_bound() {
+    fn cname_loops_hit_the_hop_bound() -> TestResult {
         let at = owner();
         let answers = vec![
             cname_record(&at, &at), // self-loop
             rrsig_record(&at, RecordType::CNAME),
         ];
+        let query = transport(vec![((at, RecordType::TXT), answers)]);
 
         assert!(matches!(
-            leaf_links::<Infallible>(&at, &answers),
+            run(assemble(&query, &hostname()?)),
             Err(TestError::TooManyCnames)
         ));
+        Ok(())
     }
 }

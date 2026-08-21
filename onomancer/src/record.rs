@@ -11,7 +11,7 @@ use onomancy_core::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
     wire::OversizeUnit,
 };
-use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
+use onomancy_hickory::provider::FetchChainError;
 
 use crate::{
     say,
@@ -68,9 +68,9 @@ pub(crate) struct Record {
     #[arg(long)]
     fetch_chain: bool,
 
-    /// Recursive resolver for --fetch-chain.
-    #[arg(long, default_value = "1.1.1.1:53")]
-    resolver: SocketAddr,
+    /// Recursive resolver for --fetch-chain (default: system, then 1.1.1.1).
+    #[arg(long)]
+    resolver: Option<SocketAddr>,
 }
 
 impl Record {
@@ -135,8 +135,11 @@ impl Record {
 }
 
 /// Fetch the live chain on a scratch runtime.
-fn fetch_chain(resolver: SocketAddr, hostname: &DnsName) -> Result<DnssecChain, RecordError> {
-    let provider = HickoryProvider::new(resolver);
+fn fetch_chain(
+    resolver: Option<SocketAddr>,
+    hostname: &DnsName,
+) -> Result<DnssecChain, RecordError> {
+    let provider = crate::provider(resolver);
     Ok(crate::block_on(provider.assemble(hostname))??)
 }
 

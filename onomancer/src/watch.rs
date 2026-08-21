@@ -6,7 +6,7 @@ use clap::Args;
 use onomancy_core::name::dns::DnsName;
 
 use crate::{
-    resolve::{stateful_pass, ResolveError},
+    resolve::{ResolveError, stateful_pass},
     say,
 };
 
@@ -23,9 +23,9 @@ pub(crate) struct Watch {
     #[arg(long)]
     store: PathBuf,
 
-    /// Recursive resolver to fetch through.
-    #[arg(long, default_value = "1.1.1.1:53")]
-    resolver: SocketAddr,
+    /// Recursive resolver (default: system resolvers, then 1.1.1.1).
+    #[arg(long)]
+    resolver: Option<SocketAddr>,
 
     /// Seconds between passes.
     #[arg(long, default_value_t = 300)]

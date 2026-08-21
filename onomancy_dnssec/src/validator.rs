@@ -160,6 +160,8 @@ impl ChainValidator for Validator {
 struct WalkState {
     zone: Name,
     keys: Vec<Dnskey>,
+    root_zone: Name,
+    root_keys: Vec<Dnskey>,
     window_inception: UnixSeconds,
     window_expiration: UnixSeconds,
 }
@@ -185,7 +187,9 @@ impl WalkState {
 
         let mut state = Self {
             zone: link.owner().clone(),
-            keys,
+            keys: keys.clone(),
+            root_zone: link.owner().clone(),
+            root_keys: keys,
             window_inception: UnixSeconds::from(0),
             window_expiration: UnixSeconds::from(u64::MAX),
         };
@@ -258,6 +262,17 @@ impl WalkState {
         let cname = Cname::parse(&record.rdata).map_err(|_| WalkError::MalformedRdata {
             rtype: RrType::CNAME,
         })?;
+
+        // A target outside the current zone's subtree can never be
+        // reached by descending: re-enter at the anchored root so the
+        // chain can descend the target's own branch. Sound because the
+        // CNAME itself was verified above and everything after re-entry
+        // is verified from the same trust anchors; the freshness window
+        // keeps intersecting across both branches.
+        if !self.zone.is_ancestor_or_self_of(cname.target()) {
+            self.zone = self.root_zone.clone();
+            self.keys = self.root_keys.clone();
+        }
 
         Ok(cname.target().clone())
     }

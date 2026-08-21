@@ -5,7 +5,7 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::Args;
 use onomancy_core::{cert::Certificate, time::UnixSeconds};
 use onomancy_dnssec::validator::{Validator, WalkError};
-use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
+use onomancy_hickory::provider::FetchChainError;
 use onomancy_publish::ceremony::refresh::Refresh as RefreshCeremony;
 
 use crate::{now_ms, plan_io};
@@ -17,9 +17,9 @@ pub(crate) struct Refresh {
     #[arg(long)]
     cert: PathBuf,
 
-    /// Recursive resolver to fetch through.
-    #[arg(long, default_value = "1.1.1.1:53")]
-    resolver: SocketAddr,
+    /// Recursive resolver (default: system resolvers, then 1.1.1.1).
+    #[arg(long)]
+    resolver: Option<SocketAddr>,
 
     /// Where the refreshed artifact lands.
     #[arg(long, default_value = ".")]
@@ -36,7 +36,7 @@ impl Refresh {
     pub(crate) fn run(&self) -> Result<(), RefreshError> {
         let certificate = Certificate::decode(&std::fs::read(&self.cert)?)?;
 
-        let provider = HickoryProvider::new(self.resolver);
+        let provider = crate::provider(self.resolver);
         let chain = crate::block_on(provider.assemble(certificate.hostname()))??;
         let proof = Validator::iana().validate_detailed(certificate.hostname(), &chain)?;
 

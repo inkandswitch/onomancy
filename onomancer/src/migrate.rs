@@ -12,7 +12,7 @@ use onomancy_core::{
     txt::record::TxtRecord,
 };
 use onomancy_dnssec::validator::{Validator, WalkError};
-use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
+use onomancy_hickory::provider::FetchChainError;
 use onomancy_publish::{ceremony::migrate::Migrate as MigrateCeremony, signer::Signer};
 
 use crate::{
@@ -52,9 +52,9 @@ pub(crate) struct Migrate {
     #[arg(long)]
     successor_generation: String,
 
-    /// Recursive resolver for fetching the currently published record.
-    #[arg(long, default_value = "1.1.1.1:53")]
-    resolver: SocketAddr,
+    /// Recursive resolver (default: system resolvers, then 1.1.1.1).
+    #[arg(long)]
+    resolver: Option<SocketAddr>,
 
     /// Where artifacts land.
     #[arg(long, default_value = ".")]
@@ -109,7 +109,7 @@ impl Migrate {
         hostname: &DnsName,
         predecessor: &DocAnchor,
     ) -> Result<TxtRecord, MigrateError> {
-        let provider = HickoryProvider::new(self.resolver);
+        let provider = crate::provider(self.resolver);
         let chain = crate::block_on(provider.assemble(hostname))??;
         let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 

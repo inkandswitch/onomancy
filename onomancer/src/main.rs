@@ -33,11 +33,13 @@ mod watch;
 
 use std::{
     io::Write as _,
+    net::SocketAddr,
     process::ExitCode,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use clap::Parser;
+use onomancy_hickory::provider::HickoryProvider;
 
 /// The Onomancy agent.
 #[derive(Debug, Parser)]
@@ -93,6 +95,12 @@ fn main() -> ExitCode {
 }
 
 /// Milliseconds since the Unix epoch — the serial convention.
+/// The chain courier for an optional explicit upstream: given = that
+/// server only; absent = system resolvers, then the public fallback.
+pub(crate) fn provider(resolver: Option<SocketAddr>) -> HickoryProvider {
+    resolver.map_or_else(HickoryProvider::system, HickoryProvider::new)
+}
+
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
