@@ -16,7 +16,7 @@ Verification is a _replay_: each question ingests the carriage's events into a t
 
 ## Carriage encoding
 
-Each `DelegationBytes` entry is `kh0` + one bincode-encoded `StaticEvent`: a delegation, revocation, or prekey operation (prekeys ride along because Keyhive resolves delegates against known individuals). Keyhive 0.5 is pre-alpha and its encoding may churn — absorbed by design: carriages ride the certificate's _unsigned attached region_, so a re-encode re-attaches evidence without touching signatures, and the version tag makes drift a loud parse error rather than a misread.
+Each `SignedDelegationBytes` entry in a `DelegationChain` is `kh0` + one bincode-encoded `StaticEvent`: a delegation, revocation, or prekey operation (prekeys ride along because Keyhive resolves delegates against known individuals). Keyhive 0.5 is pre-alpha and its encoding may churn — absorbed by design: carriages ride the certificate's _unsigned attached region_, so a re-encode re-attaches evidence without touching signatures, and the version tag makes drift a loud parse error rather than a misread.
 
 ## Scope
 
