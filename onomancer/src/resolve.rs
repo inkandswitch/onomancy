@@ -120,7 +120,7 @@ impl Resolve {
         };
         let bytes = std::fs::read(cert_path)?;
 
-        // Real authority (ADR-056): carriages replay into a Keyhive
+        // Real authority: carriages replay into a Keyhive
         // delegation graph; doc-key-signed certificates pass by the
         // identity rule.
         let authority = KeyhiveAuthority;

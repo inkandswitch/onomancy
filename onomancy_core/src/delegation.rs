@@ -41,6 +41,25 @@ impl From<Vec<u8>> for DelegationBytes {
     }
 }
 
+/// Decode a standalone count-prefixed carriage (the framing used for
+/// carriage FILES — e.g. the dev bridge's `<anchor>.carriage`).
+///
+/// # Errors
+///
+/// Returns [`WireError`] on truncation, length overrun, or trailing
+/// bytes.
+pub fn read_framed(bytes: &[u8]) -> Result<Vec<DelegationBytes>, WireError> {
+    let mut reader = Reader::new(bytes)?;
+    let entries = read_entries(&mut reader)?;
+    reader.finish()?;
+    Ok(entries)
+}
+
+/// Encode a standalone count-prefixed carriage (see [`read_framed`]).
+pub fn write_framed(entries: &[DelegationBytes], buf: &mut Vec<u8>) {
+    write_entries(buf, entries);
+}
+
 /// Decode one count-prefixed entry list.
 ///
 /// Entries are collected without a count-sized pre-allocation: the

@@ -9,14 +9,15 @@
 
 #![allow(clippy::panic)] // assertion failures in tests
 
-use automerge::{Automerge, ObjType, transaction::Transactable};
+use automerge::{transaction::Transactable, Automerge, ObjType};
 use ed25519_dalek::SigningKey;
 use onomancy_automerge::{
-    RESERVED_KEY,
     namestore::{DocumentNamestore, HeldDocuments},
+    RESERVED_KEY,
 };
 use onomancy_core::name::{doc::DocAnchor, segment::Segment};
 use onomancy_protocol::resolve::{
+    namestore::{Authority, Vouched},
     resolution::{PartialReason, Resolution},
     resolve,
 };
@@ -56,8 +57,15 @@ fn the_walk_hops_across_held_documents() -> TestResult {
         .with(pics, namestore_doc(&[])?);
 
     // Two hops: a single-segment edge, then a greedy multi-segment key.
-    match resolve(root, &segments(&["bob", "pics", "best"])?, &held) {
-        Resolution::Resolved(_) => Ok(()),
+    match resolve(
+        Vouched::new(root, Authority::TrustedSubstrate),
+        &segments(&["bob", "pics", "best"])?,
+        &held,
+    ) {
+        Resolution::Resolved { authority, .. } => {
+            assert_eq!(authority, Authority::TrustedSubstrate);
+            Ok(())
+        }
         other @ Resolution::Partial { .. } => {
             panic!("expected full resolution, got {other:?}")
         }
@@ -79,8 +87,12 @@ fn greedy_matching_wins_across_documents_too() -> TestResult {
         .with(deep, namestore_doc(&[("baz", &marker)])?)
         .with(marker, namestore_doc(&[])?);
 
-    match resolve(root, &segments(&["foo", "bar", "baz"])?, &held) {
-        Resolution::Resolved(_) => Ok(()),
+    match resolve(
+        Vouched::new(root, Authority::TrustedSubstrate),
+        &segments(&["foo", "bar", "baz"])?,
+        &held,
+    ) {
+        Resolution::Resolved { .. } => Ok(()),
         other @ Resolution::Partial { .. } => {
             panic!("expected the greedy edge to reach `deep`, got {other:?}")
         }
@@ -93,7 +105,11 @@ fn unsynced_targets_surface_as_partial() -> TestResult {
     let root = DocumentNamestore::new(namestore_doc(&[("away", &missing)])?);
     let held = HeldDocuments::default(); // nothing replicated
 
-    match resolve(root, &segments(&["away", "further"])?, &held) {
+    match resolve(
+        Vouched::new(root, Authority::TrustedSubstrate),
+        &segments(&["away", "further"])?,
+        &held,
+    ) {
         Resolution::Partial {
             reason: PartialReason::UnsyncedTarget { target },
             ..
@@ -101,7 +117,7 @@ fn unsynced_targets_surface_as_partial() -> TestResult {
             assert_eq!(target, missing);
             Ok(())
         }
-        other @ (Resolution::Resolved(_) | Resolution::Partial { .. }) => {
+        other @ (Resolution::Resolved { .. } | Resolution::Partial { .. }) => {
             panic!("expected an unsynced-target partial, got {other:?}")
         }
     }

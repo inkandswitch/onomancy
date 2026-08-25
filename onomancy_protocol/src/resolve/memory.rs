@@ -12,7 +12,7 @@ use onomancy_core::{
     name::{doc::DocAnchor, segment::Segment},
 };
 
-use super::namestore::{Namestore, Replicas};
+use super::namestore::{Authority, Namestore, Replicas, Vouched};
 
 /// A flat in-memory namestore.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,7 +40,7 @@ impl Namestore for MemoryNamestore {
 /// structural-termination property).
 #[derive(Debug, Clone, Default)]
 pub struct MemoryReplicas {
-    replicas: Map<DocAnchor, MemoryNamestore>,
+    replicas: Map<DocAnchor, Vouched<MemoryNamestore>>,
     loads: Option<Cell<usize>>,
 }
 
@@ -54,10 +54,22 @@ impl MemoryReplicas {
         }
     }
 
-    /// Add one replica, builder-style.
+    /// Add one replica at the dev-bridge grade
+    /// ([`Authority::TrustedSubstrate`]), builder-style.
     #[must_use]
-    pub fn with(mut self, id: DocAnchor, store: MemoryNamestore) -> Self {
-        self.replicas.insert(id, store);
+    pub fn with(self, id: DocAnchor, store: MemoryNamestore) -> Self {
+        self.with_vouched(id, store, Authority::TrustedSubstrate)
+    }
+
+    /// Add one replica at an explicit grade, builder-style.
+    #[must_use]
+    pub fn with_vouched(
+        mut self,
+        id: DocAnchor,
+        store: MemoryNamestore,
+        authority: Authority,
+    ) -> Self {
+        self.replicas.insert(id, Vouched::new(store, authority));
         self
     }
 
@@ -72,7 +84,7 @@ impl MemoryReplicas {
 impl Replicas for MemoryReplicas {
     type Namestore = MemoryNamestore;
 
-    fn replica(&self, target: &DocAnchor) -> Option<MemoryNamestore> {
+    fn replica(&self, target: &DocAnchor) -> Option<Vouched<MemoryNamestore>> {
         if let Some(counter) = &self.loads {
             counter.set(counter.get() + 1);
         }

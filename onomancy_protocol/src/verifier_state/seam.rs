@@ -22,7 +22,7 @@ use onomancy_core::{
 /// `RRset` carrying binding records.
 ///
 /// Deliberately no absence variant: negative proofs are out of the
-/// protocol at v0 (ADR-045) — a chain without a provable TXT leaf is
+/// protocol at v0 — a chain without a provable TXT leaf is
 /// simply invalid, and unbinding awaits the future owner-signed
 /// unbind statement.
 #[derive(Debug, Clone, PartialEq, Eq)]

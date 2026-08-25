@@ -196,6 +196,37 @@
             (builtins.attrNames ci-checks);
         };
 
+        # Build the Wasm module and serve the browser demos (the live
+        # verifier at / and documents-naming-documents at /names.html).
+        demo = pkgs.writeShellApplication {
+          name = "onomancy-demo";
+          runtimeInputs = [
+            rust-toolchain
+            unstable.wasm-bindgen-cli
+            pkgs.binaryen
+            pkgs.python3
+          ];
+          text = ''
+            if [ ! -f Cargo.toml ]; then
+              echo "run from the workspace root" >&2
+              exit 1
+            fi
+            port="''${1:-8080}"
+
+            cargo build -p onomancy_wasm --target wasm32-unknown-unknown --release
+            wasm-bindgen --target web --out-dir onomancy_wasm/demo/pkg \
+              target/wasm32-unknown-unknown/release/onomancy_wasm.wasm
+            wasm-opt -Oz -o onomancy_wasm/demo/pkg/onomancy_wasm_bg.wasm \
+              onomancy_wasm/demo/pkg/onomancy_wasm_bg.wasm
+
+            echo
+            echo "  verifier:  http://localhost:$port/"
+            echo "  names:     http://localhost:$port/names.html"
+            echo
+            exec python3 -m http.server --directory onomancy_wasm/demo "$port"
+          '';
+        };
+
         # Built-in command modules from nix-command-utils
         rust = command-utils.rust.${system};
         wasm = command-utils.wasm.${system};
@@ -215,6 +246,14 @@
           (wasm.build { wasm-pack = pkgs.wasm-pack; })
           (wasm.release { wasm-pack = pkgs.wasm-pack; gzip = pkgs.gzip; })
           (wasm.doc { cargo = pkgs.cargo; xdg-open = pkgs.xdg-utils; })
+
+          # Onomancy-specific commands
+          (command-utils.asModule.${system} {
+            "wasm:demo" = command-utils.cmd.${system}
+              "Build & serve the browser demos (port arg, default 8080)" ''
+                exec ${demo}/bin/onomancy-demo "$@"
+              '';
+          })
         ];
       in {
         devShells.default = pkgs.mkShell {
@@ -255,7 +294,7 @@
             type = "app";
             program = "${check}/bin/onomancy-${name}";
           })
-          (ci-checks // { ci = ci-all; ci-browser = ci-browser; });
+          (ci-checks // { ci = ci-all; ci-browser = ci-browser; inherit demo; });
 
         formatter = pkgs.alejandra;
       }

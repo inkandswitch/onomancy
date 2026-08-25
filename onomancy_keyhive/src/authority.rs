@@ -100,6 +100,28 @@ impl KeyhiveAuthority {
     /// root key is the document's own authority), and Keyhive already
     /// refused any chain whose links escalate or dangle at ingest.
     ///
+    /// Whether `carriage` is a genuine delegation graph rooted at
+    /// `anchor`: every event signature-checks, the set ingests to a
+    /// fixpoint, and the materialized graph contains the anchor as a
+    /// group or document. Empty or unreadable carriages vouch nothing.
+    ///
+    /// This vouches the CARRIAGE, not the document's content —
+    /// content authorship is not checkable until signed operations
+    /// land upstream. Callers grade such documents
+    /// `Authority::CarriageVerified`, never higher.
+    #[must_use]
+    pub fn vouches_document(&self, anchor: &DocAnchor, carriage: &[DelegationBytes]) -> bool {
+        block_on(async {
+            let Some(instance) = Self::replay(carriage).await else {
+                return false;
+            };
+
+            let id = Identifier(*anchor.verifying_key());
+            instance.get_group(id.into()).await.is_some()
+                || instance.get_document(id.into()).await.is_some()
+        })
+    }
+
     /// Direct membership only for now: naming chains through nested
     /// group intermediaries are future work.
     async fn sanctioned(instance: &Instance, root: &DocAnchor, signer: &VerifyingKey) -> bool {

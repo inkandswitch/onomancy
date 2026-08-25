@@ -73,7 +73,6 @@ graph TD
     publish --> proto
     automerge -- "implements Namestore,<br/>DecisionsView" --> proto
     keyhive -- "implements AuthorityVerifier" --> proto
-    keyhive --> automerge
     hickory -- "implements ChainProvider" --> proto
     wasm --> core
     wasm -- "implements ChainProvider" --> proto
@@ -101,6 +100,8 @@ Or bring your own toolchain pinned by [`rust-toolchain.toml`](./rust-toolchain.t
 cargo test --workspace --all-features
 cargo clippy --workspace --all-features --all-targets
 ```
+
+See [HACKING.md](./HACKING.md) for the engineering patterns and abstractions, and [GUIDANCE.md](./GUIDANCE.md) for publisher and verifier operational notes.
 
 ## License
 

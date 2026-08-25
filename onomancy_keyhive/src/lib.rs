@@ -18,7 +18,7 @@
 //!  └─────────────────────┘   verdict  └──────────────────────┘
 //! ```
 //!
-//! Keyhive 0.5 is pre-alpha (ADR-056): its event encoding may churn.
+//! Keyhive 0.5 is pre-alpha: its event encoding may churn.
 //! That is absorbed by design — carriage bytes ride the certificate's
 //! unsigned attached region, so a re-encode means re-attaching
 //! evidence, never re-signing the unit. The [`carriage`] envelope

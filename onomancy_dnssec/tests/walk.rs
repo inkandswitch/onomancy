@@ -157,7 +157,7 @@ fn mismatched_ds_blocks_the_descent() -> TestResult {
 
 #[test]
 fn denial_only_chains_prove_nothing() -> TestResult {
-    // Negative proofs are out at v0 (ADR-045): a chain whose leaf is
+    // Negative proofs are out at v0: a chain whose leaf is
     // an NSEC denial — even validly signed — is not a proof of
     // anything, and the denial link itself is skipped unverified.
     let root = zone(".", 1);
@@ -276,6 +276,96 @@ fn a_cross_zone_cname_reroots_and_walks_to_the_target_branch() -> TestResult {
 
     let ChainProof { records, .. } = validator.validate_detailed(&hostname()?, &chain)?;
     assert_eq!(records.len(), 1);
+    Ok(())
+}
+
+/// A CNAME staying INSIDE the current zone but landing under a
+/// deeper signed cut: no re-root — the parent zone signs the child's
+/// DS and the walk descends the cut. This is the chain shape
+/// `onomancy_chain` emits for in-zone indirection (its
+/// `in_zone_cnames_descend_intermediate_deeper_cuts` test builds
+/// exactly this sequence).
+#[test]
+fn an_in_zone_cname_descends_a_deeper_cut_without_rerooting() -> TestResult {
+    let root = zone(".", 1);
+    let source = zone("expede.wtf", 2);
+    let deeper = zone("certs.expede.wtf", 3);
+    let validator = Validator::new(vec![root.anchor()]);
+
+    let target_owner: Name = "binding.certs.expede.wtf".parse()?;
+    let cname = cname_record(Name::onomancy_owner(&hostname()?), &target_owner);
+    let txt = Record {
+        owner: target_owner,
+        ..txt_record(&hostname()?, &fixtures::fixture_txt_text())
+    };
+
+    let source_ds = Zone::ds_record_for(&source);
+    let deeper_ds = Zone::ds_record_for(&deeper);
+    let window = (1_000, 5_000);
+
+    let chain = DnssecChain::from(vec![
+        link(&[
+            root.dnskey_record.clone(),
+            root.rrsig(core::slice::from_ref(&root.dnskey_record), window),
+        ]),
+        link(&[source_ds.clone(), root.rrsig(&[source_ds], window)]),
+        link(&[
+            source.dnskey_record.clone(),
+            source.rrsig(core::slice::from_ref(&source.dnskey_record), window),
+        ]),
+        // The in-zone hop, signed by the source zone…
+        link(&[cname.clone(), source.rrsig(&[cname], window)]),
+        // …then the deeper cut, its DS signed by the SOURCE zone (no
+        // re-root: the source's links are not repeated).
+        link(&[deeper_ds.clone(), source.rrsig(&[deeper_ds], window)]),
+        link(&[
+            deeper.dnskey_record.clone(),
+            deeper.rrsig(core::slice::from_ref(&deeper.dnskey_record), window),
+        ]),
+        link(&[txt.clone(), deeper.rrsig(&[txt], window)]),
+    ]);
+
+    let ChainProof { records, .. } = validator.validate_detailed(&hostname()?, &chain)?;
+    assert_eq!(records.len(), 1);
+    Ok(())
+}
+
+/// Without the deeper cut's links, a TXT signed by the child zone's
+/// keys must NOT verify: the walk never descended to those keys.
+#[test]
+fn an_in_zone_cname_to_a_deeper_cut_without_its_links_is_rejected() -> TestResult {
+    let root = zone(".", 1);
+    let source = zone("expede.wtf", 2);
+    let deeper = zone("certs.expede.wtf", 3);
+    let validator = Validator::new(vec![root.anchor()]);
+
+    let target_owner: Name = "binding.certs.expede.wtf".parse()?;
+    let cname = cname_record(Name::onomancy_owner(&hostname()?), &target_owner);
+    let txt = Record {
+        owner: target_owner,
+        ..txt_record(&hostname()?, &fixtures::fixture_txt_text())
+    };
+
+    let source_ds = Zone::ds_record_for(&source);
+    let window = (1_000, 5_000);
+
+    let chain = DnssecChain::from(vec![
+        link(&[
+            root.dnskey_record.clone(),
+            root.rrsig(core::slice::from_ref(&root.dnskey_record), window),
+        ]),
+        link(&[source_ds.clone(), root.rrsig(&[source_ds], window)]),
+        link(&[
+            source.dnskey_record.clone(),
+            source.rrsig(core::slice::from_ref(&source.dnskey_record), window),
+        ]),
+        link(&[cname.clone(), source.rrsig(&[cname], window)]),
+        // No DS/DNSKEY for certs.expede.wtf: the TXT is signed by
+        // keys the walk has never descended to.
+        link(&[txt.clone(), deeper.rrsig(&[txt], window)]),
+    ]);
+
+    assert!(validator.validate_detailed(&hostname()?, &chain).is_err());
     Ok(())
 }
 

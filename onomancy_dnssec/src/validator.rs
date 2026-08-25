@@ -19,7 +19,7 @@
 //! reports the window, not a verdict about the present), and the
 //! anchors are a constructor input.
 //!
-//! Negative proofs are out of the protocol at v0 (ADR-045): NSEC and
+//! Negative proofs are out of the protocol at v0: NSEC and
 //! NSEC3 links are skipped unverified (they can prove nothing to this
 //! walk), a chain without a provable TXT leaf is invalid, and
 //! wildcard-expanded answers are rejected outright — the no-closer-
@@ -122,7 +122,7 @@ impl Validator {
                 }
 
                 (RrType::NSEC | RrType::NSEC3, None) => {
-                    // Denial links prove nothing at v0 (ADR-045):
+                    // Denial links prove nothing at v0:
                     // skipped unverified, never chain-poisoning.
                 }
 
@@ -290,7 +290,7 @@ impl WalkState {
 
         // A wildcard-expanded answer (RRSIG label count below the
         // owner's) would need a no-closer-match proof — a negative
-        // proof, which v0 does not evaluate (ADR-045). Reject: a
+        // proof, which v0 does not evaluate. Reject: a
         // legitimate wildcard at `_onomancy` is pathological anyway,
         // and accepting one unproven would let a stripped exact-match
         // answer go undetected.
@@ -416,7 +416,7 @@ pub enum WalkError {
     },
 
     /// The chain ended without a TXT leaf: it proves nothing
-    /// (negative proofs are out of the protocol at v0, ADR-045).
+    /// (negative proofs are out of the protocol at v0).
     #[error("no TXT leaf: the chain proves nothing")]
     MissingLeaf,
 
@@ -460,7 +460,7 @@ pub enum WalkError {
     Verify(#[from] VerifyError),
 
     /// A wildcard-expanded answer: its no-closer-match proof would be
-    /// a negative proof, which v0 does not evaluate (ADR-045).
+    /// a negative proof, which v0 does not evaluate.
     #[error("wildcard-expanded answers are rejected at v0")]
     WildcardExpansion,
 

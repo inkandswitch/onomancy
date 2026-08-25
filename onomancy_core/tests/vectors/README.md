@@ -4,7 +4,7 @@ Checked-in wire-format vectors mandated by [specs/serialization.md § Test Vecto
 
 > [!WARNING]
 > Byte drift here is a wire-format break, not a refactor. Canonical
-> re-derivation (`encode(decode(b)) = b`, ADR-043) is load-bearing:
+> re-derivation (`encode(decode(b)) = b`) is load-bearing:
 > only regenerate these files for a deliberate, versioned format
 > change.
 

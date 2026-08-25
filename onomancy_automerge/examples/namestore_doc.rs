@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! cargo run -p onomancy_automerge --example namestore_doc -- \
-//!   out.automerge pics=automerge:VDTcix… "docs/current=automerge:8W3teP…"
+//!   out.automerge --note="the gallery" \
+//!   pics=automerge:VDTcix… "docs/current=automerge:8W3teP…"
 //! ```
 
 use automerge::{Automerge, ObjType, transaction::Transactable};
@@ -20,6 +21,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     doc.transact::<_, _, automerge::AutomergeError>(|tx| {
         let map = tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
         for entry in args {
+            // A display note on the document root, not a name edge.
+            if let Some(note) = entry.strip_prefix("--note=") {
+                tx.put(automerge::ROOT, "note", note)?;
+                continue;
+            }
+
             let (key, value) = entry.split_once('=').unwrap_or((entry.as_str(), ""));
             // Only bare references belong in a namestore (E5): check
             // the spelling before writing anything.

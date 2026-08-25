@@ -140,10 +140,6 @@ pub(crate) enum MigrateError {
     #[error(transparent)]
     Ceremony(#[from] onomancy_publish::ceremony::CeremonyError),
 
-    /// The authority carriage could not be minted.
-    #[error(transparent)]
-    Mint(#[from] onomancy_keyhive::mint::MintError),
-
     /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
@@ -159,6 +155,10 @@ pub(crate) enum MigrateError {
     /// Artifact or runtime IO failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// The authority carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
 
     /// The zone publishes no record for the predecessor document.
     #[error("no live record attests the predecessor document — nothing to migrate from")]

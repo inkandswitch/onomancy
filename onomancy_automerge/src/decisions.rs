@@ -189,7 +189,7 @@ impl<'a> DecisionsView<'a> {
 
     fn document<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<DocAnchor> {
         let bytes = self.bytes32(obj, prop)?;
-        // Point validity at decode (ADR-043 §9) applies to decisions
+        // Point validity at decode applies to decisions
         // documents too: a non-key "document" contributes nothing.
         let key = VerifyingKey::from_bytes(&bytes).ok()?;
         Some(DocAnchor::from(key))

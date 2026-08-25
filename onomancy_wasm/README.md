@@ -10,4 +10,4 @@ Wasm/JavaScript bindings for Onomancer (browser and Node.js). Built as an npm pa
 
 ## Demo
 
-A browser demo lives at [`demo/index.html`](./demo) (the `pkg/` directory is generated — see `demo/README.md` for build steps). Verified live against `brooklynzelenka.com` from Node 24 and real browsers.
+A browser demo lives at [`demo/index.html`](./demo) (the `pkg/` directory is generated — see `demo/README.md` for build steps). It runs against production DNS in browsers and Node 18+.

@@ -7,7 +7,7 @@
 //!
 //! Every vector is deterministic: fixed seeds, fixed timestamps, no
 //! ambient input. The checked-in files gate codec changes — canonical
-//! re-derivation (`encode(decode(b)) = b`) is load-bearing (ADR-043),
+//! re-derivation (`encode(decode(b)) = b`) is load-bearing,
 //! so any byte drift here is a wire-format break, not a refactor.
 //!
 //! PROVISIONAL: vectors are generated from this implementation until

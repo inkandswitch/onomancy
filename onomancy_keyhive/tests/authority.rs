@@ -3,12 +3,12 @@
 //! signers against it — the checks that were vacuous under the
 //! permissive memory fake, exercised for real.
 
-use ed25519_dalek::VerifyingKey;
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use future_form::Sendable;
 use futures::executor::block_on;
 use keyhive_core::{
     access::Access,
-    event::{Event, static_event::StaticEvent},
+    event::{static_event::StaticEvent, Event},
     keyhive::Keyhive,
     listener::no_listener::NoListener,
     principal::{identifier::Identifier, individual::op::KeyOp, membered::Membered},
@@ -212,6 +212,31 @@ fn delegated_keys_are_on_path_at_any_access() -> TestResult {
     assert!(
         !KeyhiveAuthority.on_path(&[], &unknown_generation),
         "an empty carriage puts nothing on the path"
+    );
+    Ok(())
+}
+
+#[test]
+fn document_carriages_vouch_their_anchor_and_nothing_else() -> TestResult {
+    use onomancy_keyhive::mint::document_carriage;
+
+    let doc_key = SigningKey::from_bytes(&[7; 32]);
+    let anchor = DocAnchor::from(doc_key.verifying_key());
+    let other = DocAnchor::from(SigningKey::from_bytes(&[8; 32]).verifying_key());
+
+    let carriage = document_carriage(&doc_key)?;
+
+    assert!(
+        KeyhiveAuthority.vouches_document(&anchor, &carriage),
+        "a minted carriage roots at its own document"
+    );
+    assert!(
+        !KeyhiveAuthority.vouches_document(&other, &carriage),
+        "and vouches no other anchor"
+    );
+    assert!(
+        !KeyhiveAuthority.vouches_document(&anchor, &[]),
+        "an empty carriage vouches nothing"
     );
     Ok(())
 }

@@ -1,8 +1,25 @@
-# Live verifier demo
+# Browser demos
 
-The whole Onomancy verifier in a browser tab: DoH fetch → DNSSEC walk from the baked-in IANA root keys → graded verdict. No certificate authority, no trusted resolver, no server component.
+Two pages, one Wasm module:
 
-`pkg/` is generated (gitignored). Rebuild it with:
+- [`index.html`](./index.html) — the live verifier: DoH fetch → DNSSEC walk from the baked-in IANA root keys → graded verdict. No certificate authority, no trusted resolver, no server component.
+- [`names.html`](./names.html) — documents naming documents: mint in-tab Automerge documents, wire namestore edges between them, and resolve full onomancy names (`automerge:…/…`, `~/…`, `@host/…`) with the real greedy walk. `@host` names anchor live over `DoH` first, then walk the held documents — documents the tab doesn't hold are fetched from [`docs/`](./docs/) by anchor as the walk needs them. Try `@brooklynzelenka.com/team/john`: the zone attests the root document, `docs/` carries its real bytes, and the walk lands on John.
+
+`docs/` holds real saved documents named by their anchors (the dev-bridge substrate, same convention as `onomancer name --docs`). Regenerate or extend them with the `namestore_doc` example:
+
+```sh
+cargo run -p onomancy_automerge --example namestore_doc -- \
+  onomancy_wasm/demo/docs/<anchor>.automerge --note="…" "team/john=automerge:…"
+```
+
+One command builds and serves both (from the workspace root):
+
+```sh
+nix run .#demo        # or `wasm:demo` inside the dev shell; port arg optional
+# → http://localhost:8080/ and /names.html
+```
+
+`pkg/` is generated (gitignored). To rebuild it by hand:
 
 ```sh
 cargo build -p onomancy_wasm --target wasm32-unknown-unknown --release

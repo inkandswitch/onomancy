@@ -2,7 +2,7 @@
 //!
 //! The checked-in files under `tests/vectors/` gate codec changes:
 //! canonical re-derivation (`encode(decode(b)) = b`) is load-bearing
-//! (ADR-043), so a byte drift here is a wire-format break. Regenerate
+//!, so a byte drift here is a wire-format break. Regenerate
 //! deliberately with:
 //!
 //! ```sh

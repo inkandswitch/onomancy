@@ -977,9 +977,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1614,10 +1616,14 @@ dependencies = [
 name = "onomancy_wasm"
 version = "0.1.0"
 dependencies = [
+ "automerge",
  "console_error_panic_hook",
+ "ed25519-dalek",
  "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "hickory-proto",
  "js-sys",
+ "onomancy_automerge",
  "onomancy_chain",
  "onomancy_core",
  "onomancy_dnssec",

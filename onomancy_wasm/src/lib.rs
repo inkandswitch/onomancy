@@ -5,6 +5,8 @@
 
 #[cfg(feature = "doh")]
 pub mod doh;
+#[cfg(feature = "names")]
+pub mod held;
 #[cfg(feature = "doh")]
 pub mod resolve;
 

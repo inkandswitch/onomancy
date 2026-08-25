@@ -6,7 +6,7 @@ Keyhive-backed authority verification for the Onomancy protocol: the real implem
 
 | Question                                               | Rule                                                                                                                                    |
 |--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| May `signer` speak for `root_doc`?                     | `signer == root` (identity), or the carriage's graph shows a delegation to the signer whose DELEGATING hop held `Admin` (root grants count) — dns-anchor §Who Signs, ADR-057 |
+| May `signer` speak for `root_doc`?                     | `signer == root` (identity), or the carriage's graph shows a delegation to the signer whose DELEGATING hop held `Admin` (root grants count) — dns-anchor §Who Signs |
 | Is `generation` on the delegation path?                | Any graph the carriage proves delegates to the generation key, at any access level                                                      |
 | Is a walked-to document authorized to be in its state? | Every op in the doc was authored under transitive `Edit` access on that doc's own graph                                                 |
 
@@ -16,7 +16,7 @@ Verification is a _replay_: each question ingests the carriage's events into a t
 
 ## Carriage encoding
 
-Each `DelegationBytes` entry is `kh0` + one bincode-encoded `StaticEvent`: a delegation, revocation, or prekey operation (prekeys ride along because Keyhive resolves delegates against known individuals). Keyhive 0.5 is pre-alpha and its encoding may churn — absorbed by design: carriages ride the certificate's _unsigned attached region_, so a re-encode re-attaches evidence without touching signatures, and the version tag makes drift a loud parse error rather than a misread (ADR-056).
+Each `DelegationBytes` entry is `kh0` + one bincode-encoded `StaticEvent`: a delegation, revocation, or prekey operation (prekeys ride along because Keyhive resolves delegates against known individuals). Keyhive 0.5 is pre-alpha and its encoding may churn — absorbed by design: carriages ride the certificate's _unsigned attached region_, so a re-encode re-attaches evidence without touching signatures, and the version tag makes drift a loud parse error rather than a misread.
 
 ## Scope
 

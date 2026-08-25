@@ -41,7 +41,7 @@ v=ONO0;k=ed25519;n=<serial>;g=<base64 generation key>;p=<base64 doc ID>
 | `g` | The current generation key — the delegation-chain chokepoint certificate chains must pass through (see below) |
 | `p` | The verifying key = Keyhive root doc ID ([anchors.md](./anchors.md)) |
 
-Format version and ratchet are deliberately separate fields: publishers bump `n` freely on re-binding, so it cannot double as a grammar version — conflating them (as an earlier draft did) makes every format change a flag day.
+Format version and ratchet are deliberately separate fields: publishers bump `n` freely on re-binding, so it cannot double as a grammar version — conflating them makes every format change a flag day.
 
 ### Serial Ratchet
 
@@ -91,10 +91,10 @@ flowchart TD
 
 Validation requirements:
 
-- _Denial of existence_ — REMOVED at v0 (ADR-045): negative proofs are outside the protocol. A missing record is always "absence not proven" (possible downgrade, fails toward retention), and deliberate unbinding awaits a future owner-signed unbind statement — the statement-vouched mechanism, consistent with every other lifecycle event.
+- _Denial of existence_ — outside the protocol at v0: negative proofs are never evaluated. A missing record is always "absence not proven" (possible downgrade, fails toward retention), and deliberate unbinding awaits a future owner-signed unbind statement — the statement-vouched mechanism, consistent with every other lifecycle event.
 - _CNAME and zone-cut coverage_ — the chain must cover every indirection, not just the final owner name.
 - _Multiple TXT records_ — policy: highest understood format tag, then highest serial `n`; overlap is expected during migration.
-- _Wildcard synthesis_ — wildcard-derived TXT answers are REJECTED at v0: their no-closer-match proof would be a negative proof (ADR-045). Publishers MUST NOT rely on wildcard bindings.
+- _Wildcard synthesis_ — wildcard-derived TXT answers are REJECTED at v0: their no-closer-match proof would be a negative proof. Publishers MUST NOT rely on wildcard bindings.
 - _Unknown algorithms are invalid, not insecure_ — a chain needing an unimplemented signature algorithm yields ✗; the resolver-world "treat as insecure" downgrade has no analogue for a KSK-rooted binding.
 - _Hand-rolled vs. hickory's validator_ — undecided for the host path; the wasm path needs its own validation regardless.
 

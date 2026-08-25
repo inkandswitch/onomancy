@@ -24,6 +24,8 @@
 //!                        └─► Step::Done(DnssecChain)
 //! ```
 
+// std-only for now: hickory-proto has no no_std configuration, even
+// with default features off.
 #![forbid(unsafe_code)]
 
 pub mod answer;

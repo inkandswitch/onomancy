@@ -23,7 +23,7 @@
 //! - RDATA views: [`rrsig`], [`dnskey`], [`ds`], [`txt`], [`cname`]
 //!
 //! Deliberately absent: NSEC/NSEC3 views. Negative proofs are out of
-//! the protocol at v0 (ADR-045) — denial links in a chain are skipped
+//! the protocol at v0 — denial links in a chain are skipped
 //! unverified, since they can prove nothing to this walk.
 
 pub mod algorithm;

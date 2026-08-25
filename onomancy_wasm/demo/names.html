@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Onomancy — names over documents</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: ui-monospace, "JetBrains Mono", monospace;
+      max-width: 52rem; margin: 4rem auto; padding: 0 1rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.3rem; }
+    h2 { font-size: 1rem; margin-top: 2rem; }
+    form { display: flex; gap: .5rem; margin: 1rem 0; flex-wrap: wrap; }
+    input, select {
+      font: inherit; padding: .5rem .75rem;
+      border: 1px solid #8888; border-radius: .375rem;
+      background: transparent; color: inherit;
+    }
+    input { flex: 1; min-width: 8rem; }
+    button, a.button {
+      font: inherit; font-size: inherit; padding: .5rem 1rem;
+      border-radius: .375rem; border: 1px solid #8888;
+      background: transparent; color: inherit; cursor: pointer;
+      text-decoration: none;
+    }
+    button:disabled { opacity: .5; cursor: wait; }
+    pre {
+      padding: 1rem; border-radius: .375rem; background: #8881;
+      overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+    }
+    .doc {
+      border: 1px solid #8884; border-radius: .375rem;
+      padding: .75rem 1rem; margin: .75rem 0;
+    }
+    .doc .anchor { font-weight: bold; word-break: break-all; }
+    .doc .note { opacity: .8; }
+    .edge { margin-left: 1rem; }
+    .resolved { color: #2a2; } .partial { color: #b80; } .error { color: #c33; }
+    footer { margin-top: 3rem; font-size: .8rem; opacity: .6; }
+  </style>
+</head>
+<body>
+  <h1>Onomancy: documents naming documents</h1>
+  <p>
+    Each card below is a real Automerge document held in this tab,
+    identified by a self-certifying anchor. Namestore edges make one
+    document name another; resolution is the real greedy walk from
+    the Rust crates, running in WebAssembly. <code>@hostname/…</code>
+    names anchor live — DoH fetch, DNSSEC walk from the baked-in IANA
+    root keys — and the zone's attested document roots the walk.
+    Documents this tab doesn't hold yet are fetched from
+    <code>./docs/&lt;anchor&gt;.automerge</code> as the walk needs
+    them.
+  </p>
+
+  <form id="resolve-form">
+    <input id="name" value="@brooklynzelenka.com/team/john"
+           placeholder="@host/… — or automerge:…/… or ~/…"
+           autocomplete="off" spellcheck="false" />
+    <select id="root" title="root document for ~ names">
+      <option value="">~ root: (none)</option>
+    </select>
+    <button id="go" type="submit">resolve</button>
+  </form>
+  <pre id="out">press resolve — the whole pipeline runs in this tab</pre>
+  <form id="standin-form" hidden>
+    <button id="standin" type="button"></button>
+  </form>
+
+  <h2>held documents</h2>
+  <form id="doc-form">
+    <button id="new-doc" type="button">new document</button>
+    <button id="seed" type="button">seed an offline demo</button>
+    <input id="import" type="file" accept=".automerge" multiple
+           title="hold saved documents (filename = anchor)" />
+  </form>
+  <div id="docs"></div>
+
+  <footer>
+    Nothing here is mocked: the walk is
+    <code>onomancy_protocol::resolve</code> over
+    <code>onomancy_automerge</code> documents, and live anchoring is
+    the full verifier. The <code>docs/</code> fetch and
+    filename-as-anchor imports are the dev-bridge substrate — every
+    verdict carries an <code>authority</code> grade saying exactly how
+    little that vouches (in this tab: nothing — document verification
+    waits on upstream signed operations and verified ingest).
+  </footer>
+
+  <script type="module">
+    import init, { HeldDocuments } from "./pkg/onomancy_wasm.js";
+
+    await init();
+    const held = new HeldDocuments();
+
+    const $ = (id) => document.getElementById(id);
+    const short = (anchor) => anchor.slice(0, 22) + "…";
+    const bare = (anchor) => anchor.replace(/^automerge:/, "");
+
+    function report(text, cls) {
+      const out = $("out");
+      out.textContent = text;
+      out.className = cls ?? "";
+    }
+
+    function offerStandin(target) {
+      const form = $("standin-form");
+      const button = $("standin");
+      if (!target) {
+        form.hidden = true;
+        return;
+      }
+      form.hidden = false;
+      button.textContent = "hold an empty stand-in for " + short(target);
+      button.onclick = () => {
+        held.holdAt(target);
+        form.hidden = true;
+        render();
+        report("holding a stand-in for " + short(target) + " — bind edges below, then resolve again");
+      };
+    }
+
+    // Resolve, fetching unheld documents from ./docs/ as the walk
+    // discovers them — the dev-bridge replication substrate.
+    async function resolveFetching(name, root) {
+      const fetched = [];
+      for (let hops = 0; hops < 12; hops++) {
+        const verdict = await held.resolve(name, root, undefined);
+        if (verdict.status !== "partial" || !verdict.target) {
+          return { verdict, fetched };
+        }
+        const response = await fetch(`docs/${bare(verdict.target)}.automerge`);
+        if (!response.ok) {
+          return { verdict, fetched };
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        held.hold(verdict.target, bytes);
+        fetched.push(verdict.target);
+      }
+      return { verdict: { status: "partial", reason: "too many fetches" }, fetched };
+    }
+
+    function render() {
+      const docs = $("docs");
+      docs.replaceChildren();
+      const rootSelect = $("root");
+      const selected = rootSelect.value;
+      rootSelect.replaceChildren(new Option("~ root: (none)", ""));
+
+      for (const anchor of held.anchors) {
+        rootSelect.add(new Option("~ root: " + short(anchor), anchor));
+
+        const card = document.createElement("div");
+        card.className = "doc";
+
+        const title = document.createElement("div");
+        title.className = "anchor";
+        title.textContent = anchor;
+        card.append(title);
+
+        const note = held.note(anchor);
+        if (note) {
+          const noteLine = document.createElement("div");
+          noteLine.className = "note";
+          noteLine.textContent = "note: " + note;
+          card.append(noteLine);
+        }
+
+        for (const { path, target } of held.edges(anchor)) {
+          const edge = document.createElement("div");
+          edge.className = "edge";
+          edge.textContent = `${path} → ${short(target)}`;
+          card.append(edge);
+        }
+
+        const bindForm = document.createElement("form");
+        const pathInput = document.createElement("input");
+        pathInput.placeholder = "path (e.g. team/john)";
+        const targetSelect = document.createElement("select");
+        for (const other of held.anchors) {
+          targetSelect.add(new Option(short(other), other));
+        }
+        const noteInput = document.createElement("input");
+        noteInput.placeholder = "note";
+        noteInput.value = note ?? "";
+        const bindButton = document.createElement("button");
+        bindButton.textContent = "bind";
+        const saveLink = document.createElement("a");
+        saveLink.className = "button";
+        saveLink.textContent = "save";
+        saveLink.download = bare(anchor) + ".automerge";
+        saveLink.href = URL.createObjectURL(
+          new Blob([held.save(anchor)], { type: "application/octet-stream" }),
+        );
+        bindForm.append(pathInput, targetSelect, noteInput, bindButton, saveLink);
+        bindForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          try {
+            if (noteInput.value !== (note ?? "")) {
+              held.setNote(anchor, noteInput.value);
+            }
+            if (pathInput.value) {
+              held.bind(anchor, pathInput.value, targetSelect.value);
+            }
+            render();
+          } catch (error) {
+            report(String(error), "error");
+          }
+        });
+        card.append(bindForm);
+        docs.append(card);
+      }
+
+      rootSelect.value = selected;
+    }
+
+    $("new-doc").addEventListener("click", () => {
+      held.createDocument();
+      render();
+    });
+
+    $("seed").addEventListener("click", () => {
+      const gallery = held.createDocument();
+      const year = held.createDocument();
+      const root = held.createDocument();
+      held.setNote(root, "my root document");
+      held.setNote(gallery, "the gallery");
+      held.setNote(year, "🎉 best of 2026");
+      held.bind(root, "pics/best", gallery);
+      held.bind(gallery, "2026", year);
+      render();
+      $("name").value = root + "/pics/best/2026";
+      report("seeded: try resolving " + short(root) + "/pics/best/2026");
+    });
+
+    $("import").addEventListener("change", async (event) => {
+      try {
+        for (const file of event.target.files) {
+          const anchor = file.name.replace(/\.automerge$/, "");
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          held.hold(anchor, bytes);
+        }
+        render();
+      } catch (error) {
+        report(String(error), "error");
+      }
+      event.target.value = "";
+    });
+
+    $("resolve-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = $("go");
+      button.disabled = true;
+      offerStandin(null);
+      report("resolving…");
+      try {
+        const { verdict, fetched } = await resolveFetching(
+          $("name").value.trim(),
+          $("root").value || undefined,
+        );
+        const lines = [];
+        for (const anchor of fetched) {
+          lines.push("fetched docs/" + short(bare(anchor)) + ".automerge");
+        }
+        if (verdict.authority) {
+          lines.push("\u26a0 authority: " + verdict.authority + " \u2014 " + verdict.warning);
+        }
+        lines.push(JSON.stringify(verdict, null, 2));
+        report(lines.join("\n"), verdict.status);
+        if (verdict.status === "partial" && verdict.target) {
+          offerStandin(verdict.target);
+        }
+        render();
+      } catch (error) {
+        report(String(error), "error");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>

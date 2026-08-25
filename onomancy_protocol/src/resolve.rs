@@ -19,7 +19,7 @@
 //! Name { anchor, segments }
 //!         │ anchoring (elsewhere) ─► root namestore
 //!         ▼
-//! ┌─► segments empty? ──yes──► Resolved(current)
+//! ┌─► segments empty? ──yes──► Resolved (weakest grade crossed)
 //! │       │ no
 //! │       ▼
 //! │   greedy longest key matching a segment prefix?
@@ -45,7 +45,7 @@ pub mod resolution;
 use onomancy_core::name::segment::Segment;
 
 use self::{
-    namestore::{Namestore, Replicas},
+    namestore::{Namestore, Replicas, Vouched},
     resolution::{PartialReason, Resolution},
 };
 
@@ -59,19 +59,25 @@ use self::{
 /// Heads are not an input: a pinned name's root namestore is read *at*
 /// its heads by the anchoring layer before this walk begins, and
 /// pinning is deliberately not transitive.
+///
+/// The outcome's [`Authority`] is the weakest grade crossed — the
+/// root's and every hop's, folded by min.
 #[must_use]
 pub fn resolve<N: Namestore, R: Replicas<Namestore = N>>(
-    root: N,
+    root: Vouched<N>,
     segments: &[Segment],
     replicas: &R,
 ) -> Resolution<N> {
-    let mut current = root;
+    let (mut current, mut authority) = root.into_parts();
     let mut remaining = segments;
     let consumed = |remaining: &[Segment]| segments.len() - remaining.len();
 
     loop {
         if remaining.is_empty() {
-            return Resolution::Resolved(current);
+            return Resolution::Resolved {
+                target: current,
+                authority,
+            };
         }
 
         // Greedy longest-key match: try the whole remainder first,
@@ -91,7 +97,11 @@ pub fn resolve<N: Namestore, R: Replicas<Namestore = N>>(
         remaining = remaining.get(matched_len..).unwrap_or(&[]);
 
         match replicas.replica(&target) {
-            Some(next) => current = next,
+            Some(vouched) => {
+                let (next, grade) = vouched.into_parts();
+                current = next;
+                authority = authority.min(grade);
+            }
             None => {
                 return Resolution::Partial {
                     consumed: consumed(remaining),
@@ -107,6 +117,7 @@ pub fn resolve<N: Namestore, R: Replicas<Namestore = N>>(
 mod tests {
     use super::{
         memory::{MemoryNamestore, MemoryReplicas},
+        namestore::Authority,
         *,
     };
     use alloc::vec::Vec;
@@ -130,11 +141,22 @@ mod tests {
             .with(&segments("foo/bar/baz"), doc(2))
     }
 
+    /// A root vouched at the dev-bridge grade.
+    fn trusted(store: MemoryNamestore) -> Vouched<MemoryNamestore> {
+        Vouched::new(store, Authority::TrustedSubstrate)
+    }
+
     #[test]
     fn empty_segments_resolve_to_the_root_itself() {
         let root = spec_store();
-        let outcome = resolve(root.clone(), &[], &MemoryReplicas::default());
-        assert_eq!(outcome, Resolution::Resolved(root));
+        let outcome = resolve(trusted(root.clone()), &[], &MemoryReplicas::default());
+        assert_eq!(
+            outcome,
+            Resolution::Resolved {
+                target: root,
+                authority: Authority::TrustedSubstrate
+            }
+        );
     }
 
     #[test]
@@ -148,8 +170,59 @@ mod tests {
             )
             .with(doc(3), MemoryNamestore::default());
 
-        let outcome = resolve(spec_store(), &segments("foo/bar/baz/quux"), &replicas);
-        assert_eq!(outcome, Resolution::Resolved(MemoryNamestore::default()));
+        let outcome = resolve(
+            trusted(spec_store()),
+            &segments("foo/bar/baz/quux"),
+            &replicas,
+        );
+        assert_eq!(
+            outcome,
+            Resolution::Resolved {
+                target: MemoryNamestore::default(),
+                authority: Authority::TrustedSubstrate
+            }
+        );
+    }
+
+    #[test]
+    fn the_outcome_grade_is_the_weakest_link() {
+        // Root and first hop are carriage-verified; the second hop is
+        // only substrate-trusted — and drags the whole outcome down.
+        let replicas = MemoryReplicas::default()
+            .with_vouched(
+                doc(1),
+                MemoryNamestore::default().with(&segments("bar"), doc(2)),
+                Authority::CarriageVerified,
+            )
+            .with(doc(2), MemoryNamestore::default());
+
+        let root = MemoryNamestore::default().with(&segments("foo"), doc(1));
+
+        let strong = resolve(
+            Vouched::new(root.clone(), Authority::CarriageVerified),
+            &segments("foo"),
+            &replicas,
+        );
+        assert_eq!(
+            strong,
+            Resolution::Resolved {
+                target: MemoryNamestore::default().with(&segments("bar"), doc(2)),
+                authority: Authority::CarriageVerified
+            }
+        );
+
+        let weakened = resolve(
+            Vouched::new(root, Authority::CarriageVerified),
+            &segments("foo/bar"),
+            &replicas,
+        );
+        assert_eq!(
+            weakened,
+            Resolution::Resolved {
+                target: MemoryNamestore::default(),
+                authority: Authority::TrustedSubstrate
+            }
+        );
     }
 
     #[test]
@@ -159,7 +232,7 @@ mod tests {
         // continue with [bar] — which dangles there.
         let replicas = MemoryReplicas::default().with(doc(1), MemoryNamestore::default());
 
-        let outcome = resolve(spec_store(), &segments("foo/bar"), &replicas);
+        let outcome = resolve(trusted(spec_store()), &segments("foo/bar"), &replicas);
         assert_eq!(
             outcome,
             Resolution::Partial {
@@ -172,7 +245,7 @@ mod tests {
     #[test]
     fn unsynced_target_is_unavailable_not_wrong() {
         let outcome = resolve(
-            spec_store(),
+            trusted(spec_store()),
             &segments("foo/bar/baz"),
             &MemoryReplicas::default(),
         );
@@ -202,7 +275,7 @@ mod tests {
             .with(doc(2), MemoryNamestore::default())
             .with(doc(3), MemoryNamestore::default());
 
-        let outcome = resolve(root, &segments("a/b/c"), &replicas);
+        let outcome = resolve(trusted(root), &segments("a/b/c"), &replicas);
         assert_eq!(
             outcome,
             Resolution::Partial {
@@ -229,9 +302,15 @@ mod tests {
         // Three segments, three hops: root's `alice` edge, alice's
         // `bob` edge, bob's `alice` edge — landing back in alice's
         // store. The two `alice` edges live in different namestores.
-        let outcome = resolve(root, &segments("alice/bob/alice"), &replicas);
+        let outcome = resolve(trusted(root), &segments("alice/bob/alice"), &replicas);
         let expected = MemoryNamestore::default().with(&segments("bob"), bob);
-        assert_eq!(outcome, Resolution::Resolved(expected));
+        assert_eq!(
+            outcome,
+            Resolution::Resolved {
+                target: expected,
+                authority: Authority::TrustedSubstrate
+            }
+        );
         drop(bob_store);
     }
 
@@ -280,7 +359,7 @@ mod tests {
                     let walk: Vec<Segment> = walk.iter().take(6).map(seg).collect();
                     let root = stores.first().cloned().unwrap_or_default();
 
-                    let _outcome = resolve(root, &walk, &replicas);
+                    let _outcome = resolve(trusted(root), &walk, &replicas);
                     assert!(
                         replicas.loads() <= walk.len(),
                         "structural termination: ≤ one hop per segment"
@@ -313,8 +392,8 @@ mod tests {
                     );
 
                     assert_eq!(
-                        resolve(root.clone(), &walk, &replicas),
-                        resolve(root, &walk, &with_unreachable),
+                        resolve(trusted(root.clone()), &walk, &replicas),
+                        resolve(trusted(root), &walk, &with_unreachable),
                         "unreachable replicas must not affect the walk"
                     );
                 });

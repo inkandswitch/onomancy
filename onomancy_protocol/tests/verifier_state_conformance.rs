@@ -392,7 +392,7 @@ fn divergent_claims_badge_but_do_not_move_bindings() -> TestResult {
     Ok(())
 }
 
-// ───── ADR-042: the protected prefix and fork repair ─────
+// ───── the protected prefix and fork repair ─────
 
 #[test]
 fn d12_protected_prefix_survives_a_fork() -> TestResult {

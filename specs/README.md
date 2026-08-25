@@ -1,6 +1,6 @@
 # Onomancy Specifications
 
-Normative specifications for **Onomancy**, a local-first edgename protocol, written in the [BCP 14] keyword convention. _Onomancy_ is the protocol (grammar, records, certificate, and resolution semantics) and _Onomancer_ is the reference implementation (the tool that helps you practice onomancy). The [design](../design/) directory holds the rationale, threat model, and ADR narrative these specifications are derived from.
+Normative specifications for **Onomancy**, a local-first edgename protocol, written in the [BCP 14] keyword convention. _Onomancy_ is the protocol (grammar, records, certificate, and resolution semantics) and _Onomancer_ is the reference implementation (the tool that helps you practice onomancy). The [design](../design/) directory holds the rationale and threat model these specifications are derived from.
 
 | Spec                       | Scope                                                                                                                                                                         |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

@@ -18,7 +18,7 @@ use onomancy_core::{
 /// One store item: an exact byte unit, identified by content hash.
 ///
 /// Deliberately no absence-proof item: negative proofs are out of the
-/// protocol at v0 (ADR-045).
+/// protocol at v0.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {
     /// A bare chain refresh ingested without its certificate. Its

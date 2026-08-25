@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(
             Name::parse("@z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"),
             Err(ParseNameError::Dns(ParseDnsNameError::Dotless)),
-            "old-style multikey anchors are no longer keys under `@`"
+            "multikey strings are not key anchors under `@`"
         );
     }
 

@@ -2,6 +2,8 @@
 
 use onomancy_core::name::doc::DocAnchor;
 
+use super::namestore::Authority;
+
 /// What became of a resolution attempt.
 ///
 /// `Partial` is the designed norm under partition, not an error: the
@@ -13,7 +15,15 @@ use onomancy_core::name::doc::DocAnchor;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution<N> {
     /// The walk consumed every segment; here is the final namestore.
-    Resolved(N),
+    Resolved {
+        /// The namestore the name resolves to.
+        target: N,
+        /// The WEAKEST [`Authority`] grade crossed on the way — the
+        /// root's and every hop's, folded by min. Callers MUST
+        /// surface it: a resolution is only as vouched as its
+        /// weakest document.
+        authority: Authority,
+    },
 
     /// The walk stopped early. `consumed` counts the segments
     /// successfully walked before the stop.

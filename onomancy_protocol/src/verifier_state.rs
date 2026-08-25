@@ -583,7 +583,7 @@ pub(crate) fn is_deferred(record: &BindingEvidence, now: UnixSeconds) -> bool {
 // ————————————————————————— stage 3 —————————————————————————
 
 /// Stage 3's output: per-document generation history, scoped by the
-/// heads rule (ADR-042 / Heads and the Protected Prefix).
+/// heads rule (the Heads and the Protected Prefix rule).
 #[derive(Debug, Default)]
 struct LineageView {
     /// The replaced → successor edges, per document (exclusion-

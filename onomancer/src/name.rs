@@ -10,11 +10,15 @@ use std::{cell::Cell, net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
-use onomancy_core::name::{Name, anchor::Anchor, doc::DocAnchor};
+use onomancy_core::{
+    delegation,
+    name::{anchor::Anchor, doc::DocAnchor, Name},
+};
 use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::resolve::{
-    namestore::Replicas,
+    namestore::{Authority, Replicas, Vouched},
     resolution::{PartialReason, Resolution},
     resolve,
 };
@@ -66,12 +70,21 @@ impl NameWalk {
         };
 
         match resolve(root, name.segments(), &tracking) {
-            Resolution::Resolved(_) => {
+            Resolution::Resolved { authority, .. } => {
                 let target = tracking
                     .last
                     .get()
                     .map_or_else(|| "(untracked)".into(), |anchor| anchor.to_string());
                 say(&format!("resolved \u{2713} \u{2192} automerge:{target}"));
+                say(&format!(
+                    "authority: {} \u{26a0} {}",
+                    authority.label(),
+                    match authority {
+                        Authority::TrustedSubstrate => "nothing checked \u{2014} dev bridge",
+                        Authority::CarriageVerified =>
+                            "delegation graph verified; content authorship not yet checkable",
+                    }
+                ));
             }
             Resolution::Partial { consumed, reason } => {
                 let why = match reason {
@@ -113,7 +126,12 @@ impl NameWalk {
         }
     }
 
-    /// Every `<doc-anchor>.automerge` in the docs directory.
+    /// Every `<doc-anchor>.automerge` in the docs directory, graded
+    /// by its sibling `<doc-anchor>.carriage` when one exists.
+    ///
+    /// Fail-closed: a carriage that is present but does not vouch its
+    /// anchor REFUSES the document — broken evidence is worse than
+    /// none.
     fn load_docs(&self) -> Result<HeldDocuments, NameError> {
         let mut held = HeldDocuments::default();
 
@@ -133,7 +151,20 @@ impl NameWalk {
             let doc = automerge::Automerge::load(&std::fs::read(&path)?)
                 .map_err(|_| NameError::UnloadableDoc(path.clone()))?;
 
-            held = held.with(anchor, doc);
+            let carriage_path = path.with_extension("carriage");
+            let authority = if carriage_path.exists() {
+                let carriage = delegation::read_framed(&std::fs::read(&carriage_path)?)
+                    .map_err(|_| NameError::UnloadableCarriage(carriage_path.clone()))?;
+
+                if !KeyhiveAuthority.vouches_document(&anchor, &carriage) {
+                    return Err(NameError::CarriageRefused(carriage_path));
+                }
+                Authority::CarriageVerified
+            } else {
+                Authority::TrustedSubstrate
+            };
+
+            held = held.with_vouched(anchor, doc, authority);
         }
 
         Ok(held)
@@ -150,7 +181,7 @@ struct Tracking<'a> {
 impl Replicas for Tracking<'_> {
     type Namestore = DocumentNamestore;
 
-    fn replica(&self, target: &DocAnchor) -> Option<Self::Namestore> {
+    fn replica(&self, target: &DocAnchor) -> Option<Vouched<Self::Namestore>> {
         let replica = self.inner.replica(target);
         if replica.is_some() {
             self.last.set(Some(*target));
@@ -198,6 +229,15 @@ pub(crate) enum NameError {
     /// The root document is not in the docs directory.
     #[error("root document not held: add {0}.automerge to --docs")]
     RootNotHeld(Box<DocAnchor>),
+
+    /// A carriage file was present but did not vouch its document —
+    /// refused rather than downgraded.
+    #[error("carriage does not vouch its document (refusing the doc): {0}")]
+    CarriageRefused(PathBuf),
+
+    /// A carriage file did not parse.
+    #[error("not a framed carriage: {0}")]
+    UnloadableCarriage(PathBuf),
 
     /// A doc file did not load as Automerge.
     #[error("not an automerge document: {0}")]

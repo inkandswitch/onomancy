@@ -26,13 +26,13 @@ ignore = [
   { id = "RUSTSEC-2023-0071", reason = "verification-only use; Marvin requires private-key operations" },
 
   # bincode 1.3.3: development ceased; the team considers 1.3.3 complete.
-  # It is Keyhive's wire encoding (ADR-056) — onomancy_keyhive must speak
+  # It is Keyhive's wire encoding — onomancy_keyhive must speak
   # it, and carriage entries version-tag it (`kh0`) so a future encoding
   # change is a loud parse error. No security advisory, just unmaintained.
   { id = "RUSTSEC-2025-0141", reason = "keyhive_core's chosen encoding; version-tagged at our boundary" },
 
   # derivative: unmaintained proc-macro, transitive via keyhive_core
-  # (pre-alpha; ADR-056). Compile-time only — no runtime attack surface.
+  # (pre-alpha). Compile-time only — no runtime attack surface.
   # Drops out when upstream migrates (tracked in keyhive coordination).
   { id = "RUSTSEC-2024-0388", reason = "transitive compile-time dep of keyhive_core" },
 ]

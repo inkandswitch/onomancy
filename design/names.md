@@ -100,7 +100,7 @@ Decided: upstream automerge-repo's own encoding — bs58check over the 32-byte e
 Heads semantics are likewise upstream's: `#heads` pins the root document exactly as in automerge-repo URLs. Path semantics diverge deliberately: onomancy segments greedily match multi-segment keys in a **flat** namestore at a reserved location in the document ([path-resolution spec](../specs/path-resolution.md#namestore-layout)), whereas upstream URL paths descend nested sub-trees.
 
 > [!WARNING]
-> Open tension: an earlier draft claimed vanilla Automerge tools could resolve a name to the reference value by ordinary sub-tree descent. That claim broke when the namestore became a flat map with multi-segment keys — a vanilla tool descending `automerge:‹id›/foo/bar` will not find the flat key `"foo/bar"` at the reserved location. Either the vanilla-compatibility goal is dropped, or the namestore layout needs to reconcile with upstream path semantics. Track alongside the reserved-location coordination point with upstream.
+> Open tension: vanilla Automerge tools cannot resolve a name by ordinary sub-tree descent — the namestore is a flat map with multi-segment keys, so a vanilla tool descending `automerge:‹id›/foo/bar` will not find the flat key `"foo/bar"` at the reserved location. Either vanilla compatibility is a non-goal, or the namestore layout needs to reconcile with upstream path semantics. Track alongside the reserved-location coordination point with upstream.
 
 ## Hygiene Rules
 
@@ -126,7 +126,7 @@ Syntactic discrimination makes the anchor a parse-time fact, independent of netw
 
 ## Formal Verification Targets
 
-The grammar is the sweet spot for machine-checked proofs. Per ADR-015 the Lean model is developed alongside the Rust implementation (which lands first, with bolero properties); targets:
+The grammar is the sweet spot for machine-checked proofs. The Lean model is developed alongside the Rust implementation (which lands first, with bolero properties); targets:
 
 1. _Anchor disjointness_ — no string parses as more than one anchor class (the anti-phishing theorem)
 2. _Roundtrip_ — `parse (print n) = some n`; `print` is injective

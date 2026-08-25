@@ -164,7 +164,7 @@ Because it doesn't denote anything outside your device: `~` is an index into _yo
 
 ## Why don't edges carry a `met_as` field?
 
-Earlier drafts stored the alleged name on the edge. It moved to the [Binding Cache] because the edge is a mutable, field-wise-merging, replicated object — the wrong home for frozen per-observer evidence (torn merges, provenance leaked to sync peers, foreign-field ambiguity) — and because the tripwire never needed it: the cache already keeps each hostname's last-known document ID, so [Divergence and Re-Pin] falls out of a join. An alleged name _is_ an unverified binding claim; it lives with the other binding claims.
+The alleged name lives in the [Binding Cache], not on the edge: an edge is a mutable, field-wise-merging, replicated object — the wrong home for frozen per-observer evidence (torn merges, provenance leaked to sync peers, foreign-field ambiguity) — and the tripwire never needs it there: the cache already keeps each hostname's last-known document ID, so [Divergence and Re-Pin] falls out of a join. An alleged name _is_ an unverified binding claim; it lives with the other binding claims.
 
 ## What happens to `~/bob` if Bob rotates keys?
 

@@ -64,8 +64,8 @@ impl ChainBuilder {
     ///
     /// Non-matching records error at the frame — with one deliberate
     /// exception: a DS probe whose answer holds no matching DS data
-    /// reads as "not a signed cut" and the descent moves on (ADR-045:
-    /// absence is never proven at v0), so records answering the wrong
+    /// reads as "not a signed cut" and the descent moves on
+    /// (absence is never proven at v0), so records answering the wrong
     /// question are absorbed there rather than rejected.
     ///
     /// # Errors
@@ -430,7 +430,7 @@ fn encode_canonical(record: &Record, bytes: &mut Vec<u8>) -> Result<(), BuildErr
     Ok(())
 }
 
-/// Chain builder failed — unframeable answers, never a transport
+/// Chain building failed — unframeable answers, never a transport
 /// failure (the driver's) and never a validity verdict (the
 /// validator's).
 #[derive(Debug, thiserror::Error)]
@@ -473,8 +473,12 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use hickory_proto::rr::rdata::{NULL, TXT};
-    use onomancy_dnssec::{link::Link, wire::record::RrType};
+    use hickory_proto::rr::rdata::{CNAME, NULL, TXT};
+    use onomancy_dnssec::{
+        link::{Link, ParseLinkError},
+        validator::MAX_CNAME_HOPS as VALIDATOR_MAX_CNAME_HOPS,
+        wire::record::RrType,
+    };
     use testresult::TestResult;
 
     /// Canned answers: drive the machine to completion from the map,
@@ -509,7 +513,7 @@ mod tests {
             .links()
             .iter()
             .map(|link| Ok(Link::parse(link)?.rtype()))
-            .collect::<Result<_, onomancy_dnssec::link::ParseLinkError>>()?)
+            .collect::<Result<_, ParseLinkError>>()?)
     }
 
     /// A signed DS + DNSKEY answer pair for `zone`.
@@ -620,11 +624,7 @@ mod tests {
     }
 
     fn cname_record(at: &Name, target: &Name) -> Record {
-        Record::from_rdata(
-            at.clone(),
-            300,
-            RData::CNAME(hickory_proto::rr::rdata::CNAME(target.clone())),
-        )
+        Record::from_rdata(at.clone(), 300, RData::CNAME(CNAME(target.clone())))
     }
 
     #[test]
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn missing_leaves_are_unframeable() -> TestResult {
-        // ADR-045: no negative proofs — a courier cannot fabricate a
+        // No negative proofs at v0 — a courier cannot fabricate a
         // chain for a name without a TXT RRset, and says so.
         let map = transport(vec![]);
 
@@ -846,6 +846,6 @@ mod tests {
 
     #[test]
     fn hop_bound_matches_the_validator() {
-        assert_eq!(MAX_CNAME_HOPS, onomancy_dnssec::validator::MAX_CNAME_HOPS);
+        assert_eq!(MAX_CNAME_HOPS, VALIDATOR_MAX_CNAME_HOPS);
     }
 }

@@ -42,6 +42,37 @@ pub fn generation_carriage(
     doc_key: &ed25519_dalek::SigningKey,
     generation_key: &ed25519_dalek::SigningKey,
 ) -> Result<Vec<DelegationBytes>, MintError> {
+    relay_carriage(doc_key, generation_key)
+}
+
+/// A document carriage: proof that a delegation graph roots at
+/// `doc_key`'s document, for vouching dev-bridge replicas
+/// (`KeyhiveAuthority::vouches_document`). Delegates to an ephemeral
+/// witness key at the floor access level; the witness's signing half
+/// is dropped before returning — its only job was to give the graph
+/// an edge to exist through.
+///
+/// # Errors
+///
+/// Returns [`MintError`] if the host provides no entropy or Keyhive's
+/// encoding refuses an event.
+pub fn document_carriage(
+    doc_key: &ed25519_dalek::SigningKey,
+) -> Result<Vec<DelegationBytes>, MintError> {
+    let mut seed = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut OsRng, &mut seed);
+    let witness = ed25519_dalek::SigningKey::from_bytes(&seed);
+
+    relay_carriage(doc_key, &witness)
+}
+
+/// The shared two-event shape: introduce `delegate` (proof of
+/// possession) and delegate to it from `doc_key`'s document at
+/// [`Access::Relay`].
+fn relay_carriage(
+    doc_key: &ed25519_dalek::SigningKey,
+    generation_key: &ed25519_dalek::SigningKey,
+) -> Result<Vec<DelegationBytes>, MintError> {
     // Introduction: the generation key vouches for itself (proof of
     // possession); the share key is ceremonial — generation keys
     // never decrypt.
@@ -111,13 +142,9 @@ mod tests {
 
     #[test]
     fn root_granted_generation_keys_clear_the_signing_bar() -> TestResult {
-        // Deliberate (dns-anchor §Who Signs, ruled 2026-08-21): the
-        // bar is the DELEGATING hop, and a root grant is the highest
-        // hop there is — which is also what lets successor generation
-        // keys sign rotation statements. A leaked generation key can
-        // therefore pollute cert evidence until rotation, and
-        // rotation fully heals (D10 rejects fresh records whose g= is
-        // off the old carriage's path). Analysis: design/security.md.
+        // Deliberate (dns-anchor §Who Signs): the bar is the
+        // DELEGATING hop, and a root grant is the highest hop there
+        // is. Leak analysis: design/security.md.
         let doc_key = SigningKey::from_bytes(&[1; 32]);
         let generation_key = SigningKey::from_bytes(&[2; 32]);
 

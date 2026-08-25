@@ -54,7 +54,7 @@ impl StubResolver {
         Self { timeout, ..self }
     }
 
-    /// Answer one of the builder machine's questions, returning the
+    /// Answer one of the chain builder's questions, returning the
     /// answer-section records.
     ///
     /// `NXDOMAIN` and empty answers return `Ok(vec![])` — what they
