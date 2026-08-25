@@ -2,7 +2,7 @@
 //! events.
 //!
 //! A certificate or statement carries its authority proof as opaque
-//! [`DelegationBytes`] entries. This module fixes what those bytes
+//! [`SignedDelegationBytes`] entries. This module fixes what those bytes
 //! are when Keyhive is the authority: each entry is a 3-byte version
 //! tag (`kh0`) followed by one bincode-encoded
 //! [`StaticEvent`] — a delegation, revocation, or prekey operation.
@@ -15,7 +15,7 @@
 //! proves nothing.
 
 use keyhive_core::event::static_event::StaticEvent;
-use onomancy_core::delegation::DelegationBytes;
+use onomancy_core::delegation::{DelegationChain, SignedDelegationBytes};
 
 /// The envelope version tag for Keyhive 0.5 bincode encoding.
 ///
@@ -43,10 +43,10 @@ impl Carriage {
     ///
     /// Returns [`ParseCarriageError`] on an unknown version tag or an
     /// undecodable event; entry order is preserved.
-    pub fn parse(entries: &[DelegationBytes]) -> Result<Self, ParseCarriageError> {
+    pub fn parse(entries: &DelegationChain) -> Result<Self, ParseCarriageError> {
         let mut events = Vec::with_capacity(entries.len());
 
-        for (index, entry) in entries.iter().enumerate() {
+        for (index, entry) in entries.entries().iter().enumerate() {
             let bytes = entry.as_bytes();
             let Some(payload) = bytes.strip_prefix(&ENVELOPE_TAG[..]) else {
                 return Err(ParseCarriageError::UnknownEnvelope {
@@ -63,14 +63,14 @@ impl Carriage {
         Ok(Self(events))
     }
 
-    /// Encode into attachable [`DelegationBytes`] entries.
+    /// Encode into attachable [`SignedDelegationBytes`] entries.
     ///
     /// # Errors
     ///
     /// Returns [`EncodeCarriageError`] if bincode cannot serialize an
     /// event (structurally impossible for well-formed events, but
     /// bincode's API is fallible).
-    pub fn to_delegation_bytes(&self) -> Result<Vec<DelegationBytes>, EncodeCarriageError> {
+    pub fn to_delegation_bytes(&self) -> Result<DelegationChain, EncodeCarriageError> {
         self.0
             .iter()
             .map(|event| {
@@ -78,9 +78,10 @@ impl Carriage {
                 let mut bytes = Vec::with_capacity(ENVELOPE_TAG.len() + payload.len());
                 bytes.extend_from_slice(&ENVELOPE_TAG);
                 bytes.extend_from_slice(&payload);
-                Ok(DelegationBytes::from(bytes))
+                Ok(SignedDelegationBytes::from(bytes))
             })
-            .collect()
+            .collect::<Result<Vec<_>, EncodeCarriageError>>()
+            .map(DelegationChain::from)
     }
 
     /// The events, in ingest order.
@@ -123,20 +124,20 @@ mod tests {
 
     #[test]
     fn unknown_envelope_is_rejected() {
-        let entry = DelegationBytes::from(b"zz9garbage".to_vec());
+        let entry = SignedDelegationBytes::from(b"zz9garbage".to_vec());
 
         assert!(matches!(
-            Carriage::parse(&[entry]),
+            Carriage::parse(&DelegationChain::from(vec![entry])),
             Err(ParseCarriageError::UnknownEnvelope { index: 0, .. })
         ));
     }
 
     #[test]
     fn tagged_garbage_is_rejected_not_skipped() {
-        let entry = DelegationBytes::from(b"kh0garbage".to_vec());
+        let entry = SignedDelegationBytes::from(b"kh0garbage".to_vec());
 
         assert!(matches!(
-            Carriage::parse(&[entry]),
+            Carriage::parse(&DelegationChain::from(vec![entry])),
             Err(ParseCarriageError::UndecodableEvent { index: 0, .. })
         ));
     }

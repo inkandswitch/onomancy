@@ -22,7 +22,7 @@ use keyhive_core::{
     principal::{group::delegation::StaticDelegation, individual::op::add_key::AddKeyOp},
 };
 use keyhive_crypto::{share_key::ShareKey, signer::memory::MemorySigner};
-use onomancy_core::delegation::DelegationBytes;
+use onomancy_core::delegation::DelegationChain;
 use rand::rngs::OsRng;
 
 use crate::carriage::{Carriage, EncodeCarriageError};
@@ -41,7 +41,7 @@ use crate::carriage::{Carriage, EncodeCarriageError};
 pub fn generation_carriage(
     doc_key: &ed25519_dalek::SigningKey,
     generation_key: &ed25519_dalek::SigningKey,
-) -> Result<Vec<DelegationBytes>, MintError> {
+) -> Result<DelegationChain, MintError> {
     relay_carriage(doc_key, generation_key)
 }
 
@@ -58,7 +58,7 @@ pub fn generation_carriage(
 /// encoding refuses an event.
 pub fn document_carriage(
     doc_key: &ed25519_dalek::SigningKey,
-) -> Result<Vec<DelegationBytes>, MintError> {
+) -> Result<DelegationChain, MintError> {
     let mut seed = [0u8; 32];
     rand::RngCore::fill_bytes(&mut OsRng, &mut seed);
     let witness = ed25519_dalek::SigningKey::from_bytes(&seed);
@@ -72,7 +72,7 @@ pub fn document_carriage(
 fn relay_carriage(
     doc_key: &ed25519_dalek::SigningKey,
     generation_key: &ed25519_dalek::SigningKey,
-) -> Result<Vec<DelegationBytes>, MintError> {
+) -> Result<DelegationChain, MintError> {
     // Introduction: the generation key vouches for itself (proof of
     // possession); the share key is ceremonial — generation keys
     // never decrypt.
@@ -113,8 +113,9 @@ pub enum MintError {
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::SigningKey;
-    use onomancy_core::{name::doc::DocAnchor, txt::generation_key::GenerationKey};
-    use onomancy_protocol::verifier_state::seam::AuthorityVerifier;
+    use onomancy_core::anchor::doc::DocAnchor;
+    use onomancy_dnssec::txt::generation_key::GenerationKey;
+    use onomancy_protocol::verifier_state::authority_verifier::AuthorityVerifier;
     use testresult::TestResult;
 
     use super::*;

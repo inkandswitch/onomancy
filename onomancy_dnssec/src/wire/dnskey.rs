@@ -51,7 +51,7 @@ impl Dnskey {
         }
 
         Ok(Self {
-            algorithm: Algorithm(algorithm),
+            algorithm: Algorithm::new(algorithm),
             flags,
             public_key,
             rdata: rdata.to_vec(),

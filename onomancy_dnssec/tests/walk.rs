@@ -4,13 +4,13 @@
 
 #![allow(clippy::indexing_slicing, clippy::panic)]
 
-use onomancy_core::{
+use onomancy_core::time::UnixSeconds;
+use onomancy_dnssec::{
     certificate::chain::{ChainLink, DnssecChain},
-    name::dns::DnsName,
-    time::UnixSeconds,
+    chain_proof::{ChainProof, ChainValidator as _},
+    dns_name::DnsName,
     txt::serial::Serial,
 };
-use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator as _};
 use testresult::TestResult;
 
 use onomancy_dnssec::{

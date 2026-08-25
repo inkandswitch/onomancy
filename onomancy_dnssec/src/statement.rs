@@ -24,7 +24,7 @@
 //!   [`SuccessorStatement`](successor::SuccessorStatement): document
 //!   migration under one hostname
 //!
-//! The carriage framing itself is [`crate::delegation`]'s entry-list
+//! The carriage framing itself is [`onomancy_core::delegation`]'s entry-list
 //! encoding; carriage *semantics* (roots at the statement's document,
 //! terminates at its signer, admin-held delegating hop) are checked by
 //! Keyhive verification behind the `AuthorityVerifier` seam, not here.

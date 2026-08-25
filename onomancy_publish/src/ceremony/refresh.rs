@@ -7,9 +7,9 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use onomancy_core::{
+use onomancy_core::time::UnixSeconds;
+use onomancy_dnssec::{
     certificate::{Certificate, chain::DnssecChain},
-    time::UnixSeconds,
     txt::record::TxtRecord,
 };
 
@@ -46,7 +46,7 @@ impl Refresh {
     /// different document's records).
     pub fn plan(&self, now: UnixSeconds) -> Result<Plan, CeremonyError> {
         let refreshed = self.certificate.with_attachments(
-            self.certificate.delegation_chain().to_vec(),
+            self.certificate.delegation_chain().clone(),
             self.certificate.lineage().to_vec(),
             self.chain.clone(),
         )?;

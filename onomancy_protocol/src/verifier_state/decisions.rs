@@ -10,10 +10,11 @@
 use alloc::{string::String, vec::Vec};
 
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::{Map, Set},
     digest::{Blake3, Digest},
-    name::{dns::DnsName, doc::DocAnchor},
 };
+use onomancy_dnssec::dns_name::DnsName;
 
 /// The decision document's state, as read at derivation time.
 ///

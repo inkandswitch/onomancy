@@ -9,9 +9,9 @@
 
 use alloc::vec::Vec;
 
-use onomancy_core::{
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{
     freshness::ChainWindow,
-    name::doc::DocAnchor,
     txt::{generation_key::GenerationKey, serial::Serial},
 };
 

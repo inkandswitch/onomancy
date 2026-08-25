@@ -11,10 +11,11 @@ use alloc::{vec, vec::Vec};
 use core::cmp::Ordering;
 
 use onomancy_core::{
-    freshness::{ChainWindow, EmptyWindow},
     time::UnixSeconds,
     wire::{Reader, WireError},
 };
+
+use crate::freshness::{ChainWindow, EmptyWindow};
 
 use super::{
     algorithm::Algorithm,
@@ -53,7 +54,7 @@ impl Rrsig {
     pub fn parse(rdata: &[u8]) -> Result<Self, ParseRrsigError> {
         let mut reader = Reader::new(rdata)?;
 
-        let type_covered = RrType(read_u16(&mut reader)?);
+        let type_covered = RrType::new(read_u16(&mut reader)?);
         let [algorithm] = reader.take_array::<1>()?;
         let [labels] = reader.take_array::<1>()?;
         let original_ttl = read_u32(&mut reader)?;
@@ -67,7 +68,7 @@ impl Rrsig {
         let signature = reader.take(reader.remaining())?.to_vec();
 
         Ok(Self {
-            algorithm: Algorithm(algorithm),
+            algorithm: Algorithm::new(algorithm),
             expiration,
             inception,
             key_tag,
@@ -239,7 +240,7 @@ fn signed_data(link: &Link, rrsig: &Rrsig) -> Result<Vec<u8>, VerifyError> {
 
     for rdata in rdatas {
         message.extend_from_slice(&owner_wire);
-        message.extend_from_slice(&link.rtype().0.to_be_bytes());
+        message.extend_from_slice(&link.rtype().code().to_be_bytes());
         message.extend_from_slice(&CLASS_IN.to_be_bytes());
         message.extend_from_slice(&rrsig.original_ttl().to_be_bytes());
         // RDATA length fits u16: it was framed from a u16 RDLENGTH.
@@ -282,8 +283,8 @@ fn signed_owner(owner: &Name, rrsig: &Rrsig) -> Result<Name, VerifyError> {
 mod tests {
     use alloc::format;
 
+    use crate::certificate::chain::ChainLink;
     use ed25519_dalek::Signer as _;
-    use onomancy_core::certificate::chain::ChainLink;
 
     use super::*;
     use crate::wire::record::Record;
@@ -291,7 +292,7 @@ mod tests {
     /// Hand-built RRSIG RDATA covering TXT, signed by `expede.wtf`.
     fn sample_rdata() -> Vec<u8> {
         let mut rdata = Vec::new();
-        rdata.extend_from_slice(&RrType::TXT.0.to_be_bytes()); // covered
+        rdata.extend_from_slice(&RrType::TXT.code().to_be_bytes()); // covered
         rdata.push(15); // algorithm: ED25519
         rdata.push(3); // labels
         rdata.extend_from_slice(&900u32.to_be_bytes()); // original TTL
@@ -369,7 +370,7 @@ mod tests {
         let mut key_rdata = Vec::new();
         key_rdata.extend_from_slice(&0x0100u16.to_be_bytes());
         key_rdata.push(3);
-        key_rdata.push(Algorithm::ED25519.0);
+        key_rdata.push(Algorithm::ED25519.code());
         key_rdata.extend_from_slice(signing.verifying_key().as_bytes());
         let dnskey = Dnskey::parse(&key_rdata).expect("valid DNSKEY");
 
@@ -378,8 +379,8 @@ mod tests {
         // RRSIG preamble (unsigned yet): covered/alg/labels/ttl/
         // windows/tag/signer.
         let mut preamble = Vec::new();
-        preamble.extend_from_slice(&RrType::TXT.0.to_be_bytes());
-        preamble.push(Algorithm::ED25519.0);
+        preamble.extend_from_slice(&RrType::TXT.code().to_be_bytes());
+        preamble.push(Algorithm::ED25519.code());
         preamble.push(labels);
         preamble.extend_from_slice(&900u32.to_be_bytes());
         preamble.extend_from_slice(&1_755_600_000u32.to_be_bytes());
@@ -412,7 +413,7 @@ mod tests {
 
         for rdata in &sorted {
             message.extend_from_slice(&owner_wire);
-            message.extend_from_slice(&RrType::TXT.0.to_be_bytes());
+            message.extend_from_slice(&RrType::TXT.code().to_be_bytes());
             message.extend_from_slice(&CLASS_IN.to_be_bytes());
             message.extend_from_slice(&900u32.to_be_bytes());
             message.extend_from_slice(&u16::try_from(rdata.len()).expect("small").to_be_bytes());

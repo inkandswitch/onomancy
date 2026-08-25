@@ -11,7 +11,7 @@
 pub mod ds_digest;
 pub mod sha256;
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use onomancy_core::digest::Digest;
 use p256::ecdsa::signature::Verifier as _;
 use sha2::Digest as _;
@@ -226,17 +226,13 @@ pub enum VerifyError {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::wire::{record::Record, rr_type::RrType};
-    use alloc::format;
-    use ed25519_dalek::Signer as _;
-    use onomancy_core::certificate::chain::ChainLink;
 
     #[test]
     fn unsupported_algorithms_are_invalid_not_insecure() {
-        assert!(matches!(
-            verify_signature(Algorithm(253), &[], b"m", &[]),
-            Err(VerifyError::UnsupportedAlgorithm(Algorithm(253)))
-        ));
+        assert_eq!(
+            verify_signature(Algorithm::new(253), &[], b"m", &[]),
+            Err(VerifyError::UnsupportedAlgorithm(Algorithm::new(253)))
+        );
     }
 
     #[test]
@@ -245,15 +241,15 @@ mod tests {
         let mut key_rdata = Vec::new();
         key_rdata.extend_from_slice(&0x0100u16.to_be_bytes());
         key_rdata.push(3);
-        key_rdata.push(Algorithm::ED25519.0);
+        key_rdata.push(Algorithm::ED25519.code());
         key_rdata.extend_from_slice(&[7; 32]);
         let key = Dnskey::parse(&key_rdata).expect("valid DNSKEY");
         let owner: Name = "expede.wtf".parse().expect("parses");
 
         let mut ds_rdata = Vec::new();
         ds_rdata.extend_from_slice(&key.key_tag().to_be_bytes());
-        ds_rdata.push(Algorithm::ED25519.0);
-        ds_rdata.push(DigestType::SHA256.0);
+        ds_rdata.push(Algorithm::ED25519.code());
+        ds_rdata.push(DigestType::SHA256.code());
         ds_rdata.extend_from_slice(ds_digest(&owner, &key).as_bytes());
         let ds = Ds::parse(&ds_rdata).expect("parses");
 

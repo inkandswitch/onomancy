@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use onomancy_core::{
+use onomancy_dnssec::{
     certificate::Certificate,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
@@ -84,7 +84,7 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::certificate::DecodeCertificateError,
+        source: onomancy_dnssec::certificate::DecodeCertificateError,
     },
 
     /// The directory could not be read or written.
@@ -97,7 +97,7 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::statement::rotation::DecodeRotationError,
+        source: onomancy_dnssec::statement::rotation::DecodeRotationError,
     },
 
     /// A `.ons` file did not decode as a successor statement.
@@ -106,6 +106,6 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::statement::successor::DecodeSuccessorError,
+        source: onomancy_dnssec::statement::successor::DecodeSuccessorError,
     },
 }

@@ -39,9 +39,9 @@ impl Ds {
         }
 
         Ok(Self {
-            algorithm: Algorithm(algorithm),
+            algorithm: Algorithm::new(algorithm),
             digest,
-            digest_type: DigestType(digest_type),
+            digest_type: DigestType::new(digest_type),
             key_tag,
         })
     }

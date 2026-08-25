@@ -6,11 +6,11 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::{Map, Set},
-    name::doc::DocAnchor,
     time::UnixSeconds,
-    txt::serial::Serial,
 };
+use onomancy_dnssec::txt::serial::Serial;
 use testresult::TestResult;
 
 use onomancy_protocol::{
@@ -20,7 +20,7 @@ use onomancy_protocol::{
     verifier_state::{
         VerifierState,
         decisions::{Acceptance, Claim, Decisions},
-        memory::{MemoryAuthority, MemoryValidator},
+        memory::{authority::MemoryAuthority, validator::MemoryValidator},
         output::{BindingGrade, ContinuityGrade, HostState},
         store::{Store, item::Item},
     },

@@ -7,10 +7,7 @@
 use alloc::vec::Vec;
 use core::cell::Cell;
 
-use onomancy_core::{
-    collections::Map,
-    name::{doc::DocAnchor, segment::Segment},
-};
+use onomancy_core::{anchor::doc::DocAnchor, collections::Map, name::segment::Segment};
 
 use super::namestore::{Authority, Namestore, Replicas, Vouched};
 

@@ -1494,6 +1494,7 @@ dependencies = [
  "automerge",
  "ed25519-dalek",
  "onomancy_core",
+ "onomancy_dnssec",
  "onomancy_protocol",
  "testresult",
  "thiserror 2.0.20",
@@ -1522,7 +1523,6 @@ dependencies = [
  "bolero",
  "bs58",
  "ed25519-dalek",
- "idna",
  "onomancy_core",
  "serde",
  "testresult",
@@ -1534,8 +1534,11 @@ dependencies = [
 name = "onomancy_dnssec"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
+ "base64",
  "bolero",
  "ed25519-dalek",
+ "idna",
  "onomancy_core",
  "onomancy_dnssec",
  "onomancy_protocol",
@@ -1573,6 +1576,7 @@ dependencies = [
  "keyhive_core",
  "keyhive_crypto",
  "onomancy_core",
+ "onomancy_dnssec",
  "onomancy_protocol",
  "rand 0.8.7",
  "testresult",
@@ -1587,6 +1591,7 @@ dependencies = [
  "bolero",
  "ed25519-dalek",
  "onomancy_core",
+ "onomancy_dnssec",
  "onomancy_protocol",
  "testresult",
  "thiserror 2.0.20",
@@ -1599,6 +1604,7 @@ version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
  "onomancy_core",
+ "onomancy_dnssec",
  "onomancy_protocol",
  "testresult",
  "thiserror 2.0.20",

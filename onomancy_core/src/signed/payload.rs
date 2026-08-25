@@ -29,9 +29,8 @@ pub trait Payload: Sized {
     /// malformed field.
     fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, Self::Error>;
 
-    /// The key this unit's signature must verify under. For most
-    /// units an explicit field; for rotation statements, the successor
-    /// key itself.
+    /// The key this unit's signature must verify under — an explicit
+    /// field on most units, derived from the payload on some.
     fn signer(&self) -> &VerifyingKey;
 }
 

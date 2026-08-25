@@ -10,7 +10,7 @@ pub mod held;
 #[cfg(feature = "doh")]
 pub mod resolve;
 
-use onomancy_core::name::{Name, anchor::Anchor};
+use onomancy_dnssec::supported_name::SupportedName;
 use wasm_bindgen::prelude::*;
 
 /// One-time setup for panic reporting in the browser console.
@@ -19,10 +19,10 @@ pub fn setup() {
     console_error_panic_hook::set_once();
 }
 
-/// A parsed edgename (see [`onomancy_core::name::Name`]).
+/// A parsed edgename (see `onomancy_dnssec::supported_name::SupportedName`).
 #[wasm_bindgen(js_name = Name)]
 #[derive(Debug, Clone)]
-pub struct JsName(Name);
+pub struct JsName(SupportedName);
 
 #[wasm_bindgen(js_class = Name)]
 impl JsName {
@@ -34,7 +34,7 @@ impl JsName {
     /// path segment is invalid.
     #[wasm_bindgen(constructor)]
     pub fn new(raw: &str) -> Result<JsName, JsError> {
-        Ok(Self(Name::parse(raw)?))
+        Ok(Self(SupportedName::parse(raw)?))
     }
 
     /// The canonical (normalized) printed form.
@@ -48,10 +48,10 @@ impl JsName {
     #[wasm_bindgen(getter, js_name = anchorKind)]
     #[must_use]
     pub fn anchor_kind(&self) -> String {
-        match self.0.anchor() {
-            Anchor::Local => "local".into(),
-            Anchor::Dns(_) => "dns".into(),
-            Anchor::Doc(_) => "doc".into(),
+        match self.0 {
+            SupportedName::Local(_) => "local".into(),
+            SupportedName::Dns(_) => "dns".into(),
+            SupportedName::Doc(_) => "doc".into(),
         }
     }
 
@@ -59,7 +59,7 @@ impl JsName {
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn anchor(&self) -> String {
-        self.0.anchor().to_string()
+        self.0.anchor_string()
     }
 
     /// The path segments, one edge hop each.
@@ -70,18 +70,6 @@ impl JsName {
             .segments()
             .iter()
             .map(|s| s.as_str().into())
-            .collect()
-    }
-
-    /// Pinned heads on the anchor document (bs58check strings). Empty
-    /// for live names; only ever non-empty for `"doc"` anchors.
-    #[wasm_bindgen(getter)]
-    #[must_use]
-    pub fn heads(&self) -> Vec<String> {
-        self.0
-            .heads()
-            .iter()
-            .map(std::string::ToString::to_string)
             .collect()
     }
 }

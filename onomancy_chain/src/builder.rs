@@ -12,10 +12,10 @@ use hickory_proto::{
     rr::{Name, RData, Record, RecordType},
     serialize::binary::{BinEncodable, BinEncoder},
 };
-use onomancy_core::{
+use onomancy_core::wire::MAX_UNIT_BYTES;
+use onomancy_dnssec::{
     certificate::chain::{ChainLink, DnssecChain},
-    name::dns::DnsName,
-    wire::MAX_UNIT_BYTES,
+    dns_name::DnsName,
 };
 
 use crate::question::Question;

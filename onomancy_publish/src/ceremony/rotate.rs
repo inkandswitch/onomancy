@@ -7,11 +7,11 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use onomancy_core::{
+use onomancy_core::{anchor::doc::DocAnchor, time::UnixSeconds};
+use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams, chain::DnssecChain},
-    name::{dns::DnsName, doc::DocAnchor},
+    dns_name::DnsName,
     statement::rotation::RotationStatement,
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
@@ -45,7 +45,7 @@ pub struct Rotate {
     /// rotation statement (its signing authority) and the refreshed
     /// certificate (D10 path membership for the new `g=`). Opaque
     /// here — minted by `onomancy_keyhive::mint`.
-    pub carriage: Vec<onomancy_core::delegation::DelegationBytes>,
+    pub carriage: onomancy_core::delegation::DelegationChain,
 }
 
 impl Rotate {

@@ -6,9 +6,22 @@ use core::fmt;
 
 /// A DS digest-type code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DigestType(pub u8);
+pub struct DigestType(u8);
 
 impl DigestType {
+    /// Adopt a wire-carried code verbatim (the registry is open;
+    /// unknown codes are representable and fail closed downstream).
+    #[must_use]
+    pub const fn new(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The registry code, for wire encoding.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self.0
+    }
+
     /// SHA-256 (2) — the only type this implementation computes;
     /// everything else fails validation (the D13 doctrine applied to
     /// digests).

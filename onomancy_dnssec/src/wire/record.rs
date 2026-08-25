@@ -42,7 +42,7 @@ impl Record {
     /// input.
     pub fn read(reader: &mut Reader<'_>) -> Result<Self, ParseRecordError> {
         let owner = Name::read(reader)?;
-        let rtype = RrType(read_u16(reader)?);
+        let rtype = RrType::new(read_u16(reader)?);
         let class = read_u16(reader)?;
         let ttl = read_u32(reader)?;
 
@@ -61,7 +61,7 @@ impl Record {
     /// Append the canonical wire form.
     pub fn write(&self, buf: &mut Vec<u8>) {
         self.owner.write(buf);
-        buf.extend_from_slice(&self.rtype.0.to_be_bytes());
+        buf.extend_from_slice(&self.rtype.code().to_be_bytes());
         buf.extend_from_slice(&self.class.to_be_bytes());
         buf.extend_from_slice(&self.ttl.to_be_bytes());
         // RDATA length fits u16 by construction on read; writes of
@@ -132,7 +132,7 @@ mod tests {
     fn rdlength_overrun_is_rejected_before_allocation() {
         let mut buf = Vec::new();
         sample().owner.write(&mut buf);
-        buf.extend_from_slice(&RrType::TXT.0.to_be_bytes());
+        buf.extend_from_slice(&RrType::TXT.code().to_be_bytes());
         buf.extend_from_slice(&CLASS_IN.to_be_bytes());
         buf.extend_from_slice(&900u32.to_be_bytes());
         buf.extend_from_slice(&u16::MAX.to_be_bytes()); // declares 65535
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn type_display_names_the_seven() {
         assert_eq!(alloc::format!("{}", RrType::DNSKEY), "DNSKEY");
-        assert_eq!(alloc::format!("{}", RrType(65280)), "TYPE65280");
+        assert_eq!(alloc::format!("{}", RrType::new(65280)), "TYPE65280");
     }
 
     mod props {

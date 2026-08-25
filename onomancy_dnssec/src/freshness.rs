@@ -7,7 +7,7 @@
 //! clock reading, never a property of a connection: fresh chains travel
 //! by gossip and courier like everything else.
 
-use crate::time::UnixSeconds;
+use onomancy_core::time::UnixSeconds;
 
 /// The intersection window of a chain's RRSIG validity intervals: the
 /// span during which every link was simultaneously valid.

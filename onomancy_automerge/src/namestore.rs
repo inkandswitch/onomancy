@@ -7,9 +7,9 @@
 //! the greedy longest-key matching above this seam.
 
 use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value};
-use onomancy_core::name::{
-    doc::{self, DocAnchor},
-    segment::Segment,
+use onomancy_core::{
+    anchor::doc::{self, DocAnchor},
+    name::segment::Segment,
 };
 use onomancy_protocol::resolve::namestore::{Authority, Namestore, Replicas, Vouched};
 

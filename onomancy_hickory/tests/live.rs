@@ -7,9 +7,8 @@
 #![allow(clippy::expect_used, clippy::panic)]
 
 use onomancy_chain::builder::BuildError;
-use onomancy_core::name::dns::DnsName;
+use onomancy_dnssec::{chain_provider::ChainProvider, dns_name::DnsName};
 use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
-use onomancy_protocol::chain_provider::ChainProvider;
 
 /// Transport and zone-cut walking against a public recursive
 /// resolver. `cloudflare.com` publishes no `_onomancy` TXT record, so

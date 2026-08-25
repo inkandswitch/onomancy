@@ -27,7 +27,7 @@
 //! | 15 | `chain_count`      | bijou64         | varies       |                              | no     |
 //! | 16 | `chain`            | entry list      | varies       | DNSSEC chain framing         | no     |
 //!
-//! The unit is [`Signed<Binding>`](crate::signed::Signed) plus the
+//! The unit is [`Signed<Binding>`](onomancy_core::signed::Signed) plus the
 //! attached region. Decoded units rederive their canonical bytes
 //! ([`encode`](Certificate::encode)) rather than retaining them: the
 //! encoding is canonical and injective, `encode(decode(b)) = b`, the
@@ -54,20 +54,21 @@ use core::hash::{Hash, Hasher};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use self::{binding::Binding, chain::DnssecChain};
-use crate::{
-    delegation::{self, DelegationBytes},
+use onomancy_core::{
+    anchor::doc::{DocAnchor, Head},
+    delegation::DelegationChain,
     digest::{Blake3, Digest},
-    name::{
-        dns::{CanonicalDnsNameError, DnsName},
-        doc::{DocAnchor, Head},
-    },
     signed::{Signed, payload::Malformed},
+    time::UnixSeconds,
+    wire::{self, OversizeUnit, Reader, WireError},
+};
+
+use crate::{
+    dns_name::{CanonicalDnsNameError, DnsName},
     statement::{
         rotation::{DecodeRotationError, RotationStatement},
         successor::{DecodeSuccessorError, SuccessorStatement},
     },
-    time::UnixSeconds,
-    wire::{self, OversizeUnit, Reader, WireError},
 };
 
 /// A decoded, signature-checked certificate unit:
@@ -80,7 +81,7 @@ use crate::{
 pub struct Certificate {
     digest: Digest<Blake3, Certificate>,
     signed: Signed<Binding>,
-    delegation_chain: Vec<DelegationBytes>,
+    delegation_chain: DelegationChain,
     lineage: Vec<RotationStatement>,
     chain: DnssecChain,
 }
@@ -100,7 +101,7 @@ impl Certificate {
         let mut reader = Reader::new(bytes)?;
         let signed = Signed::decode_from(bytes, &mut reader)?;
 
-        let delegation_chain = delegation::read_entries(&mut reader)?;
+        let delegation_chain = DelegationChain::decode(&mut reader)?;
         let lineage = read_lineage(&mut reader)?;
         let chain = DnssecChain::read(&mut reader)?;
 
@@ -200,7 +201,7 @@ impl Certificate {
     /// the 1 MiB cap.
     pub fn with_attachments(
         &self,
-        delegation_chain: Vec<DelegationBytes>,
+        delegation_chain: DelegationChain,
         lineage: Vec<RotationStatement>,
         chain: DnssecChain,
     ) -> Result<Self, OversizeUnit> {
@@ -275,7 +276,7 @@ impl Certificate {
     /// Attached: verbatim `Signed<Delegation>` entries, doc root →
     /// signer, awaiting Keyhive verification.
     #[must_use]
-    pub fn delegation_chain(&self) -> &[DelegationBytes] {
+    pub const fn delegation_chain(&self) -> &DelegationChain {
         &self.delegation_chain
     }
 
@@ -317,7 +318,7 @@ pub struct CertificateParams {
     /// Succession proof from the predecessor document, if migrating.
     pub predecessor: Option<SuccessorStatement>,
     /// Verbatim `Signed<Delegation>` chain, doc root → signer.
-    pub delegation_chain: Vec<DelegationBytes>,
+    pub delegation_chain: DelegationChain,
     /// Rotation statements, oldest first.
     pub lineage: Vec<RotationStatement>,
     /// The DNSSEC chain for the hostname's TXT record.
@@ -327,11 +328,11 @@ pub struct CertificateParams {
 /// Encode the attached region (fields 11–16).
 fn encode_attached(
     bytes: &mut Vec<u8>,
-    delegation_chain: &[DelegationBytes],
+    delegation_chain: &DelegationChain,
     lineage: &[RotationStatement],
     chain: &DnssecChain,
 ) {
-    delegation::write_entries(bytes, delegation_chain);
+    delegation_chain.encode_into(bytes);
 
     wire::put_varint(bytes, lineage.len() as u64);
     for statement in lineage {
@@ -455,6 +456,7 @@ mod tests {
     use super::*;
     use crate::txt::generation_key::GenerationKey;
     use alloc::vec;
+    use onomancy_core::delegation::SignedDelegationBytes;
 
     fn doc(seed: u8) -> DocAnchor {
         DocAnchor::from(SigningKey::from_bytes(&[seed; 32]).verifying_key())
@@ -476,17 +478,20 @@ mod tests {
                     &doc(1),
                     &host(),
                     &SigningKey::from_bytes(&[5; 32]),
-                    vec![DelegationBytes::from(vec![1, 2, 3])],
+                    DelegationChain::from(vec![SignedDelegationBytes::from(vec![1, 2, 3])]),
                 )
                 .expect("under the unit cap"),
             ),
-            delegation_chain: vec![DelegationBytes::from(vec![0xAA; 9])],
+            delegation_chain: DelegationChain::from(vec![SignedDelegationBytes::from(vec![
+                0xAA;
+                9
+            ])]),
             lineage: vec![
                 RotationStatement::sign(
                     &doc(1),
                     &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
                     &SigningKey::from_bytes(&[7; 32]),
-                    vec![],
+                    DelegationChain::default(),
                 )
                 .expect("under the unit cap"),
             ],
@@ -555,7 +560,7 @@ mod tests {
         let cert = sample();
         let refreshed = cert
             .with_attachments(
-                vec![DelegationBytes::from(vec![0xCC; 4])],
+                DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xCC; 4])]),
                 vec![],
                 DnssecChain::from(vec![vec![0xDD; 5].into()]),
             )
@@ -593,7 +598,7 @@ mod tests {
             &doc(2),
             &host(),
             &SigningKey::from_bytes(&[3; 32]),
-            vec![],
+            DelegationChain::default(),
         )
         .expect("under the unit cap")
         .encode();
@@ -610,7 +615,10 @@ mod tests {
         // A delegation blob past the cap: the encoder must refuse to
         // build what its own decoder would reject.
         let mut params = sample_params();
-        params.delegation_chain = vec![DelegationBytes::from(vec![0u8; wire::MAX_UNIT_BYTES + 1])];
+        params.delegation_chain = DelegationChain::from(vec![SignedDelegationBytes::from(vec![
+            0u8;
+            wire::MAX_UNIT_BYTES + 1
+        ])]);
 
         assert!(matches!(
             Certificate::sign(params, &SigningKey::from_bytes(&[2; 32])),
@@ -620,7 +628,11 @@ mod tests {
         // Same rule on the keyless re-attach path.
         assert!(matches!(
             sample().with_attachments(
-                vec![DelegationBytes::from(vec![0u8; wire::MAX_UNIT_BYTES + 1])],
+                DelegationChain::from(vec![SignedDelegationBytes::from(vec![
+                    0u8;
+                    wire::MAX_UNIT_BYTES
+                        + 1
+                ])]),
                 vec![],
                 DnssecChain::default(),
             ),
@@ -660,7 +672,7 @@ mod tests {
                         delegation_chain: blobs
                             .iter()
                             .cloned()
-                            .map(DelegationBytes::from)
+                            .map(SignedDelegationBytes::from)
                             .collect(),
                         lineage: vec![],
                         chain: DnssecChain::default(),

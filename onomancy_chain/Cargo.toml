@@ -20,6 +20,7 @@ rust-version.workspace = true
 # and our IDs are explicit — keeps getrandom out of the wasm graph.
 hickory-proto = { workspace = true }
 onomancy_core = { workspace = true }
+onomancy_dnssec = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

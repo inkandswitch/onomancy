@@ -11,11 +11,8 @@
 
 use alloc::vec::Vec;
 
-use onomancy_core::{
-    collections::Set,
-    name::{dns::DnsName, doc::DocAnchor},
-    txt::serial::Serial,
-};
+use onomancy_core::{anchor::doc::DocAnchor, collections::Set};
+use onomancy_dnssec::{dns_name::DnsName, txt::serial::Serial};
 
 use super::output::{BindingGrade, Divergence, Fork, HostState, SuccessionFork};
 
@@ -231,8 +228,8 @@ mod tests {
         DocAnchor::from(ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key())
     }
 
-    fn generation(seed: u8) -> onomancy_core::txt::generation_key::GenerationKey {
-        onomancy_core::txt::generation_key::GenerationKey::from(
+    fn generation(seed: u8) -> onomancy_dnssec::txt::generation_key::GenerationKey {
+        onomancy_dnssec::txt::generation_key::GenerationKey::from(
             ed25519_dalek::SigningKey::from_bytes(&[seed; 32]).verifying_key(),
         )
     }

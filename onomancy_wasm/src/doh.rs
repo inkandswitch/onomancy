@@ -15,8 +15,9 @@ use onomancy_chain::{
     builder::{BuildError, ChainBuilder, Step},
     question::Question,
 };
-use onomancy_core::{certificate::chain::DnssecChain, name::dns::DnsName};
-use onomancy_protocol::chain_provider::ChainProvider;
+use onomancy_dnssec::{
+    certificate::chain::DnssecChain, chain_provider::ChainProvider, dns_name::DnsName,
+};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, Request, RequestInit, Response};

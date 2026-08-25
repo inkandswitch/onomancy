@@ -50,7 +50,7 @@ Segments follow the shared [Onomancy Name Grammar]; this section defines the `dn
 - Parsers MUST reject IP literals (v4 and v6) under `@`.
 - Names MUST be normalized at parse time: lowercase, trailing dot stripped, [IDNA] U-labels converted to A-labels. The parser, stores, comparisons, and chain validation operate on **A-labels only**; U-labels exist purely at the display layer.
 - DNS length limits apply: 253 octets total, 63 per label.
-- `#` is reserved in segments (heads delimiter); DNS anchors do not carry heads.
+- `#` is reserved in segments, as in every family; names carry no version pins.
 
 # TXT Binding Record
 [TXT Binding Record]: #txt-binding-record
@@ -174,15 +174,20 @@ A fork suspends D12 **fork-locally, never document-wide**:
 
 Given two certificates (or cached bindings) for the same name, a verifier determines which is current by a precedence ladder, each rung consulted only when stronger rungs are silent. First, **pool the evidence**: both artifacts' attached regions are self-authenticating, so their lineages and chains MUST be evaluated as a union — one artifact's lineage may order the other.
 
-| Rung | Comparator | Vouched by | Rule |
-|------|-----------|------------|------|
-| 0 | Chain freshness | DNSSEC windows | A fresh ✓ artifact beats any stale ⚠ one outright |
-| 1 | Succession proofs / lineage descent | The document's keys | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
-| 2 | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Within a freshness class, every record has one sort key (`window_end` = the end of the chain's ∩-window, [Graded Freshness]): later window end wins; equal ends → higher serial; equal serials → later `issued_at` — but `issued_at` breaks ties only within a single document: cross-document equality at `(window_end, serial)` is zone equivocation (contested), never resolved by a signer-claimed field. Cross-document capable, durable, static — and a **total order**: full key equality between different documents is **zone equivocation** (contested, surfaced, never auto-resolved) |
+| Rung | Comparator                                                       | Vouched by                                     | Rule                                                                                                                                                                                                                 |
+|------|------------------------------------------------------------------|------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0    | Chain freshness                                                  | DNSSEC windows                                 | A fresh ✓ artifact beats any stale ⚠ one outright                                                                                                                                                                    |
+| 1    | Succession proofs / lineage descent                              | The document's keys                            | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
+| 2    | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Later window end wins; equal ends → higher serial; equal serials → later `issued_at` (within one document only; see below)                                                                                           |
 
-The maximal record is defined as the **unique undominated candidate**: the one no other candidate beats on the ladder. Implementations MUST select it by dominance testing (or an equivalent order-insensitive computation), never by a fold whose result can depend on enumeration order: rungs 0–1 together with rung 2 are not guaranteed transitive (a proof can order a pair the keys order oppositely), so pairwise folding is not implementation-independent. Zero or several undominated candidates — dominance cycles, equivocation, forks — derive as **contested**.
+The maximal record is the **unique undominated candidate**: the one no other candidate beats on the ladder. Implementations MUST select it by dominance testing (or an equivalent order-insensitive computation), never by a fold whose result can depend on enumeration order. The reason folding is unsafe: the full ladder is not guaranteed transitive — a rung-1 proof can order a pair one way while the rung-2 keys order it the other — so a pairwise fold's answer can depend on which pair it happened to compare first. Zero or several undominated candidates — dominance cycles, equivocation, forks — derive as **contested**.
 
-Rung 2 is one lexicographic key rather than pairwise comparators, deliberately: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset — a single key per record makes the order total and "the maximal record" well-defined. `window_end` leads because it is DNSSEC-vouched where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window). The key orders **zone states** across documents for the same hostname — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
+Rung 2's key details, in prose:
+
+- `window_end` is the end of the chain's ∩-window ([Graded Freshness]). It leads the key because it is DNSSEC-vouched, where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window).
+- `issued_at` breaks ties only **within a single document**. Cross-document equality at `(window_end, serial)` is zone equivocation — contested, surfaced, never resolved by a signer-claimed field.
+- One lexicographic key per record, rather than pairwise comparators, is deliberate: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset. A single key makes the order total and "the maximal record" well-defined.
+- The key orders **zone states** — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
 
 Two verifiers holding the same evidence MUST reach the same verdict — the ladder is deterministic, including any bridged succession verdicts built from the pooled evidence ([Bridging History Gaps]), and its determinism is a conformance target (see [design/verification.md](../../design/verification.md)).
 
@@ -198,11 +203,11 @@ The certificate is a self-authenticating record: integrity does not depend on th
 
 Retrieval paths:
 
-| Path | Requirement | Notes |
-|------|-------------|-------|
-| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT |
-| Any onomancy server's [Lookup Endpoint] | OPTIONAL | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
-| Gossip / cache | OPTIONAL | Certificates travel peer-to-peer and verify identically (see [Binding Cache]) |
+| Path                                                          | Requirement                | Notes                                                                                              |
+|---------------------------------------------------------------|----------------------------|----------------------------------------------------------------------------------------------------|
+| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT                         |
+| Any onomancy server's [Lookup Endpoint]                       | OPTIONAL                   | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
+| Gossip / cache                                                | OPTIONAL                   | Certificates travel peer-to-peer and verify identically (see [Binding Cache])                      |
 
 Publishers MUST make the certificate retrievable through at least one path; verifiers MUST accept certificate bytes from any source, subject only to [Verification]. A name with no designated endpoint is still fully conformant — it just is not self-bootstrapping for cold verifiers with no peers.
 

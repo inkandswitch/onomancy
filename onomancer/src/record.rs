@@ -5,11 +5,12 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
+    anchor::doc::DocAnchor, delegation::DelegationChain, time::UnixSeconds, wire::OversizeUnit,
+};
+use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams, chain::DnssecChain},
-    name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
-    wire::OversizeUnit,
 };
 use onomancy_hickory::provider::FetchChainError;
 
@@ -121,7 +122,7 @@ impl Record {
                 predecessor: None,
                 // Empty until Keyhive delegation lands: verification
                 // of the carriage is the AuthorityVerifier seam's job.
-                delegation_chain: vec![],
+                delegation_chain: DelegationChain::default(),
                 lineage: vec![],
                 chain,
             },
@@ -152,7 +153,7 @@ pub(crate) enum RecordError {
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// File or runtime IO failed.
     #[error(transparent)]

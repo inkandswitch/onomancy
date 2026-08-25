@@ -2,9 +2,10 @@
 //! hostname's Onomancy binding in one call.
 
 use js_sys::{Array, Date, Object, Reflect};
-use onomancy_core::{freshness::Grade, name::dns::DnsName, time::UnixSeconds};
-use onomancy_dnssec::validator::Validator;
-use onomancy_protocol::chain_provider::ChainProvider;
+use onomancy_core::time::UnixSeconds;
+use onomancy_dnssec::{
+    chain_provider::ChainProvider, dns_name::DnsName, freshness::Grade, validator::Validator,
+};
 use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
 
 use crate::doh::DohProvider;

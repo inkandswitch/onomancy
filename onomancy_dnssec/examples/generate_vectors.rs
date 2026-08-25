@@ -36,19 +36,19 @@ fn main() {
         // that decodes (hashes are over verbatim bytes).
         let digest = match vector.expect {
             vectors_catalog::Expect::Certificate => Some(
-                onomancy_core::certificate::Certificate::decode(&vector.bytes)
+                onomancy_dnssec::certificate::Certificate::decode(&vector.bytes)
                     .expect("accept vector decodes")
                     .digest()
                     .to_string(),
             ),
             vectors_catalog::Expect::Rotation => Some(
-                onomancy_core::statement::rotation::RotationStatement::decode(&vector.bytes)
+                onomancy_dnssec::statement::rotation::RotationStatement::decode(&vector.bytes)
                     .expect("accept vector decodes")
                     .digest()
                     .to_string(),
             ),
             vectors_catalog::Expect::Successor => Some(
-                onomancy_core::statement::successor::SuccessorStatement::decode(&vector.bytes)
+                onomancy_dnssec::statement::successor::SuccessorStatement::decode(&vector.bytes)
                     .expect("accept vector decodes")
                     .digest()
                     .to_string(),

@@ -55,4 +55,5 @@ impl From<Digest<Sha256, OwnedDnskey>> for DsDigest {
 /// form) followed by the DNSKEY rdata. Not any single unit's encoding,
 /// which is why the digest is indexed by this marker rather than by
 /// [`Dnskey`](super::dnskey::Dnskey) itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OwnedDnskey;

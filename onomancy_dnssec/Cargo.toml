@@ -15,9 +15,11 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+arbitrary = { workspace = true, optional = true, features = ["derive"] }
+base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
+idna = { workspace = true, optional = true }
 onomancy_core = { workspace = true }
-onomancy_protocol = { workspace = true }
 p256 = { workspace = true }
 rsa = { workspace = true }
 sha2 = { workspace = true }
@@ -27,13 +29,19 @@ tracing = { workspace = true }
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
 onomancy_dnssec = { version = "0.1.0", path = ".", features = ["test_utils"] }
-onomancy_protocol = { workspace = true, features = ["test_utils"] }
+onomancy_protocol = { workspace = true, features = ["std", "test_utils"] }
 testresult = { workspace = true }
 
 [features]
+arbitrary = [
+  "dep:arbitrary",
+  "onomancy_core/arbitrary",
+  "std",
+] # derive needs std's thread_local
 default = []
-std = ["onomancy_core/std", "onomancy_protocol/std", "thiserror/std"]
-test_utils = []                                                       # synthetic-zone factories
+idna = ["dep:idna"] # U-label → A-label input layer
+std = ["onomancy_core/std", "thiserror/std"]
+test_utils = [] # synthetic-zone factories
 
 [[example]]
 name = "generate_fixtures"

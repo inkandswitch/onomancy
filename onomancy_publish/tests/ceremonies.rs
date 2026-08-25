@@ -5,8 +5,9 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
 use ed25519_dalek::SigningKey;
-use onomancy_core::{
-    name::{dns::DnsName, doc::DocAnchor},
+use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_dnssec::{
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 use onomancy_publish::{
@@ -42,7 +43,7 @@ fn bind_emits_a_verified_plan() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(1))?;
 
@@ -64,7 +65,7 @@ fn rotate_emits_statement_and_certificate() -> TestResult {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(3), &signer(1))?;
 
@@ -91,13 +92,13 @@ fn rotate_refuses_generation_reuse() {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(3), &signer(1))
     .expect("first rotation plans");
 
     // Recover the signed statement from the plan for the next step.
-    let statement = onomancy_core::statement::rotation::RotationStatement::decode(
+    let statement = onomancy_dnssec::statement::rotation::RotationStatement::decode(
         &first
             .artifacts
             .iter()
@@ -112,7 +113,7 @@ fn rotate_refuses_generation_reuse() {
         document: doc(1),
         replaced: generation(3),
         prior_lineage: vec![statement],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS + 1000, &signer(2), &signer(1)); // signer(2) = retired G
 
@@ -125,11 +126,11 @@ fn rotate_catches_forks_the_reuse_check_cannot_see() -> TestResult {
     // toward G3, and this ceremony retires G2 again toward G4. The
     // simple reuse check passes (G4 is new) — the simulated
     // derivation catches the set-wise fork.
-    let earlier = onomancy_core::statement::rotation::RotationStatement::sign(
+    let earlier = onomancy_dnssec::statement::rotation::RotationStatement::sign(
         &doc(1),
         &generation(2),
         &SigningKey::from_bytes(&[3; 32]),
-        vec![],
+        DelegationChain::default(),
     )?;
 
     let forked = Rotate {
@@ -137,7 +138,7 @@ fn rotate_catches_forks_the_reuse_check_cannot_see() -> TestResult {
         document: doc(1),
         replaced: generation(2), // second replacement of G2
         prior_lineage: vec![earlier],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(4), &signer(1));
 
@@ -156,7 +157,7 @@ fn migrate_dual_publishes_and_proves_continuity() -> TestResult {
         retained,
         successor_generation: generation(6),
         lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(1), &signer(5))?;
 
@@ -183,16 +184,16 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     };
     let bound = bind.plan(NOW_MS, &signer(1))?;
 
-    let certificate = onomancy_core::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
+    let certificate = onomancy_dnssec::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
     let record = *bound.dns_ops[0].record();
 
     let refreshed = Refresh {
         certificate,
-        chain: onomancy_core::certificate::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
+        chain: onomancy_dnssec::certificate::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
         records: vec![record],
     }
     .plan(onomancy_core::time::UnixSeconds::from(NOW_MS / 1000))?;
@@ -214,7 +215,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         generation: generation(2),
         heads: vec![],
         lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS, &signer(1))?;
 
@@ -224,7 +225,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         document: doc(1),
         replaced: generation(2),
         prior_lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS + 1_000, &signer(3), &signer(1))?;
     let rotated_record = *rotated.dns_ops[0].record();
@@ -237,7 +238,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         retained: rotated_record,
         successor_generation: generation(6),
         lineage: vec![],
-        carriage: vec![],
+        carriage: DelegationChain::default(),
     }
     .plan(NOW_MS + 2_000, &signer(1), &signer(5))?;
 

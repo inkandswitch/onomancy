@@ -7,15 +7,14 @@ use std::{
 };
 
 use clap::Args;
-use onomancy_core::{
+use onomancy_core::{collections::Map, time::UnixSeconds};
+use onomancy_dnssec::{
     certificate::Certificate,
-    collections::Map,
+    dns_name::DnsName,
     freshness::Freshness,
-    name::dns::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
-    time::UnixSeconds,
+    validator::{Validator, WalkError},
 };
-use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::{
@@ -104,9 +103,9 @@ impl Resolve {
 
         let proof = validator.validate_detailed(&hostname, &chain)?;
         let grade = match proof.window.grade(now) {
-            onomancy_core::freshness::Grade::Fresh => "fresh \u{2713}",
-            onomancy_core::freshness::Grade::Stale => "stale \u{26a0}",
-            onomancy_core::freshness::Grade::NotYetBegun => "not yet begun (deferred)",
+            onomancy_dnssec::freshness::Grade::Fresh => "fresh \u{2713}",
+            onomancy_dnssec::freshness::Grade::Stale => "stale \u{26a0}",
+            onomancy_dnssec::freshness::Grade::NotYetBegun => "not yet begun (deferred)",
         };
         say(&format!("DNSSEC: valid, window {grade}"));
 
@@ -158,7 +157,7 @@ pub(crate) fn stateful_pass(
     let now = UnixSeconds::from(now_seconds());
     let validator = Validator::iana();
     let authority = KeyhiveAuthority;
-    let pins: Map<DnsName, Vec<onomancy_core::name::doc::DocAnchor>> = Map::default();
+    let pins: Map<DnsName, Vec<onomancy_core::anchor::doc::DocAnchor>> = Map::default();
     let decisions = Decisions::default();
 
     // What the evidence supported before this run's inputs.
@@ -304,7 +303,7 @@ pub(crate) enum ResolveError {
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// File or runtime IO failed.
     #[error(transparent)]
@@ -316,11 +315,11 @@ pub(crate) enum ResolveError {
 
     /// An ingested `.onc` did not decode.
     #[error("certificate: {0}")]
-    Certificate(#[from] onomancy_core::certificate::DecodeCertificateError),
+    Certificate(#[from] onomancy_dnssec::certificate::DecodeCertificateError),
 
     /// An ingested `.onr` did not decode.
     #[error("rotation statement: {0}")]
-    Rotation(#[from] onomancy_core::statement::rotation::DecodeRotationError),
+    Rotation(#[from] onomancy_dnssec::statement::rotation::DecodeRotationError),
 
     /// The store directory was unreadable or held corrupt units.
     #[error("store: {0}")]
@@ -328,7 +327,7 @@ pub(crate) enum ResolveError {
 
     /// An ingested `.ons` did not decode.
     #[error("successor statement: {0}")]
-    Successor(#[from] onomancy_core::statement::successor::DecodeSuccessorError),
+    Successor(#[from] onomancy_dnssec::statement::successor::DecodeSuccessorError),
 
     /// An ingested file had no unit extension.
     #[error("not a unit file (expected .onc/.onr/.ons): {0}")]

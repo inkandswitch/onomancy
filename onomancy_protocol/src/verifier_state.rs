@@ -30,42 +30,46 @@
 //! - [`store`] — the grow-only item store
 //! - [`decisions`] — the decisions-document view (claims, acceptances,
 //!   resets)
-//! - [`seam`] — the [`ChainValidator`](seam::ChainValidator) and
-//!   [`AuthorityVerifier`](seam::AuthorityVerifier) oracles
+//! - [`seam`] — the [`ChainValidator`](chain_proof::ChainValidator) and
+//!   [`AuthorityVerifier`](authority_verifier::AuthorityVerifier) oracles
 //! - [`output`] — the derived-state vocabulary
 //! - [`memory`] — table-driven fakes for conformance tests
 
+pub mod authority_verifier;
 pub mod decisions;
 pub mod diff;
 pub mod memory;
 pub mod output;
 pub mod prune;
-pub mod seam;
 pub mod store;
 
 use alloc::{vec, vec::Vec};
 
 use onomancy_core::{
-    certificate::Certificate,
+    anchor::doc::DocAnchor,
     collections::{Map, Set},
-    delegation::DelegationBytes,
+    delegation::DelegationChain,
     digest::{Blake3, Digest},
-    freshness::{ChainWindow, Freshness, Grade},
-    name::{dns::DnsName, doc::DocAnchor},
-    statement::{rotation::RotationStatement, successor::SuccessorStatement},
     time::UnixSeconds,
+};
+use onomancy_dnssec::{
+    certificate::Certificate,
+    chain_proof::{ChainProof, ChainValidator},
+    dns_name::DnsName,
+    freshness::{ChainWindow, Freshness, Grade},
+    statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::generation_key::GenerationKey,
     zone_state::ZoneStateKey,
 };
 
 use self::{
+    authority_verifier::AuthorityVerifier,
     decisions::Decisions,
     diff::Event,
     output::{
         AcceptedBinding, BindingGrade, ContinuityGrade, Divergence, DivergenceSource, Fork,
         HostState, SuccessionFork,
     },
-    seam::{AuthorityVerifier, ChainProof, ChainValidator},
     store::{Store, item::Item},
 };
 use crate::ladder::{self, Contender, Continuity, Verdict};
@@ -360,7 +364,7 @@ struct RotationEvidence {
 struct SuccessorEvidence {
     /// The statement's authority carriage, kept for stage 5's
     /// departing-hop path-membership check (bridging-hop grading).
-    carriage: Vec<DelegationBytes>,
+    carriage: DelegationChain,
     hash: Digest<Blake3, [u8]>,
     hostname: DnsName,
     predecessor: DocAnchor,
@@ -552,7 +556,7 @@ fn extract_successor<A: AuthorityVerifier>(
     provenance.record(carrier);
 
     evidence.successors.push(SuccessorEvidence {
-        carriage: statement.authority().to_vec(),
+        carriage: statement.authority().clone(),
         hash,
         hostname: statement.hostname().clone(),
         predecessor: *statement.predecessor_doc(),

@@ -15,6 +15,7 @@ rust-version.workspace = true
 [dependencies]
 ed25519-dalek = { workspace = true }
 onomancy_core = { workspace = true }
+onomancy_dnssec = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
@@ -25,8 +26,8 @@ testresult = { workspace = true }
 
 [features]
 default = []
-std = ["onomancy_core/std", "thiserror/std"]
-test_utils = []                              # deterministic evidence factories
+std = ["onomancy_core/std", "onomancy_dnssec/std", "thiserror/std"]
+test_utils = []                                                     # deterministic evidence factories
 
 [lints]
 workspace = true

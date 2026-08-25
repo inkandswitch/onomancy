@@ -19,18 +19,17 @@
 
 use ed25519_dalek::VerifyingKey;
 
-use onomancy_core::{
+use onomancy_core::{anchor::doc::DocAnchor, time::UnixSeconds};
+use onomancy_dnssec::{
     certificate::{Certificate, DecodeCertificateError},
+    dns_name::DnsName,
     freshness::{ChainWindow, Freshness},
-    name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, serial::Serial},
 };
 
-use crate::verifier_state::{
-    self,
-    seam::{AuthorityVerifier, ChainValidator},
-};
+use onomancy_dnssec::chain_proof::ChainValidator;
+
+use crate::verifier_state::{self, authority_verifier::AuthorityVerifier};
 
 /// A verified certificate's graded standing at one clock reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,7 +181,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{binding, binding_carrying, doc, generation, host},
-        verifier_state::memory::{MemoryAuthority, MemoryValidator},
+        verifier_state::memory::{authority::MemoryAuthority, validator::MemoryValidator},
     };
     use alloc::vec;
     use testresult::TestResult;

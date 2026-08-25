@@ -3,16 +3,14 @@
 use alloc::{boxed::Box, vec::Vec};
 use ed25519_dalek::VerifyingKey;
 
-use crate::{
-    name::{
-        dns::DnsName,
-        doc::{DocAnchor, Head},
-    },
+use onomancy_core::{
+    anchor::doc::{DocAnchor, Head},
     signed::payload::Payload,
-    statement::successor::SuccessorStatement,
     time::UnixSeconds,
     wire::{self, Reader},
 };
+
+use crate::{dns_name::DnsName, statement::successor::SuccessorStatement};
 
 use super::{DecodeCertificateError, FieldName, read_heads, read_key};
 

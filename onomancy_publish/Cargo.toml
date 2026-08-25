@@ -17,6 +17,7 @@ rust-version.workspace = true
 [dependencies]
 ed25519-dalek = { workspace = true }
 onomancy_core = { workspace = true }
+onomancy_dnssec = { workspace = true }
 onomancy_protocol = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

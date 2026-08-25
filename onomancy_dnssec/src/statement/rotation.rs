@@ -17,7 +17,7 @@
 //! `root_doc` inside the signature prevents cross-document lineage
 //! replay under key reuse.
 //!
-//! The unit is [`Signed<Rotation>`](crate::signed::Signed) plus its
+//! The unit is [`Signed<Rotation>`](onomancy_core::signed::Signed) plus its
 //! authority carriage; decoded units rederive their canonical bytes
 //! ([`encode`](RotationStatement::encode)) rather than retaining them.
 
@@ -25,17 +25,18 @@ use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
-use crate::{
-    delegation::{self, DelegationBytes},
+use onomancy_core::{
+    anchor::doc::DocAnchor,
+    delegation::DelegationChain,
     digest::{Blake3, Digest},
-    name::doc::DocAnchor,
     signed::{
         Signed,
         payload::{Malformed, Payload},
     },
-    txt::generation_key::GenerationKey,
     wire::{self, OversizeUnit, Reader, WireError},
 };
+
+use crate::txt::generation_key::GenerationKey;
 
 /// A decoded, signature-checked rotation statement unit:
 /// [`Signed<Rotation>`] traveling with its authority carriage.
@@ -47,7 +48,7 @@ use crate::{
 pub struct RotationStatement {
     digest: Digest<Blake3, RotationStatement>,
     signed: Signed<Rotation>,
-    authority: Vec<DelegationBytes>,
+    authority: DelegationChain,
 }
 
 impl RotationStatement {
@@ -63,7 +64,7 @@ impl RotationStatement {
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeRotationError> {
         let mut reader = Reader::new(bytes)?;
         let signed = Signed::decode_from(bytes, &mut reader)?;
-        let authority = delegation::read_entries(&mut reader)?;
+        let authority = DelegationChain::decode(&mut reader)?;
         reader.finish()?;
 
         Ok(Self {
@@ -84,7 +85,7 @@ impl RotationStatement {
         root_doc: &DocAnchor,
         replaced: &GenerationKey,
         successor: &SigningKey,
-        authority: Vec<DelegationBytes>,
+        authority: DelegationChain,
     ) -> Result<Self, OversizeUnit> {
         let signed = Signed::sign(
             Rotation {
@@ -97,7 +98,7 @@ impl RotationStatement {
 
         let mut bytes = Vec::new();
         signed.encode_into(&mut bytes);
-        delegation::write_entries(&mut bytes, &authority);
+        authority.encode_into(&mut bytes);
         wire::check_unit_len(bytes.len())?;
 
         Ok(Self {
@@ -112,14 +113,14 @@ impl RotationStatement {
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         self.signed.encode_into(&mut bytes);
-        delegation::write_entries(&mut bytes, &self.authority);
+        self.authority.encode_into(&mut bytes);
 
         bytes
     }
 
     /// The typed digest of the unit's canonical bytes, computed over
     /// the received (or built) bytes and cached; erase via `.into()`
-    /// for the store-level form via [`erase`](crate::digest::Digest::erase).
+    /// for the store-level form via [`erase`](onomancy_core::digest::Digest::erase).
     #[must_use]
     pub const fn digest(&self) -> Digest<Blake3, RotationStatement> {
         self.digest
@@ -148,7 +149,7 @@ impl RotationStatement {
     /// [`root_doc`](Self::root_doc), terminates at
     /// [`successor`](Self::successor), admin-held delegating hop).
     #[must_use]
-    pub fn authority(&self) -> &[DelegationBytes] {
+    pub const fn authority(&self) -> &DelegationChain {
         &self.authority
     }
 }
@@ -241,6 +242,7 @@ pub enum DecodeRotationError {
 mod tests {
     use super::*;
     use alloc::vec;
+    use onomancy_core::delegation::SignedDelegationBytes;
 
     /// Signed-region length: tag + three keys.
     const SIGNED_LEN: usize = 4 + 32 + 32 + 32;
@@ -258,7 +260,7 @@ mod tests {
             &doc(1),
             &gen_key(2),
             &SigningKey::from_bytes(&[3; 32]),
-            vec![DelegationBytes::from(vec![0xAB; 5])],
+            DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xAB; 5])]),
         )
         .expect("under the unit cap")
     }
@@ -321,8 +323,11 @@ mod tests {
             bolero::check!()
                 .with_type::<(u8, u8, u8, Vec<Vec<u8>>)>()
                 .for_each(|(a, b, c, blobs)| {
-                    let authority: Vec<DelegationBytes> =
-                        blobs.iter().cloned().map(DelegationBytes::from).collect();
+                    let authority: DelegationChain = blobs
+                        .iter()
+                        .cloned()
+                        .map(SignedDelegationBytes::from)
+                        .collect();
 
                     let statement = RotationStatement::sign(
                         &doc(*a),
@@ -336,7 +341,7 @@ mod tests {
                     let decoded = RotationStatement::decode(&bytes).expect("own encoding decodes");
                     assert_eq!(statement, decoded);
                     assert_eq!(bytes, decoded.encode(), "byte identity");
-                    assert_eq!(decoded.authority(), authority.as_slice());
+                    assert_eq!(decoded.authority(), &authority);
                 });
         }
 

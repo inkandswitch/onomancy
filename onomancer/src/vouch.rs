@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use onomancy_core::{delegation, name::doc::DocAnchor};
+use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_keyhive::mint::{MintError, document_carriage};
 
 use crate::{say, seed::SeedError};
@@ -50,7 +50,7 @@ impl Vouch {
 
         let carriage = document_carriage(&doc_key)?;
         let mut framed = Vec::new();
-        delegation::write_framed(&carriage, &mut framed);
+        carriage.write_framed(&mut framed);
 
         let path = self.out.join(format!("{anchor}.carriage"));
         std::fs::write(&path, framed)?;

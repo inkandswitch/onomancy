@@ -23,9 +23,11 @@ use onomancy_automerge::{
     namestore::{DocumentNamestore, HeldDocuments},
 };
 use onomancy_core::{
+    anchor::doc::{self, DocAnchor},
     collections::Map,
-    name::{Name, anchor::Anchor, doc, doc::DocAnchor, segment::Segment},
+    name::segment::Segment,
 };
+use onomancy_dnssec::supported_name::SupportedName;
 use onomancy_protocol::resolve::{
     namestore::{Authority, Replicas, Vouched},
     resolution::{PartialReason, Resolution},
@@ -208,7 +210,7 @@ impl JsHeldDocuments {
         root: Option<String>,
         doh_url: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let name = Name::parse(name).map_err(|error| JsError::new(&error.to_string()))?;
+        let name = SupportedName::parse(name).map_err(|error| JsError::new(&error.to_string()))?;
         let root_anchor = self.anchor_of(&name, root.as_deref(), doh_url).await?;
 
         let mut held = HeldDocuments::default();
@@ -314,22 +316,23 @@ impl JsHeldDocuments {
     /// The root document anchor for the name's trust anchor.
     async fn anchor_of(
         &self,
-        name: &Name,
+        name: &SupportedName,
         root: Option<&str>,
         doh_url: Option<String>,
     ) -> Result<DocAnchor, JsError> {
-        match name.anchor() {
-            Anchor::Doc(anchor) => Ok(*anchor),
-            Anchor::Local => match root {
+        match name {
+            SupportedName::Doc(doc_name) => Ok(*doc_name.anchor()),
+            SupportedName::Local(_) => match root {
                 Some(raw) => parse_anchor(raw),
                 None => Err(JsError::new(
                     "local (~) names resolve from YOUR root document: pass a root anchor",
                 )),
             },
-            Anchor::Dns(hostname) => {
+            SupportedName::Dns(dns_name) => {
+                let hostname = dns_name.anchor();
                 #[cfg(feature = "doh")]
                 {
-                    use onomancy_protocol::chain_provider::ChainProvider as _;
+                    use onomancy_dnssec::chain_provider::ChainProvider as _;
 
                     let provider = doh_url.map_or_else(
                         crate::doh::DohProvider::cloudflare,

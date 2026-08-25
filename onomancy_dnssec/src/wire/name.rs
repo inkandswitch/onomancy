@@ -15,10 +15,9 @@
 use alloc::vec::Vec;
 use core::{cmp::Ordering, fmt, str::FromStr};
 
-use onomancy_core::{
-    name::dns::DnsName,
-    wire::{Reader, WireError},
-};
+use onomancy_core::wire::{Reader, WireError};
+
+use crate::dns_name::DnsName;
 
 /// Maximum total length of a name on the wire (labels + lengths +
 /// root), per RFC 1035 §3.1.

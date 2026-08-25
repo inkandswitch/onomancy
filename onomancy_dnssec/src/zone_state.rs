@@ -14,7 +14,9 @@
 //! scoping rule lives in the comparison ladder (`onomancy_protocol`); this
 //! type is just the key.
 
-use crate::{time::UnixSeconds, txt::serial::Serial};
+use onomancy_core::time::UnixSeconds;
+
+use crate::txt::serial::Serial;
 
 /// A record's zone-state sort key, ordered lexicographically.
 ///

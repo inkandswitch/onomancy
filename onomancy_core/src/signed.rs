@@ -1,8 +1,8 @@
 //! The signed-unit core: tag → fields → signature, verified at decode.
 //!
 //! The Keyhive/subduction `Signed<T>` pattern: every Onomancy signed
-//! artifact — certificate, rotation statement, successor statement —
-//! shares one skeleton, and this module implements it exactly once:
+//! artifact shares one skeleton, and this module implements it
+//! exactly once:
 //!
 //! ```text
 //! ┌────────────┬───────────────────┬───────────┬──────────────────┐
@@ -16,9 +16,9 @@
 //! The signature is verified against the **received** bytes during
 //! decoding — a unit that fails is undecodable, so holding a
 //! `Signed<P>` is holding the proof. Unsigned tails deliberately stay
-//! out of this abstraction: the statements' authority carriage and the
-//! certificate's attached region have genuinely different shapes and
-//! lifecycles, and two variants do not justify a `Tail` trait.
+//! out of this abstraction: downstream unit kinds attach tails of
+//! genuinely different shapes and lifecycles, and a handful of
+//! variants does not justify a `Tail` trait.
 
 use alloc::vec::Vec;
 use core::fmt;
@@ -43,7 +43,12 @@ impl<P: Payload> Signed<P> {
     /// `reader` (positioned at the start), verifying the signature
     /// against the received bytes. The reader is left at the unit's
     /// unsigned tail.
-    pub(crate) fn decode_from(bytes: &[u8], reader: &mut Reader<'_>) -> Result<Self, P::Error> {
+    ///
+    /// # Errors
+    ///
+    /// Returns the payload's own error for malformed fields, a bad
+    /// tag, or a signature that does not verify.
+    pub fn decode_from(bytes: &[u8], reader: &mut Reader<'_>) -> Result<Self, P::Error> {
         let tag: [u8; 4] = reader.take_array().map_err(P::Error::from)?;
         if tag != P::TAG {
             return Err(Malformed::WrongTag {
@@ -75,7 +80,7 @@ impl<P: Payload> Signed<P> {
     /// Sign a payload. Crate-internal: unit constructors build the
     /// payload from the signing key's verifying key, so a
     /// payload-vs-key mismatch is unrepresentable at the public API.
-    pub(crate) fn sign(payload: P, key: &SigningKey) -> Self {
+    pub fn sign(payload: P, key: &SigningKey) -> Self {
         let mut region = Vec::new();
         region.extend_from_slice(&P::TAG);
         payload.encode_fields(&mut region);
@@ -87,7 +92,7 @@ impl<P: Payload> Signed<P> {
     }
 
     /// Append the canonical signed skeleton (tag, fields, signature).
-    pub(crate) fn encode_into(&self, buf: &mut Vec<u8>) {
+    pub fn encode_into(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&P::TAG);
         self.payload.encode_fields(buf);
         buf.extend_from_slice(&self.signature.to_bytes());

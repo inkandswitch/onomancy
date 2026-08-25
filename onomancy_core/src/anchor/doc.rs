@@ -1,10 +1,12 @@
 //! Doc anchors: Automerge URLs whose document ID is an ed25519 verifying
 //! key.
 //!
-//! doc anchors adopt automerge-repo's URL format wholesale:
-//! the `automerge:` scheme, a bs58check-encoded document ID, and optional
-//! `#`-suffixed heads. With Keyhive, the document ID IS an ed25519
-//! verifying key, so the anchor is self-certifying.
+//! Doc anchors adopt automerge-repo's payload format: the
+//! `automerge:` scheme and a bs58check-encoded document ID. With
+//! Keyhive, the document ID IS an ed25519 verifying key, so the
+//! anchor is self-certifying. Upstream's optional `#`-suffixed heads
+//! are NOT part of the name grammar — names carry no version pins
+//! (pinning is edge data), and `#` is reserved.
 //!
 //! Onomancy does not define its own payload encoding — it tracks
 //! upstream. bs58check's 4-byte checksum means transcription typos fail
@@ -13,6 +15,11 @@
 use alloc::vec::Vec;
 use core::{cmp::Ordering, fmt};
 use ed25519_dalek::VerifyingKey;
+
+use crate::{
+    anchor::Anchor,
+    name::{Name, ParseSegmentsError, parse_segments, split_anchor},
+};
 
 /// The URI scheme for doc anchors, including the `:` separator.
 pub const SCHEME_PREFIX: &str = "automerge:";
@@ -27,7 +34,7 @@ pub const SCHEME_PREFIX: &str = "automerge:";
 /// # Examples
 ///
 /// ```
-/// use onomancy_core::name::doc::DocAnchor;
+/// use onomancy_core::anchor::doc::DocAnchor;
 ///
 /// let raw = "2nBeEMDjAzFa9Ev2pxwejYrgCRmSLx96SbA24uhdMMTUktJWvK";
 /// let anchor = DocAnchor::parse(raw).expect("valid key-based doc ID");
@@ -105,12 +112,11 @@ impl Ord for DocAnchor {
     }
 }
 
-/// A single pinned head: a bs58check-encoded Automerge change hash.
+/// One Automerge change hash, bs58check-encoded in text form.
 ///
-/// Heads appear after `#` in a doc-anchored name (`|`-joined, matching
-/// automerge-repo) and pin the *anchor document* to a point in time.
-/// Pinned names are stale-by-construction; freshness policy is a
-/// resolution-layer concern.
+/// Names carry no version pins, so heads never appear in the name
+/// grammar; the type exists for signed units that attest document
+/// state (e.g. a certificate's advisory heads).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Head([u8; KEY_LEN]);
 
@@ -188,6 +194,55 @@ pub enum ParseHeadError {
     /// Automerge change hashes are exactly 32 bytes.
     #[error("heads are exactly 32 bytes")]
     WrongLength,
+}
+
+impl Anchor for DocAnchor {
+    type ParseError = ParseDocNameError;
+
+    fn parse_name(raw: &str) -> Result<Name<Self>, ParseDocNameError> {
+        let rest = raw
+            .strip_prefix(SCHEME_PREFIX)
+            .ok_or(ParseDocNameError::MissingScheme)?;
+
+        if rest.contains('#') {
+            // Names carry no version pins: pinning is edge data, not
+            // grammar. `#` stays reserved so every extension option
+            // remains open.
+            return Err(ParseDocNameError::ReservedFragment);
+        }
+
+        let (anchor_raw, segments_raw) = split_anchor(rest);
+
+        Ok(Name::from_parts(
+            Self::parse(anchor_raw)?,
+            parse_segments(segments_raw)?,
+        ))
+    }
+
+    fn fmt_anchor(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{SCHEME_PREFIX}{self}")
+    }
+}
+
+/// The input could not be parsed as a doc-anchored (`automerge:`) name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ParseDocNameError {
+    /// The doc anchor payload was malformed.
+    #[error(transparent)]
+    Anchor(#[from] ParseDocAnchorError),
+
+    /// Doc-anchored names start with `automerge:`.
+    #[error("doc-anchored names start with `automerge:`")]
+    MissingScheme,
+
+    /// `#` is reserved: names carry no version pins (pinning is edge
+    /// data, not grammar).
+    #[error("`#` is reserved: names carry no version pins")]
+    ReservedFragment,
+
+    /// The path after the anchor was malformed.
+    #[error(transparent)]
+    Segments(#[from] ParseSegmentsError),
 }
 
 #[cfg(test)]

@@ -14,19 +14,19 @@ pub mod rotate;
 
 use alloc::boxed::Box;
 use onomancy_core::{
+    anchor::doc::DocAnchor, collections::Map, time::UnixSeconds, wire::OversizeUnit,
+};
+use onomancy_dnssec::{
     certificate::Certificate,
-    collections::Map,
+    chain_proof::ChainProof,
+    dns_name::DnsName,
     freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
-    wire::OversizeUnit,
 };
 use onomancy_protocol::verifier_state::{
     VerifierState,
     decisions::Decisions,
-    memory::{MemoryAuthority, MemoryValidator},
-    seam::ChainProof,
+    memory::{authority::MemoryAuthority, validator::MemoryValidator},
     store::{Store, item::Item},
 };
 

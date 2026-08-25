@@ -29,7 +29,8 @@
 
 use core::cmp::Ordering;
 
-use onomancy_core::{freshness::Freshness, name::doc::DocAnchor, zone_state::ZoneStateKey};
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{freshness::Freshness, zone_state::ZoneStateKey};
 
 /// One record's ladder-relevant facts, extracted by the derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -134,7 +135,8 @@ pub fn compare(left: &Contender, right: &Contender, continuity: Continuity) -> V
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use onomancy_core::{time::UnixSeconds, txt::serial::Serial};
+    use onomancy_core::time::UnixSeconds;
+    use onomancy_dnssec::txt::serial::Serial;
 
     fn doc(seed: u8) -> DocAnchor {
         DocAnchor::from(SigningKey::from_bytes(&[seed; 32]).verifying_key())

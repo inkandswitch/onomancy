@@ -3,6 +3,11 @@
 use alloc::string::String;
 use core::{fmt, str};
 
+use onomancy_core::{
+    anchor::Anchor,
+    name::{Name, ParseSegmentsError, parse_segments, split_anchor},
+};
+
 /// A normalized DNS name: lowercase ASCII A-labels, at least two labels,
 /// no trailing dot, no IP literals.
 ///
@@ -15,7 +20,7 @@ use core::{fmt, str};
 /// # Examples
 ///
 /// ```
-/// use onomancy_core::name::dns::DnsName;
+/// use onomancy_dnssec::dns_name::DnsName;
 ///
 /// let dns = DnsName::parse("EXPEDE.WTF.").expect("valid, normalizes");
 /// assert_eq!(dns.as_str(), "expede.wtf");
@@ -112,11 +117,11 @@ impl DnsName {
     /// # Examples
     ///
     /// ```
-    /// use onomancy_core::name::dns::DnsName;
+    /// use onomancy_dnssec::dns_name::DnsName;
     ///
     /// let display = DnsName::parse_display("münchen.de")?;
     /// assert_eq!(display, DnsName::parse("xn--mnchen-3ya.de")?);
-    /// # Ok::<(), onomancy_core::name::dns::ParseDnsNameError>(())
+    /// # Ok::<(), onomancy_dnssec::dns_name::ParseDnsNameError>(())
     /// ```
     ///
     /// [IDNA]: https://www.rfc-editor.org/rfc/rfc5890
@@ -332,4 +337,41 @@ mod tests {
                 });
         }
     }
+}
+
+impl Anchor for DnsName {
+    type ParseError = ParseDnsAnchoredNameError;
+
+    fn parse_name(raw: &str) -> Result<Name<Self>, ParseDnsAnchoredNameError> {
+        let rest = raw
+            .strip_prefix('@')
+            .ok_or(ParseDnsAnchoredNameError::MissingSigil)?;
+        let (anchor_raw, segments_raw) = split_anchor(rest);
+
+        Ok(Name::from_parts(
+            Self::parse(anchor_raw)?,
+            parse_segments(segments_raw)?,
+        ))
+    }
+
+    fn fmt_anchor(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "@{self}")
+    }
+}
+
+/// The input could not be parsed as a DNS-anchored (`@`) name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ParseDnsAnchoredNameError {
+    /// The DNS anchor was malformed (including dotless `@` names: `@`
+    /// means DNS and nothing else).
+    #[error(transparent)]
+    Anchor(#[from] ParseDnsNameError),
+
+    /// DNS-anchored names start with `@`.
+    #[error("DNS-anchored names start with `@`")]
+    MissingSigil,
+
+    /// The path after the anchor was malformed.
+    #[error(transparent)]
+    Segments(#[from] ParseSegmentsError),
 }

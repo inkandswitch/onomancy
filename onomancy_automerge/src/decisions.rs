@@ -15,10 +15,11 @@
 use automerge::{Automerge, ObjId, ObjType, Prop, ReadDoc, ScalarValue, Value};
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::Set,
     digest::{Blake3, Digest},
-    name::{dns::DnsName, doc::DocAnchor},
 };
+use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::verifier_state::decisions::{Acceptance, Claim, Decisions};
 
 use crate::RESERVED_KEY;

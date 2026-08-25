@@ -40,12 +40,11 @@ Onomancy names are _edgenames_: a trust anchor followed by path segments, where 
 
 Path resolution is defined over any substrate providing:
 
-| Property                          | Requirement Level                | Description                                                                                                                                                  |
-|-----------------------------------|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Self-certifying references        | REQUIRED                         | A namestore reference MUST designate exactly one namestore, independent of who supplies the bytes (e.g. an identifier that is or commits to a verifying key) |
-| Flat string-keyed maps            | REQUIRED                         | A namestore is a map from strings to values; nothing more is assumed about what a namestore contains                                                         |
-| Deterministic conflict resolution | REQUIRED (replicated substrates) | Concurrent writes to the same key MUST resolve to one deterministic winner, with the losing value(s) still observable                                        |
-| Versions                          | OPTIONAL                         | If the substrate can address past states (e.g. by change-hash heads), pinned names per [Heads] are supported; otherwise heads MUST be rejected at parse time |
+| Property                          | Requirement Level                | Description                                                                                                                                                                |
+|-----------------------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Self-certifying references        | REQUIRED                         | A namestore reference MUST designate exactly one namestore, independent of who supplies the bytes (e.g. an identifier that is or commits to a verifying key)               |
+| Flat string-keyed maps            | REQUIRED                         | A namestore is a map from strings to values; nothing more is assumed about what a namestore contains                                                                       |
+| Deterministic conflict resolution | REQUIRED (replicated substrates) | Concurrent writes to the same key MUST resolve to one deterministic winner, with the losing value(s) still observable                                                      |
 
 A namestore MAY be embedded in a larger document (e.g. as one field among other application data). The namestore is the map itself, not its container: path resolution reads only the map, and a namestore reference designates the map's location within the containing document, however the substrate expresses that.
 
@@ -81,7 +80,7 @@ NOT this (nested):
 ## References
 [References]: #references
 
-This specification does not define an encoding for references; that belongs to the profile or substrate that writes them. Whatever the encoding, a reference MUST yield exactly one _target_: a namestore reference (self-certifying, per the [Namestore Model]) that carries no path segments or heads of its own.
+This specification does not define an encoding for references; that belongs to the profile or substrate that writes them. Whatever the encoding, a reference MUST yield exactly one _target_: a namestore reference (self-certifying, per the [Namestore Model]) that carries no path segments of its own. A profile MAY define reference encodings that pin the target to a version — pinning is edge data, never name grammar.
 
 The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, nothing more (e.g. [Petname Anchoring] maps labels directly to Automerge URLs). Richer values are permitted but discouraged: field-wise CRDT merges can tear a composite value (one writer's target beside another's metadata), and unknown fields become parsing policy. Metadata (display names, timestamps, provenance) SHOULD live in a sidecar outside the walked map, keyed by label or target. Metadata, wherever it lives, MUST NOT affect resolution.
 
@@ -91,13 +90,12 @@ The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, 
 # Resolution
 [Resolution]: #resolution
 
-Input: a root namestore `S`, a segment list `segments`, and OPTIONAL heads.
+Input: a root namestore `S` and a segment list `segments`.
 
-1. If heads were supplied, the resolver MUST read `S` at those heads (see [Heads]). Heads apply to the root namestore only.
-2. If `segments` is empty, resolution succeeds with `S` itself.
-3. Otherwise, perform a **greedy longest-key match**: among the keys of `S`, select the key `k` with the greatest number of segments such that `k`'s segments are a prefix of `segments` _at segment boundaries_.
-4. If no key matches, resolution ends `Partial` with reason `DanglingSegment` (see [Error Conditions]).
-5. Consume `len(k)` segments and load the namestore designated by the matched reference's target. If that namestore is unavailable (e.g. not yet replicated), resolution ends `Partial` with reason `UnsyncedTarget` — the data is unavailable, not wrong. Otherwise repeat from step 2 with the remaining segments.
+1. If `segments` is empty, resolution succeeds with `S` itself.
+2. Otherwise, perform a **greedy longest-key match**: among the keys of `S`, select the key `k` with the greatest number of segments such that `k`'s segments are a prefix of `segments` _at segment boundaries_.
+3. If no key matches, resolution ends `Partial` with reason `DanglingSegment` (see [Error Conditions]).
+4. Consume `len(k)` segments and load the namestore designated by the matched reference's target. If that namestore is unavailable (e.g. not yet replicated), resolution ends `Partial` with reason `UnsyncedTarget` — the data is unavailable, not wrong. Otherwise repeat from step 1 with the remaining segments.
 
 ``` mermaid
 flowchart TD
@@ -137,16 +135,12 @@ Each hop consumes at least one segment (paths are non-empty), so resolution perf
 
 Resolvers MUST NOT impose a hop limit as a substitute for the no-symlink invariant (see [References]); the invariant is the termination proof.
 
-# Heads
-[Heads]: #heads
+# No Version Pinning
+[Heads]: #no-version-pinning
 
-A name MAY pin its **root** namestore to a set of version heads (`#`-suffixed in the grammar):
+Names carry no version pins: every namestore in a walk is read LIVE, at its current state. A party that wants a pinned reference writes an edge whose target addresses a pinned document state (where the profile's reference encoding supports it) — the pin then lives in a replicated, authored document, is scoped to exactly one hop, and composes per-edge instead of freezing states its author never saw.
 
-- The root namestore MUST be read at exactly those heads.
-- Namestores reached by hops are read **live** (at their current heads). Pinning is not transitive.
-- If the local replica does not contain all pinned heads, resolution ends `Partial` with reason `MissingHeads` (see [Error Conditions]) — the data is unavailable, not wrong.
-
-Pinned names are stale by construction; freshness presentation is a policy/UI concern, not a path-resolution concern.
+This specification does not define pinned-target behavior. A profile that adds pinned targets must answer two questions this document leaves open: what the resolver reads when it follows a pinned edge (the target at the pinned state, by whatever mechanism the substrate provides), and what happens when the local replica has not yet synced that state (a `Partial`, like any unsynced target — unavailable is not wrong).
 
 # Results
 [Results]: #results
@@ -164,15 +158,13 @@ pub enum Resolution {
 # Error Conditions
 [Error Conditions]: #error-conditions
 
-| Tag | Condition | Requirement |
-|-----|-----------|-------------|
-| E1 | No key in the current namestore matches the remaining segments | MUST end `Partial(DanglingSegment)`; MUST NOT backtrack to a shorter key (see [Greedy Matching][Greedy Means Greedy]) |
-| E2 | The matched edge's target namestore is unavailable (not replicated, not loadable) | MUST end `Partial(UnsyncedTarget)` — unavailable, not wrong |
-| E3 | Pinned heads not all present in the local replica | MUST end `Partial(MissingHeads)` (see [Heads]) |
-| E4 | Heads supplied but the substrate cannot address past states | MUST be rejected at parse time (see [Namestore Model]) |
-| E5 | Value carrying a name (of any anchor family) in place of a namestore reference | MUST be rejected as a symlink; MUST NOT be re-parsed or re-resolved (see [References]) |
-| E6 | Non-conforming key (empty, `.`, or `..` segments; `#`; leading/trailing `/`) | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [Namestore Layout]) |
-| E7 | Conflicting values for the matched key | MUST resolve to the substrate's deterministic winner; SHOULD surface the loser(s) (see [Conflicting Updates]) |
+| Tag | Condition                                                                         | Requirement                                                                                                           |
+|-----|-----------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| E1  | No key in the current namestore matches the remaining segments                    | MUST end `Partial(DanglingSegment)`; MUST NOT backtrack to a shorter key (see [Greedy Matching][Greedy Means Greedy]) |
+| E2  | The matched edge's target namestore is unavailable (not replicated, not loadable) | MUST end `Partial(UnsyncedTarget)` — unavailable, not wrong                                                           |
+| E5  | Value carrying a name (of any anchor family) in place of a namestore reference    | MUST be rejected as a symlink; MUST NOT be re-parsed or re-resolved (see [References])                                |
+| E6  | Non-conforming key (empty, `.`, or `..` segments; `#`; leading/trailing `/`)      | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [Namestore Layout])         |
+| E7  | Conflicting values for the matched key                                            | MUST resolve to the substrate's deterministic winner; SHOULD surface the loser(s) (see [Conflicting Updates])         |
 
 # Security Considerations
 [Security Considerations]: #security-considerations
@@ -191,10 +183,6 @@ Longest-match keeps authority with the namestore closest to the name's owner: if
 ## Why no backtracking?
 
 Backtracking would make resolution outcomes depend on the availability of downstream namestores: the same name could resolve to different targets depending on which replicas happen to be synced. Deterministic-and-local beats maximally-permissive here; a dead end is surfaced as `Partial`, not papered over.
-
-## Why is pinning not transitive?
-
-A head pins _one_ namestore's state. The namestores it links to are separately owned and separately replicated; freezing them by association would require the pinning party to know (and vouch for) head sets they never saw.
 
 <!-- External Links -->
 

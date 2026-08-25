@@ -7,15 +7,16 @@
 use alloc::{format, string::String, vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
-use onomancy_core::{
+use crate::{
     certificate::chain::{ChainLink, DnssecChain},
-    name::{dns::DnsName, doc::DocAnchor},
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_core::anchor::doc::DocAnchor;
 
 use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
 use crate::{
-    anchor::TrustAnchor,
+    trust_anchor::TrustAnchor,
     wire::{
         name::Name,
         record::{CLASS_IN, Record},

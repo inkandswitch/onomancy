@@ -19,7 +19,7 @@
 //! per-name, and an unscoped proof could be replayed under a different
 //! name to disguise capture as continuity.
 //!
-//! The unit is [`Signed<Succession>`](crate::signed::Signed) plus its
+//! The unit is [`Signed<Succession>`](onomancy_core::signed::Signed) plus its
 //! authority carriage; decoded units rederive their canonical bytes
 //! ([`encode`](SuccessorStatement::encode)) rather than retaining them.
 
@@ -27,19 +27,18 @@ use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
-use crate::{
-    delegation::{self, DelegationBytes},
+use onomancy_core::{
+    anchor::doc::DocAnchor,
+    delegation::DelegationChain,
     digest::{Blake3, Digest},
-    name::{
-        dns::{CanonicalDnsNameError, DnsName},
-        doc::DocAnchor,
-    },
     signed::{
         Signed,
         payload::{Malformed, Payload},
     },
     wire::{self, OversizeUnit, Reader, WireError},
 };
+
+use crate::dns_name::{CanonicalDnsNameError, DnsName};
 
 /// A decoded, signature-checked successor statement unit:
 /// [`Signed<Succession>`] traveling with its authority carriage.
@@ -51,7 +50,7 @@ use crate::{
 pub struct SuccessorStatement {
     digest: Digest<Blake3, SuccessorStatement>,
     signed: Signed<Succession>,
-    authority: Vec<DelegationBytes>,
+    authority: DelegationChain,
 }
 
 impl SuccessorStatement {
@@ -68,7 +67,7 @@ impl SuccessorStatement {
     pub fn decode(bytes: &[u8]) -> Result<Self, DecodeSuccessorError> {
         let mut reader = Reader::new(bytes)?;
         let signed = Signed::decode_from(bytes, &mut reader)?;
-        let authority = delegation::read_entries(&mut reader)?;
+        let authority = DelegationChain::decode(&mut reader)?;
         reader.finish()?;
 
         Ok(Self {
@@ -90,7 +89,7 @@ impl SuccessorStatement {
         successor_doc: &DocAnchor,
         hostname: &DnsName,
         signer: &SigningKey,
-        authority: Vec<DelegationBytes>,
+        authority: DelegationChain,
     ) -> Result<Self, OversizeUnit> {
         let signed_unit = Signed::sign(
             Succession {
@@ -104,7 +103,7 @@ impl SuccessorStatement {
 
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);
-        delegation::write_entries(&mut bytes, &authority);
+        authority.encode_into(&mut bytes);
         wire::check_unit_len(bytes.len())?;
 
         Ok(Self {
@@ -119,14 +118,14 @@ impl SuccessorStatement {
     pub fn encode(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         self.signed.encode_into(&mut bytes);
-        delegation::write_entries(&mut bytes, &self.authority);
+        self.authority.encode_into(&mut bytes);
 
         bytes
     }
 
     /// The typed digest of the unit's canonical bytes, computed over
     /// the received (or built) bytes and cached; erase via `.into()`
-    /// for the store-level form via [`erase`](crate::digest::Digest::erase).
+    /// for the store-level form via [`erase`](onomancy_core::digest::Digest::erase).
     #[must_use]
     pub const fn digest(&self) -> Digest<Blake3, SuccessorStatement> {
         self.digest
@@ -163,7 +162,7 @@ impl SuccessorStatement {
     /// [`predecessor_doc`](Self::predecessor_doc), terminates at the
     /// signer, admin-held delegating hop).
     #[must_use]
-    pub fn authority(&self) -> &[DelegationBytes] {
+    pub const fn authority(&self) -> &DelegationChain {
         &self.authority
     }
 }
@@ -271,6 +270,7 @@ pub enum DecodeSuccessorError {
 mod tests {
     use super::*;
     use alloc::vec;
+    use onomancy_core::delegation::SignedDelegationBytes;
 
     fn doc(seed: u8) -> DocAnchor {
         DocAnchor::from(SigningKey::from_bytes(&[seed; 32]).verifying_key())
@@ -286,7 +286,7 @@ mod tests {
             &doc(2),
             &host(),
             &SigningKey::from_bytes(&[3; 32]),
-            vec![DelegationBytes::from(vec![0xCD; 7])],
+            DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xCD; 7])]),
         )
         .expect("under the unit cap")
     }
@@ -370,8 +370,11 @@ mod tests {
             bolero::check!()
                 .with_type::<(u8, u8, u8, Vec<Vec<u8>>)>()
                 .for_each(|(a, b, c, blobs)| {
-                    let authority: Vec<DelegationBytes> =
-                        blobs.iter().cloned().map(DelegationBytes::from).collect();
+                    let authority: DelegationChain = blobs
+                        .iter()
+                        .cloned()
+                        .map(SignedDelegationBytes::from)
+                        .collect();
 
                     let statement = SuccessorStatement::sign(
                         &doc(*a),
@@ -386,7 +389,7 @@ mod tests {
                     let decoded = SuccessorStatement::decode(&bytes).expect("own encoding decodes");
                     assert_eq!(statement, decoded);
                     assert_eq!(bytes, decoded.encode(), "byte identity");
-                    assert_eq!(decoded.authority(), authority.as_slice());
+                    assert_eq!(decoded.authority(), &authority);
                 });
         }
 

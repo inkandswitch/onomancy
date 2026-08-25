@@ -1,5 +1,5 @@
-//! Typed content digests: `Digest<Blake3, Certificate>` is not
-//! `Digest<Blake3, RotationStatement>`.
+//! Typed content digests: a digest of one unit kind is not a digest
+//! of another.
 //!
 //! The Keyhive/subduction pattern, indexed twice: a digest carries a
 //! marker for the hash algorithm that produced it AND for the unit
@@ -7,8 +7,7 @@
 //! same kind under different hash functions — are different types and
 //! cannot be swapped by accident. Onomancy's own units always use
 //! [`Blake3`]; other algorithms exist only where an external protocol
-//! demands them (DNS's DS records instantiate `Digest<Sha256, …>` in
-//! `onomancy_dnssec`).
+//! demands them, and live with the crate that speaks that protocol.
 //!
 //! The unit-agnostic form — what decisions-document entries and reset
 //! exclusion sets hold, since they reference store items of any kind
@@ -26,8 +25,8 @@ use core::{any, cmp::Ordering, fmt, hash::Hash, marker::PhantomData};
 
 /// A hash function a [`Digest`] can be indexed by.
 ///
-/// Implementors are zero-sized markers ([`Blake3`] here; DNS-mandated
-/// algorithms live with the code that speaks them). Every algorithm
+/// Implementors are zero-sized markers ([`Blake3`] here; externally
+/// mandated algorithms live with the code that speaks them). Every algorithm
 /// in use emits 32 bytes; if a wider one ever arrives (SHA-384 DS
 /// digests would be the candidate), the width moves into the trait
 /// then — not speculatively now.
@@ -37,6 +36,7 @@ pub trait HashAlgorithm {
 }
 
 /// BLAKE3-256: the hash for everything onomancy addresses itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Blake3;
 
 impl HashAlgorithm for Blake3 {
@@ -83,9 +83,9 @@ impl<T: ?Sized> Digest<Blake3, T> {
     /// verbatim bytes. `Blake3` only — the store's addressing is
     /// single-algorithm by design.
     ///
-    /// Two certificates differing only in their attached regions are
-    /// the *same certificate* but *different store items*, and their
-    /// erased digests differ.
+    /// Two units differing only in unsigned attachments are the *same
+    /// unit* but *different store items*, and their erased digests
+    /// differ.
     #[must_use]
     pub const fn erase(self) -> Digest<Blake3, [u8]> {
         Digest {
@@ -201,7 +201,7 @@ mod tests {
             bolero::check!().with_type::<Vec<u8>>().for_each(|bytes| {
                 let erased = Digest::<Blake3, [u8]>::hash(bytes);
                 assert_eq!(erased, Digest::<Blake3, [u8]>::hash(bytes));
-                assert_eq!(*erased.as_bytes(), Blake3::hash(bytes));
+                assert_eq!(*erased.as_bytes(), <Blake3 as HashAlgorithm>::hash(bytes));
             });
         }
     }

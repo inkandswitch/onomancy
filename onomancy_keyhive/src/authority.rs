@@ -29,10 +29,9 @@ use keyhive_core::{
     principal::identifier::Identifier, store::ciphertext::memory::MemoryCiphertextStore,
 };
 use keyhive_crypto::signer::memory::MemorySigner;
-use onomancy_core::{
-    delegation::DelegationBytes, name::doc::DocAnchor, txt::generation_key::GenerationKey,
-};
-use onomancy_protocol::verifier_state::seam::AuthorityVerifier;
+use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_dnssec::txt::generation_key::GenerationKey;
+use onomancy_protocol::verifier_state::authority_verifier::AuthorityVerifier;
 use rand::rngs::OsRng;
 
 use crate::carriage::Carriage;
@@ -62,7 +61,7 @@ impl KeyhiveAuthority {
     /// dependency-*compatible*, not perfectly sorted. Returns `None`
     /// when any entry fails to parse or never ingests — an authority
     /// proof with unreadable or dangling pieces proves nothing.
-    async fn replay(carriage: &[DelegationBytes]) -> Option<Instance> {
+    async fn replay(carriage: &DelegationChain) -> Option<Instance> {
         let events = Carriage::parse(carriage).ok()?.events().to_vec();
 
         let instance = Instance::generate(
@@ -110,7 +109,7 @@ impl KeyhiveAuthority {
     /// land upstream. Callers grade such documents
     /// `Authority::CarriageVerified`, never higher.
     #[must_use]
-    pub fn vouches_document(&self, anchor: &DocAnchor, carriage: &[DelegationBytes]) -> bool {
+    pub fn vouches_document(&self, anchor: &DocAnchor, carriage: &DelegationChain) -> bool {
         block_on(async {
             let Some(instance) = Self::replay(carriage).await else {
                 return false;
@@ -156,7 +155,7 @@ impl AuthorityVerifier for KeyhiveAuthority {
         &self,
         root: &DocAnchor,
         signer: &VerifyingKey,
-        carriage: &[DelegationBytes],
+        carriage: &DelegationChain,
     ) -> bool {
         if signer == root.verifying_key() {
             return true;
@@ -171,7 +170,7 @@ impl AuthorityVerifier for KeyhiveAuthority {
         })
     }
 
-    fn on_path(&self, carriage: &[DelegationBytes], generation: &GenerationKey) -> bool {
+    fn on_path(&self, carriage: &DelegationChain, generation: &GenerationKey) -> bool {
         block_on(async {
             let Some(instance) = Self::replay(carriage).await else {
                 return false;

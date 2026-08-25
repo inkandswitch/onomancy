@@ -2,10 +2,10 @@
 
 use alloc::vec::Vec;
 
-use onomancy_core::{
+use onomancy_core::digest::{Blake3, Digest};
+use onomancy_dnssec::{
     certificate::{Certificate, chain::DnssecChain},
-    digest::{Blake3, Digest},
-    name::dns::DnsName,
+    dns_name::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
 

@@ -24,16 +24,18 @@
 use alloc::vec::Vec;
 
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::{Map, Set},
     digest::{Blake3, Digest},
-    name::doc::DocAnchor,
     time::UnixSeconds,
 };
 
+use onomancy_dnssec::chain_proof::ChainValidator;
+
 use super::{
     BindingEvidence,
+    authority_verifier::AuthorityVerifier,
     decisions::Decisions,
-    seam::{AuthorityVerifier, ChainValidator},
     store::{Store, item::Item},
     validate_and_extract,
 };
@@ -144,7 +146,7 @@ mod tests {
         verifier_state::{
             VerifierState,
             decisions::Acceptance,
-            memory::{MemoryAuthority, MemoryValidator},
+            memory::{authority::MemoryAuthority, validator::MemoryValidator},
         },
     };
     use alloc::{vec, vec::Vec};

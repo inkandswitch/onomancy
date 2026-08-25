@@ -20,13 +20,11 @@ The binding cache is a grow-only **store** of self-authenticating protocol recor
 # Introduction
 [Introduction]: #introduction
 
-An earlier revision of this specification defined the cache as an incremental state machine: records arrive, rules fire, memory moves. That framing carries a hidden risk — step-by-step rules can depend on arrival order without anyone noticing, and arrival order is attacker-influenced (gossip). It also under-used the protocol's own design: the serial ratchet, generation lineage, chain freshness, and succession proofs exist precisely to order evidence _without clocks or coordination_. Taken seriously, they make every verdict a deterministic function of **what evidence you hold**, not when it arrived.
-
-So this specification makes the derived view the semantics. The store is the only state. Consequences:
+Every verdict is a deterministic function of **what evidence you hold**, never of when it arrived. The store is the only state; there is no incremental ingestion machine whose memory moves as records land. Step-by-step ingestion rules can depend on arrival order without anyone noticing, and arrival order is attacker-influenced (gossip) — while the protocol's own instruments (the serial ratchet, generation lineage, chain freshness, succession proofs) already order evidence _without clocks or coordination_. Recomputing verdicts from the full store leans on those instruments and closes the arrival-order channel. Consequences:
 
 - **Sync is set union.** Any transport that unions records is a valid sync protocol — gossip already is one. Pooling records with a group needs no new trust analysis: records carry their own proof, and decisions never travel with them — they live in their own access-controlled document.
 - **No derived state ever crosses a boundary.** There are no ratchet counters or "I saw X" marks on the wire; every device derives its own conclusions by running the same rules over its own store. Asserted-conclusion poisoning is impossible by construction.
-- **Gossip races decide nothing.** Where evidence is genuinely ambiguous, the output is _contested_ and surfaced — the old first-arrival TOFU quietly rewarded whoever gossiped fastest.
+- **Gossip races decide nothing.** Where evidence is genuinely ambiguous, the output is _contested_ and surfaced. First-arrival rules (TOFU included) quietly reward whoever gossips fastest; a derived view cannot, because arrival is not an input.
 - **Local-first is preserved.** Nothing below requires connectivity: freshness is a property of a record (its RRSIG windows cover `now`), and fresh chains travel by gossip and courier like everything else.
 
 # The Store
@@ -60,7 +58,7 @@ The stages below are a **normative evaluation order**: each stage reads only the
    An **unproven fresh** binding change is durable via acceptance-on-use (the user acting on it records the acceptance); if the user never acts and the window lapses, the accepted document reverts to the decision-backed incumbent — surfaced as a reversion event, never silent.
 6. **Grade the binding.** Supported by fresh evidence: confirmed. Supported only by stale evidence (including sole-candidate first contact) or by provisional bridge hops: **provisional** — it MUST NOT anchor a fully-checked bridge hop, and carries the opportunistic re-check obligation. Demotion needs no rule: when a fork or competing statement enters the store, this stage's output changes by itself.
 7. **Effective serial and tenure.** The effective serial is the accepted record's serial — the one definition ([Serial Ratchet] rule 1); a downward move relative to the prior derivation is a ratchet-reset event in the diff. **Tenure** is a span: from the earliest chain-window inception to the latest window end among the accepted document's surviving records — derived history that grades the severity of a later unproven displacement ([DNS Anchoring], Succession) and that a capture-era newcomer cannot fake or remove. It is a span deliberately, not a union: two records carry it (the earliest-inception one and the latest), so pruning dominated records between them never changes it ([Pruning]).
-8. **Divergence.** Claims and pinned targets are compared against the accepted binding; mismatches yield badges per [Petname Anchoring][Divergence and Re-Pin]. (An earlier revision evaluated proven-absence records here — the unbound state; removed with negative proofs.)
+8. **Divergence.** Claims and pinned targets are compared against the accepted binding; mismatches yield badges per [Petname Anchoring][Divergence and Re-Pin]. (There is no unbound state to derive: negative proofs are outside the protocol at v0.)
 
 # Surfacing
 [Surfacing]: #surfacing
@@ -70,7 +68,7 @@ State is what `derive` returns; **events are diffs**. When a store update or the
 # The Decision Document
 [the Decision Document]: #the-decision-document
 
-The user's decisions live in a **decision document**: a user-private [Keyhive] document, linked from the root document, with access delegated to exactly the user's devices. It is not a new mechanism — it is the substrate doing what the substrate does, and each property the retired statement machinery hand-built is inherited structurally:
+The user's decisions live in a **decision document**: a user-private [Keyhive] document, linked from the root document, with access delegated to exactly the user's devices. It is not a new mechanism — it is the substrate doing what the substrate does, and every property the decisions need is inherited structurally:
 
 | Property                                           | Provided by                                                                                                                     |
 |----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
@@ -81,11 +79,20 @@ The user's decisions live in a **decision document**: a user-private [Keyhive] d
 | Stolen or retired device                           | Keyhive device revocation cuts its write access; no bespoke retroactive-voiding or re-issue rules                               |
 | Concurrent conflicting entries                     | Ordinary CRDT conflicts, resolved by the receipts rule (stage 5), loser surfaced — the same doctrine as everywhere else         |
 
-The entry kinds and their semantics — unchanged from the statement model:
+The entry kinds:
 
 - **Claim** `{hostname, document, note}` — recorded at introduction ([Petname Anchoring]). Feeds divergence badges only; MUST NOT affect acceptance. Claims are immutable provenance: a verified record for the same hostname takes display precedence, but the claim MUST be retained (B6).
-- **Acceptance** `{hostname, document, cited}` — records a deliberate user choice: confirming a first contact, resolving a contested state, re-pinning through the divergence flow, or — the MUST case — **acceptance-on-use** whenever the user acts on a binding whose document differs from the currently accepted one (stage 5: this is what makes incumbency derivable, and re-firing keeps the reversion target current). `cited` names the records relied on by [content hash][Serialization] — the receipts — non-empty, every cited item a record for this hostname, at least one attesting this `document`. Conflicting concurrent acceptances are resolved by comparing receipts on the zone-state key (stage 5); an acceptance is superseded only by _eligible_ evidence for a _different_ document — same-document evidence (a community chain refresh) never disturbs it. An acceptance any of whose cited items is excluded by a reset is inert; one whose cited record is absent from the store is not-yet-evaluable until sync delivers it.
-- **Reset** `{hostname, excluded}` — the manual "reset trust" action mandated by [DNS Anchoring]. The named items — explicit content hashes, with their extraction closure — contribute to no derivation output at their natural scope (stage 2). Evidence outside the exclusion set — including a concurrent acceptance citing other records — survives and is surfaced. Resets MUST be user-initiated, MUST NOT be automatic, and are undone by editing the decision document — the fat-finger path is ordinary document editing. Because rotation statements are document-scoped, excluding one through a single name's reset weakens D12 for every sibling name bound to the same document: implementations SHOULD warn when an exclusion's scope reaches beyond the reset's hostname — surfaced, never silent.
+- **Acceptance** `{hostname, document, cited}` — records a deliberate user choice of binding.
+  - **When one is written**: confirming a first contact, resolving a contested state, re-pinning through the divergence flow, or — the MUST case — **acceptance-on-use**: whenever the user acts on a binding whose document differs from the currently accepted one. (Stage 5: acceptance-on-use is what makes incumbency derivable, and re-firing keeps the reversion target current.)
+  - **What `cited` must satisfy**: it names the records relied on, by [content hash][Serialization] — the receipts. It MUST be non-empty, every cited item MUST be a record for this hostname, and at least one MUST attest this `document`.
+  - **Conflicts**: concurrent acceptances are resolved by comparing receipts on the zone-state key (stage 5), loser surfaced.
+  - **Supersession**: only _eligible_ evidence for a _different_ document supersedes an acceptance. Same-document evidence (e.g. a community chain refresh) never disturbs it.
+  - **Inertness**: an acceptance is inert if any cited item is excluded by a reset, and not-yet-evaluable if a cited record is absent from the store (until sync delivers it).
+- **Reset** `{hostname, excluded}` — the manual "reset trust" action mandated by [DNS Anchoring].
+  - The named items — explicit content hashes, with their extraction closure — contribute to no derivation output at their natural scope (stage 2).
+  - Evidence outside the exclusion set survives and is surfaced, including a concurrent acceptance citing other records.
+  - Resets MUST be user-initiated and MUST NOT be automatic. Undo is editing the decision document — the fat-finger path is ordinary document editing.
+  - Because rotation statements are document-scoped, excluding one through a single name's reset weakens D12 for every sibling name bound to the same document: implementations SHOULD warn when an exclusion's scope reaches beyond the reset's hostname — surfaced, never silent.
 
 ## Schema
 [Decision Schema]: #schema

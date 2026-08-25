@@ -6,8 +6,9 @@
 
 use alloc::{string::String, vec::Vec};
 
-use onomancy_core::{
-    name::{dns::DnsName, doc::DocAnchor},
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 

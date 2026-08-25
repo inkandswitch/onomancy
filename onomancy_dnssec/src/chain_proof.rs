@@ -1,20 +1,15 @@
-//! The derivation's trait seams: chain validation and Keyhive
-//! authority verification.
+//! The chain-validation seam: what a validated chain proves.
 //!
-//! `derive` is pure over its inputs; the two cryptographic oracles it
-//! consults are seams so that `onomancy_dnssec` (RFC 4034/4035 over
-//! supplied bytes) and `onomancy_keyhive` (delegation-graph
-//! verification) can plug in — and so conformance tests can fake them
-//! without mocking IO, because there is no IO to mock.
+//! The verifier derivation in `onomancy_protocol` is pure over its
+//! inputs; chain validation is a seam so this crate (RFC 4034/4035
+//! over supplied bytes) can plug in — and so conformance tests can
+//! fake it without mocking IO, because there is no IO to mock.
 
 use alloc::vec::Vec;
-use ed25519_dalek::VerifyingKey;
-use onomancy_core::{
-    certificate::chain::DnssecChain,
-    delegation::DelegationBytes,
-    freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
-    txt::{generation_key::GenerationKey, record::TxtRecord},
+
+use crate::{
+    certificate::chain::DnssecChain, dns_name::DnsName, freshness::ChainWindow,
+    txt::record::TxtRecord,
 };
 
 /// What a DNSSEC chain, once validated from the verifier's own trust
@@ -41,7 +36,7 @@ pub struct ChainProof {
 }
 
 /// Validates DNSSEC chains against the baked-in trust anchor.
-/// Sans-IO: bytes in, proof out — `onomancy_dnssec`'s seam.
+/// Sans-IO: bytes in, proof out.
 pub trait ChainValidator {
     /// Validate `chain` for `hostname`'s `_onomancy` owner name.
     ///
@@ -52,23 +47,6 @@ pub trait ChainValidator {
     /// algorithms, which MUST be invalid ✗, never insecure-but-ok).
     fn validate(&self, hostname: &DnsName, chain: &DnssecChain)
     -> Result<ChainProof, InvalidChain>;
-}
-
-/// Verifies Keyhive delegation proofs — `onomancy_keyhive`'s seam.
-pub trait AuthorityVerifier {
-    /// Whether `carriage` is a valid delegation chain rooting at
-    /// `root`, terminating at `signer`, with the delegating hop held
-    /// at admin access.
-    fn authorizes(
-        &self,
-        root: &DocAnchor,
-        signer: &VerifyingKey,
-        carriage: &[DelegationBytes],
-    ) -> bool;
-
-    /// Whether `generation` lies on the delegation path in `carriage`,
-    /// at any depth — the path-membership check behind the TXT `g=` rules.
-    fn on_path(&self, carriage: &[DelegationBytes], generation: &GenerationKey) -> bool;
 }
 
 /// The chain never verified from the trust anchor: invalid ✗, not

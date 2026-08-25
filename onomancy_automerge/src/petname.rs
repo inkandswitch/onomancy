@@ -9,13 +9,11 @@
 
 use automerge::{Automerge, ObjType, ReadDoc, transaction::Transactable};
 use onomancy_core::{
+    anchor::doc::{self, DocAnchor},
     collections::Map,
-    name::{
-        dns::DnsName,
-        doc::{self, DocAnchor},
-        segment::Segment,
-    },
+    name::segment::Segment,
 };
+use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::{resolve::namestore::Namestore, verifier_state::decisions::Decisions};
 
 use crate::{

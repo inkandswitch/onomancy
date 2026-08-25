@@ -9,7 +9,7 @@
 //! > gap is typed, surfaced in every verdict, and closable by an
 //! > impl swap — never silently assumed away.
 
-use onomancy_core::name::{doc::DocAnchor, segment::Segment};
+use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 
 /// A flat map from paths to namestore references — the substrate
 /// contract of the Namestore Model.

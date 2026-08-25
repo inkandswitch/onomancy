@@ -9,9 +9,22 @@ use core::fmt;
 
 /// A security algorithm code (RFC 4034 Appendix A registry).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Algorithm(pub u8);
+pub struct Algorithm(u8);
 
 impl Algorithm {
+    /// Adopt a wire-carried code verbatim (the registry is open;
+    /// unknown codes are representable and fail closed downstream).
+    #[must_use]
+    pub const fn new(code: u8) -> Self {
+        Self(code)
+    }
+
+    /// The registry code, for wire encoding.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self.0
+    }
+
     /// ECDSA Curve P-256 with SHA-256 (13).
     pub const ECDSA_P256_SHA256: Self = Self(13);
     /// Ed25519 (15).

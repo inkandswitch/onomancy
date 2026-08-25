@@ -18,6 +18,7 @@ rust-version.workspace = true
 hickory-proto = { workspace = true }
 onomancy_chain = { workspace = true }
 onomancy_core = { workspace = true, features = ["std"] }
+onomancy_dnssec = { workspace = true, features = ["std"] }
 onomancy_protocol = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "time"] }

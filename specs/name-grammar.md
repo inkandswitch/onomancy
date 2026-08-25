@@ -14,7 +14,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 # Abstract
 [Abstract]: #abstract
 
-This specification defines the textual grammar of Onomancy names: the three spelling families, parse-time anchor discrimination, the shared segment rules, the doc-anchor payload, and pinned heads. The anchoring specifications define what each family's anchor _means_; this document defines what parses.
+This specification defines the textual grammar of Onomancy names: the three spelling families, parse-time anchor discrimination, the shared segment rules, and the doc-anchor payload. The anchoring specifications define what each family's anchor _means_; this document defines what parses.
 
 # Introduction
 [Introduction]: #introduction
@@ -28,10 +28,9 @@ Onomancy names are _edgenames_: a trust anchor followed by path segments. The an
 name         = local-name / dns-name-ref / doc-name
 local-name   = "~" *( "/" segment )
 dns-name-ref = "@" dns-name *( "/" segment )
-doc-name     = "automerge:" doc-id *( "/" segment ) [ "#" heads ]
+doc-name     = "automerge:" doc-id *( "/" segment )
 dns-name     = label 1*( "." label )      ; ≥ one dot, post-normalization
 doc-id       = bs58check-key              ; 32-byte ed25519 vk + checksum
-heads        = head *( "|" head )         ; bs58check 32-byte change hashes
 segment      = 1*segment-char             ; see Segments
 ```
 
@@ -59,7 +58,7 @@ Segments are the path components after the anchor, shared by all three families:
 
 - A segment MUST be non-empty. Empty segments (`@x.y//a`) MUST be rejected — there is no silent normalization.
 - A segment MUST NOT be `.` or `..` — no traversal semantics exist to exploit.
-- A segment MUST NOT contain `/` (the separator) or `#` (reserved as the heads delimiter in every family, so no lookalike pinned names exist).
+- A segment MUST NOT contain `/` (the separator) or `#` (reserved in every family; see [No Version Pinning]).
 - A segment MUST NOT contain control characters.
 - Dots within a segment carry no meaning: anchor discrimination is entirely by the leading token, so `~/bmann.ca` is a legal label with no verification connotation.
 - Segments compare byte-for-byte. Unicode normalization (NFC) and case policy at input boundaries are display-layer concerns and not yet fixed by this specification (see [design/names.md](../design/names.md#hygiene-rules)); implementations MUST NOT normalize during comparison.
@@ -76,15 +75,14 @@ A doc anchor is a full [Automerge URL]: the payload encoding is upstream [autome
 - A payload that decodes to a **16-byte legacy** Automerge document ID MUST be rejected with an error _distinct_ from a generic parse failure: it is a valid Automerge URL but not self-certifying, so it cannot anchor a name.
 - A payload that decodes to any other length MUST be rejected.
 
-# Heads
-[Heads]: #heads
+# No Version Pinning
+[No Version Pinning]: #no-version-pinning
 
-Heads pin the anchor document to a point in time, matching [automerge-repo] URL semantics:
+Names are always LIVE: the grammar carries no version pins, and `#` is a reserved character rejected everywhere it could appear.
 
-- Heads are spelled as a `#`-suffixed, `|`-joined list of bs58check-encoded 32-byte change hashes.
-- Only `doc-name` MAY carry heads. Because `#` is rejected in segments, a `#` in a `~` or `@` name is a parse error by construction.
-- A `#` followed by an empty heads list MUST be rejected.
-- An absent heads list and an empty one are the same thing: a _live_ (unpinned) name. Resolution of pinned names is defined in [Onomancy Path Resolution][Heads (resolution)].
+Pinning is data, not grammar. A party that wants a pinned reference writes an edge whose target addresses a pinned document state — the pin then lives in a replicated, authored document rather than an ephemeral string. (Whether a reference encoding supports pinned targets is profile-defined; see [Onomancy Path Resolution].)
+
+A trailing `#` fragment was deliberately removed from the grammar: RFC 3986 intuition reads a fragment as the state of the RESOLVED resource, while segments resolve through documents at every hop — any single pin position is either misleading or incomplete. Reserving `#` keeps every extension option open.
 
 # The Parsed Type
 [The Parsed Type]: #the-parsed-type
@@ -101,10 +99,9 @@ pub enum Anchor {
     Doc(DocAnchor),
 }
 
-pub struct Name {
-    anchor: Anchor,
+pub struct Name<A: Anchor> {
+    anchor: A,
     segments: Vec<Segment>, // each non-empty, validated at parse
-    heads: Vec<Head>,       // doc anchors only; empty = live name
 }
 ```
 
@@ -118,8 +115,7 @@ pub struct Name {
 | N3  | Doc-anchor payload fails its bs58check checksum                         | MUST reject (parse error)                                     |
 | N4  | Doc-anchor payload decodes to a 16-byte legacy document ID              | MUST reject with a distinct legacy-ID error                   |
 | N5  | Doc-anchor payload decodes to any length other than 32 bytes            | MUST reject                                                   |
-| N6  | Heads on a `~` or `@` name                                              | MUST reject (falls out of N2: `#` is not a segment character) |
-| N7  | `#` with an empty heads list, or a malformed head                       | MUST reject                                                   |
+| N6  | `#` anywhere in the input                                               | MUST reject (reserved; see [No Version Pinning])              |
 | N8  | Dotless `@` name, IP literal, or malformed DNS name                     | MUST reject per [DNS Anchoring] (its D1)                      |
 
 # Conformance
@@ -132,7 +128,6 @@ The reference implementation is `onomancy_core::name`; the Lean model and extrac
 [DNS Anchoring]: ./anchoring/dns-anchor.md
 [Onomancy Path Resolution]: ./path-resolution.md
 [Petname Anchoring]: ./anchoring/petname-anchor.md
-[Heads (resolution)]: ./path-resolution.md#heads
 
 <!-- External Links -->
 

@@ -19,6 +19,7 @@ futures = { workspace = true }
 keyhive_core = { workspace = true }
 keyhive_crypto = { workspace = true }
 onomancy_core = { workspace = true, features = ["std"] }
+onomancy_dnssec = { workspace = true, features = ["std"] }
 onomancy_protocol = { workspace = true, features = ["std"] }
 rand = { workspace = true }
 thiserror = { workspace = true }

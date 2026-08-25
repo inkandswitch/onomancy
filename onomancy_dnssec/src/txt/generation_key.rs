@@ -6,7 +6,7 @@ use ed25519_dalek::VerifyingKey;
 /// The current generation key: the attested chokepoint that certificate
 /// delegation chains must thread as an authority-carrying hop.
 ///
-/// A distinct newtype from [`DocAnchor`](crate::name::doc::DocAnchor)
+/// A distinct newtype from [`DocAnchor`](onomancy_core::anchor::doc::DocAnchor)
 /// on purpose — generation keys and document IDs are both ed25519
 /// keys, and confusing them is exactly the kind of bug newtypes exist
 /// to make unrepresentable.

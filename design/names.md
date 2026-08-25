@@ -23,9 +23,9 @@ sigil
  └───┬────┘└──┬───┘
    anchor    path segments
 
-automerge:2nBeEMDj…/blog#4NMNn…
-└───┬────┘└───┬───┘└─┬─┘ └─┬──┘
- scheme     doc ID  path   heads (optional pin, `|`-joined)
+automerge:2nBeEMDj…/blog
+└───┬────┘└───┬───┘└─┬─┘
+ scheme     doc ID  path
 ```
 
 ## Parse Rules
@@ -51,8 +51,8 @@ flowchart TD
 
 - _`@` means DNS and nothing else._ IDNA, lowercasing, and trailing-dot normalization apply. IP literals are rejected. Dotless `@` names are flat parse errors — the `@bob` vs `@bob.co` near-miss phishing class is deleted, not mitigated.
 - _Internationalized names normalize to A-labels._ DNS itself is ASCII on the wire: Unicode names (U-labels, e.g. `аррӏе.com`) are IDNA-encoded to Punycode A-labels (`xn--80ak6aa92e.com`). Onomancy parses, stores, compares, and validates **A-labels only** — the DNSSEC chain never sees Unicode. U-labels exist purely at the display layer, which is where homograph defenses live (see [security.md](./security.md#homographs-and-the-display-layer)).
-- _Doc anchors are Automerge URLs_: `automerge:<bs58check-doc-id>[/segments][#head|head]`. The payload encoding is upstream automerge-repo's, not ours; the bs58check checksum makes transcription typos fail loudly instead of silently denoting a different valid key. Legacy 16-byte document IDs are rejected with a distinct error — they're valid Automerge URLs but not self-certifying, so they can't anchor a name.
-- _Heads pin the anchor document_ to a point in time (`#`-suffixed, `|`-joined, matching automerge-repo). `#` is reserved in segments across every anchor family. Pinned names are stale-by-construction; freshness policy is resolution-layer.
+- _Doc anchors are Automerge URLs_: `automerge:<bs58check-doc-id>[/segments]`. The payload encoding is upstream automerge-repo's, not ours; the bs58check checksum makes transcription typos fail loudly instead of silently denoting a different valid key. Legacy 16-byte document IDs are rejected with a distinct error — they're valid Automerge URLs but not self-certifying, so they can't anchor a name.
+- _Names carry no version pins._ `#` is reserved and rejected everywhere it could appear. Pinning is data, not grammar: a party that wants a pinned reference writes an edge whose target addresses a pinned document state — the pin lives in a replicated, authored document, scoped to exactly one hop. (A trailing fragment was considered and removed: RFC 3986 intuition reads it as the state of the RESOLVED resource, while our previous semantics pinned the anchor — misleading either way, since every hop is a document.)
 - _Dotless DNS names are defined out of existence_, aligned with ICANN SAC053 (dotless domains are harmful and won't be delegated).
 - `~` is local-only by construction and never hits the wire. The “no protocol info in shareable names” rule is narrowed to DNS anchors: DNS names are protocol-free indirection, while doc anchors are direct references and deliberately carry the `automerge:` scheme.
 
@@ -62,10 +62,9 @@ flowchart TD
 name         = local-name / dns-name-ref / doc-name
 local-name   = "~" *( "/" segment )
 dns-name-ref = "@" dns-name *( "/" segment )
-doc-name     = "automerge:" doc-id *( "/" segment ) [ "#" heads ]
+doc-name     = "automerge:" doc-id *( "/" segment )
 dns-name     = label 1*( "." label )      ; ≥ one dot, post-normalization
 doc-id       = bs58check-key              ; 32-byte ed25519 vk + checksum
-heads        = head *( "|" head )         ; bs58check 32-byte change hashes
 segment      = 1*segment-char             ; non-empty, no "/" "#", no "." ".."
 ```
 
@@ -84,10 +83,9 @@ pub enum Anchor {
     Doc(DocAnchor),
 }
 
-pub struct Name {
-    anchor: Anchor,
+pub struct Name<A: Anchor> {
+    anchor: A,
     segments: Vec<Segment>, // each non-empty, validated at parse
-    heads: Vec<Head>,       // doc anchors only; empty = live name
 }
 ```
 
@@ -97,7 +95,7 @@ Parse-don't-validate: there is no "string name" type downstream of the parser. E
 
 Decided: upstream automerge-repo's own encoding — bs58check over the 32-byte ed25519 verifying key (the Keyhive root document ID). Onomancy defines no encoding of its own; algorithm agility is upstream's concern. The checksum doubles as transcription-typo detection: a corrupted multikey had roughly a coin-flip chance of decoding to some other valid curve point, while bs58check rejects at ~1/2³² false-accept.
 
-Heads semantics are likewise upstream's: `#heads` pins the root document exactly as in automerge-repo URLs. Path semantics diverge deliberately: onomancy segments greedily match multi-segment keys in a **flat** namestore at a reserved location in the document ([path-resolution spec](../specs/path-resolution.md#namestore-layout)), whereas upstream URL paths descend nested sub-trees.
+Path semantics diverge from upstream deliberately: onomancy segments greedily match multi-segment keys in a **flat** namestore at a reserved location in the document ([path-resolution spec](../specs/path-resolution.md#namestore-layout)), whereas upstream URL paths descend nested sub-trees. Upstream `#heads` URL pinning is not part of the name grammar (see Parse Rules); the substrate-level URL form remains available to tooling that references a single document directly.
 
 > [!WARNING]
 > Open tension: vanilla Automerge tools cannot resolve a name by ordinary sub-tree descent — the namestore is a flat map with multi-segment keys, so a vanilla tool descending `automerge:‹id›/foo/bar` will not find the flat key `"foo/bar"` at the reserved location. Either vanilla compatibility is a non-goal, or the namestore layout needs to reconcile with upstream path semantics. Track alongside the reserved-location coordination point with upstream.
@@ -107,7 +105,7 @@ Heads semantics are likewise upstream's: `#heads` pins the root document exactly
 | Rule | Rationale |
 |------|-----------|
 | Anchor-only names allowed (`@expede.wtf`, `automerge:2nBe…`) | Resolves to the root doc itself |
-| `#` reserved in segments, all anchor families | Heads delimiter; no lookalike pinned names |
+| `#` reserved, all anchor families | Rejected everywhere; keeps future grammar extensions open |
 | Empty segments rejected (`@x.y//a`) | No silent normalization surprises |
 | `.` and `..` segments rejected | No traversal semantics to exploit |
 | DNS length limits (253 total / 63 per label) | Wire compatibility |

@@ -27,19 +27,20 @@
 
 use alloc::{string::String, vec::Vec};
 
-use onomancy_core::{
-    certificate::chain::DnssecChain,
-    freshness::ChainWindow,
-    name::dns::DnsName,
-    time::UnixSeconds,
-    txt::record::{Classified, TxtRecord},
-};
-use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator, InvalidChain};
+use onomancy_core::time::UnixSeconds;
 
 use crate::{
-    anchor::TrustAnchor,
+    certificate::chain::DnssecChain,
+    chain_proof::{ChainProof, ChainValidator, InvalidChain},
+    dns_name::DnsName,
+    freshness::ChainWindow,
+    txt::record::{Classified, TxtRecord},
+};
+
+use crate::{
     crypto::{self, VerifyError},
     link::{Link, ParseLinkError},
+    trust_anchor::TrustAnchor,
     wire::{
         cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, rr_type::RrType, rrsig::Rrsig, txt::Txt,
     },
@@ -67,7 +68,7 @@ impl Validator {
     /// A validator trusting the baked-in IANA root KSKs.
     #[must_use]
     pub fn iana() -> Self {
-        Self::new(crate::anchor::iana_root_anchors())
+        Self::new(crate::trust_anchor::iana_root_anchors())
     }
 
     /// Validate a chain for `hostname`'s `_onomancy` owner name, with

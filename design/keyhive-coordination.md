@@ -24,18 +24,18 @@ The seam is two functions (`onomancy_protocol::verifier_state::seam::AuthorityVe
 /// Valid delegation chain: roots at `root`, terminates at `signer`,
 /// delegating hop held at admin access.
 fn authorizes(root: &DocAnchor, signer: &VerifyingKey,
-              carriage: &[DelegationBytes]) -> bool;
+              carriage: &[SignedDelegationBytes]) -> bool;
 
 /// Whether `generation` lies on the delegation path in `carriage` —
 /// the path-membership check behind the TXT `g=` rules (D10).
-fn on_path(carriage: &[DelegationBytes], generation: &GenerationKey) -> bool;
+fn on_path(carriage: &[SignedDelegationBytes], generation: &GenerationKey) -> bool;
 ```
 
 Everything below is what implementing those two functions honestly requires from upstream.
 
 ## Ask 1: `Signed<Delegation>` encoding stability (or versioning)
 
-`DelegationBytes` is deliberately opaque in `onomancy_core`: verbatim Keyhive `Signed<Delegation>` bytes. But those bytes ride **inside Onomancy's own signed units** — statement authority carriages are part of the ONR/ONS signed region, and certificates embed the chain. If the encoding changes shape, previously issued certificates and statements stop verifying: evidence rot, in a protocol whose entire point is that old evidence keeps working offline.
+`SignedDelegationBytes` is deliberately opaque in `onomancy_core`: verbatim Keyhive `Signed<Delegation>` bytes. But those bytes ride **inside Onomancy's own signed units** — statement authority carriages are part of the ONR/ONS signed region, and certificates embed the chain. If the encoding changes shape, previously issued certificates and statements stop verifying: evidence rot, in a protocol whose entire point is that old evidence keeps working offline.
 
 **Ask**: a commitment to the wire encoding of `Signed<Delegation>` — frozen, or version-tagged so old bytes stay parseable forever. We don't need the format to be _pretty_; we need `decode(bytes)` to work in ten years.
 

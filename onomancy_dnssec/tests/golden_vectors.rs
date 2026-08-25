@@ -17,9 +17,11 @@ mod vectors_catalog;
 use std::{fs, path::PathBuf};
 
 use onomancy_core::{
-    certificate::{Certificate, DecodeCertificateError},
     digest::{Blake3, Digest},
     signed::payload::Malformed,
+};
+use onomancy_dnssec::{
+    certificate::{Certificate, DecodeCertificateError},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
 use testresult::TestResult;

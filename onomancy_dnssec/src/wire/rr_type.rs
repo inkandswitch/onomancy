@@ -10,9 +10,22 @@ use core::fmt;
 /// a number (and, per the strictness doctrine, gets rejected where the
 /// walk requires a specific type — never silently repurposed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RrType(pub u16);
+pub struct RrType(u16);
 
 impl RrType {
+    /// Adopt a wire-carried code verbatim (the registry is open;
+    /// unknown codes are representable and fail closed downstream).
+    #[must_use]
+    pub const fn new(code: u16) -> Self {
+        Self(code)
+    }
+
+    /// The registry code, for wire encoding.
+    #[must_use]
+    pub const fn code(self) -> u16 {
+        self.0
+    }
+
     /// CNAME (5): indirection on the `_onomancy` owner name.
     pub const CNAME: Self = Self(5);
     /// DNSKEY (48): zone keys.

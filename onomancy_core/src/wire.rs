@@ -1,8 +1,8 @@
 //! Shared wire-codec machinery: strict cursors, canonical integers,
 //! and the unit size cap.
 //!
-//! Every Onomancy proof artifact — certificate, rotation statement,
-//! successor statement — is one self-contained byte unit whose decoding
+//! Every Onomancy proof artifact is one self-contained byte unit
+//! whose decoding
 //! is deterministic and strict: one byte string has at most one
 //! reading, decoders never normalize, and every declared length is
 //! validated against the remaining input *before* any allocation.
@@ -14,11 +14,11 @@
 
 use alloc::vec::Vec;
 
-/// Maximum size of one certificate or statement unit: 1 MiB.
+/// Maximum size of one signed unit: 1 MiB.
 ///
-/// Honest units run 10–100 KB (dominated by the DNSSEC chain); the cap
-/// bounds adversarial memory, not honest growth, and is part of the
-/// format contract.
+/// Honest units run 10–100 KB (dominated by their attached proof
+/// material); the cap bounds adversarial memory, not honest growth,
+/// and is part of the format contract.
 pub const MAX_UNIT_BYTES: usize = 1 << 20;
 
 /// A strict decoding cursor over one wire unit.
@@ -151,13 +151,19 @@ impl<'a> Reader<'a> {
 }
 
 /// Append one bijou64 varint to a unit under construction.
-pub(crate) fn put_varint(buf: &mut Vec<u8>, value: u64) {
+/// Append a varint (the unit framing integer form).
+pub fn put_varint(buf: &mut Vec<u8>, value: u64) {
     bijoux::u64::encode(value, buf);
 }
 
 /// Enforce [`MAX_UNIT_BYTES`] on a unit under CONSTRUCTION: encoders
 /// MUST NOT build units their own decoders reject.
-pub(crate) const fn check_unit_len(len: usize) -> Result<(), OversizeUnit> {
+/// Enforce the unit byte cap shared by every signed unit.
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when `len` exceeds the cap.
+pub const fn check_unit_len(len: usize) -> Result<(), OversizeUnit> {
     if len > MAX_UNIT_BYTES {
         Err(OversizeUnit { len })
     } else {

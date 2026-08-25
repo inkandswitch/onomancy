@@ -11,13 +11,13 @@
 
 use core::future::Future;
 
-use onomancy_core::{certificate::chain::DnssecChain, name::dns::DnsName};
+use crate::{certificate::chain::DnssecChain, dns_name::DnsName};
 
 /// Fetches the DNSSEC chain for a hostname's `_onomancy` TXT record.
 ///
 /// A provider is a byte courier, nothing more: it MUST NOT be trusted
 /// to validate — the returned chain is unverified input, and the
-/// verifier's own [`ChainValidator`](crate::verifier_state::seam::ChainValidator)
+/// verifier's own [`ChainValidator`](crate::chain_proof::ChainValidator)
 /// is the only judge. A malicious or broken provider can cause
 /// staleness or rejection, never a false bind.
 pub trait ChainProvider {

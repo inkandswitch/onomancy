@@ -29,14 +29,14 @@
 use core::fmt::Write as _;
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
-    delegation::DelegationBytes,
-    name::{
-        dns::DnsName,
-        doc::{DocAnchor, Head},
-    },
-    statement::{rotation::RotationStatement, successor::SuccessorStatement},
+    anchor::doc::{DocAnchor, Head},
+    delegation::{DelegationChain, SignedDelegationBytes},
     time::UnixSeconds,
+};
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    dns_name::DnsName,
+    statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::generation_key::GenerationKey,
 };
 
@@ -138,7 +138,9 @@ pub fn vectors() -> Vec<Vector> {
         Vector {
             name: "cert_long_delegation",
             bytes: certificate(CertificateParams {
-                delegation_chain: vec![DelegationBytes::from(vec![0xCC; 300])],
+                delegation_chain: DelegationChain::from(vec![SignedDelegationBytes::from(
+                    vec![0xCC; 300],
+                )]),
                 ..minimal_params()
             })
             .encode(),
@@ -163,7 +165,7 @@ pub fn vectors() -> Vec<Vector> {
                 &doc(1),
                 &generation(2),
                 &signer(3),
-                vec![DelegationBytes::from(vec![0xAB; 5])],
+                DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xAB; 5])]),
             )
             .expect("under the unit cap")
             .encode(),
@@ -176,7 +178,7 @@ pub fn vectors() -> Vec<Vector> {
                 &doc(2),
                 &host(),
                 &signer(3),
-                vec![DelegationBytes::from(vec![0xCD; 7])],
+                DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xCD; 7])]),
             )
             .expect("under the unit cap")
             .encode(),
@@ -226,7 +228,7 @@ fn minimal_params() -> CertificateParams {
         hostname: host(),
         heads: vec![],
         predecessor: None,
-        delegation_chain: vec![],
+        delegation_chain: DelegationChain::default(),
         lineage: vec![],
         chain: DnssecChain::default(),
     }
@@ -247,14 +249,19 @@ fn full_params() -> CertificateParams {
                 &doc(1),
                 &host(),
                 &signer(5),
-                vec![DelegationBytes::from(vec![1, 2, 3])],
+                DelegationChain::from(vec![SignedDelegationBytes::from(vec![1, 2, 3])]),
             )
             .expect("under the unit cap"),
         ),
-        delegation_chain: vec![DelegationBytes::from(vec![0xAA; 9])],
+        delegation_chain: DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xAA; 9])]),
         lineage: vec![
-            RotationStatement::sign(&doc(1), &generation(6), &signer(7), vec![])
-                .expect("under the unit cap"),
+            RotationStatement::sign(
+                &doc(1),
+                &generation(6),
+                &signer(7),
+                DelegationChain::default(),
+            )
+            .expect("under the unit cap"),
         ],
         chain: DnssecChain::from(vec![vec![0xDD; 5].into()]),
         ..minimal_params()
@@ -267,7 +274,7 @@ pub fn reattach_pair() -> (Certificate, Certificate) {
     let a = certificate(full_params());
     let b = a
         .with_attachments(
-            vec![DelegationBytes::from(vec![0xEE; 4])],
+            DelegationChain::from(vec![SignedDelegationBytes::from(vec![0xEE; 4])]),
             vec![],
             DnssecChain::from(vec![vec![0xEF; 6].into()]),
         )

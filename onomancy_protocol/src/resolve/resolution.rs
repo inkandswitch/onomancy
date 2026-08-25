@@ -1,6 +1,6 @@
 //! The outcome of a walk.
 
-use onomancy_core::name::doc::DocAnchor;
+use onomancy_core::anchor::doc::DocAnchor;
 
 use super::namestore::Authority;
 

@@ -20,7 +20,7 @@
 
 use alloc::vec::Vec;
 
-use crate::wire::{self, Reader, WireError};
+use onomancy_core::wire::{self, Reader, WireError};
 
 /// A framed DNSSEC chain, root zone → owner name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]

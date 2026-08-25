@@ -6,7 +6,7 @@ use std::{io::Write as _, path::PathBuf};
 
 use clap::Args;
 use ed25519_dalek::SigningKey;
-use onomancy_core::name::doc::DocAnchor;
+use onomancy_core::anchor::doc::DocAnchor;
 
 use crate::{say, seed};
 

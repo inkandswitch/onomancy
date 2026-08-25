@@ -20,15 +20,15 @@
 
 use std::{fs, path::PathBuf};
 
-use onomancy_core::{
+use onomancy_core::time::UnixSeconds;
+use onomancy_dnssec::{
     certificate::chain::DnssecChain,
+    dns_name::DnsName,
     freshness::{Freshness, Grade},
-    name::dns::DnsName,
-    time::UnixSeconds,
     txt::serial::Serial,
+    validator::Validator,
 };
-use onomancy_dnssec::validator::Validator;
-use onomancy_protocol::{verifier_state::memory::MemoryAuthority, verify};
+use onomancy_protocol::{verifier_state::memory::authority::MemoryAuthority, verify};
 use testresult::TestResult;
 
 /// The capture instant (seconds), inside every RRSIG window.

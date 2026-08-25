@@ -15,7 +15,7 @@ use onomancy_automerge::{
     RESERVED_KEY,
     namestore::{DocumentNamestore, HeldDocuments},
 };
-use onomancy_core::name::{doc::DocAnchor, segment::Segment};
+use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 use onomancy_protocol::resolve::{
     namestore::{Authority, Vouched},
     resolution::{PartialReason, Resolution},

@@ -14,16 +14,17 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
+    anchor::doc::DocAnchor, delegation::DelegationChain, time::UnixSeconds, wire::OversizeUnit,
+};
+use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    dns_name::DnsName,
     freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
-    wire::OversizeUnit,
 };
 
-use crate::verifier_state::seam::ChainProof;
+use onomancy_dnssec::chain_proof::ChainProof;
 
 /// The fixed test hostname.
 ///
@@ -133,7 +134,7 @@ pub fn binding_carrying(
             hostname: host(),
             heads: vec![],
             predecessor: None,
-            delegation_chain: vec![],
+            delegation_chain: DelegationChain::default(),
             lineage,
             chain: chain.clone(),
         },
@@ -168,7 +169,7 @@ pub fn rotation(
         &doc(doc_seed),
         &generation(replaced_seed),
         &signer(successor_seed),
-        vec![],
+        DelegationChain::default(),
     )
 }
 
@@ -189,6 +190,6 @@ pub fn succession(
         &doc(successor_seed),
         &host(),
         &signer(signer_seed),
-        vec![],
+        DelegationChain::default(),
     )
 }

@@ -122,7 +122,7 @@ mod tests {
     };
     use alloc::vec::Vec;
     use ed25519_dalek::SigningKey;
-    use onomancy_core::name::doc::DocAnchor;
+    use onomancy_core::anchor::doc::DocAnchor;
 
     fn doc(seed: u8) -> DocAnchor {
         DocAnchor::from(SigningKey::from_bytes(&[seed; 32]).verifying_key())

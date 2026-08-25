@@ -16,7 +16,7 @@ use super::{
     generation_key::GenerationKey,
     serial::{ParseSerialError, Serial},
 };
-use crate::name::doc::DocAnchor;
+use onomancy_core::anchor::doc::DocAnchor;
 
 /// The format tag this module implements, as it appears on the wire.
 pub const FORMAT_TAG: &str = "v=ONO0";
@@ -44,7 +44,7 @@ const KEY_LEN: usize = 32;
 ///
 /// ```
 /// use ed25519_dalek::SigningKey;
-/// use onomancy_core::txt::record::TxtRecord;
+/// use onomancy_dnssec::txt::record::TxtRecord;
 ///
 /// let key = SigningKey::from_bytes(&[7; 32]).verifying_key();
 /// let record = TxtRecord::new(1.into(), key.into(), key.into());
@@ -52,7 +52,7 @@ const KEY_LEN: usize = 32;
 /// let rendered = record.to_string();
 /// assert!(rendered.starts_with("v=ONO0;k=ed25519;n=1;g="));
 /// assert_eq!(TxtRecord::parse(&rendered)?, record);
-/// # Ok::<_, onomancy_core::txt::record::ParseTxtRecordError>(())
+/// # Ok::<_, onomancy_dnssec::txt::record::ParseTxtRecordError>(())
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TxtRecord {

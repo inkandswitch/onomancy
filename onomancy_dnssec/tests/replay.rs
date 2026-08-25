@@ -9,10 +9,14 @@
 
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     collections::{Map, Set},
-    freshness::ChainWindow,
+    delegation::DelegationChain,
     time::UnixSeconds,
+};
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    chain_proof::ChainProof,
+    freshness::ChainWindow,
     txt::{record::TxtRecord, serial::Serial},
 };
 use onomancy_protocol::{
@@ -20,8 +24,7 @@ use onomancy_protocol::{
     verifier_state::{
         VerifierState,
         decisions::{Acceptance, Decisions},
-        memory::{MemoryAuthority, MemoryValidator},
-        seam::ChainProof,
+        memory::{authority::MemoryAuthority, validator::MemoryValidator},
         store::{Store, item::Item},
     },
 };
@@ -72,7 +75,7 @@ fn real_binding(
             hostname: hostname.clone(),
             heads: vec![],
             predecessor: None,
-            delegation_chain: vec![],
+            delegation_chain: DelegationChain::default(),
             lineage: vec![],
             chain: chain.clone(),
         },

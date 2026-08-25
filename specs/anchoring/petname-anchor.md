@@ -40,7 +40,7 @@ local-name = "~" *( "/" segment )
 
 - `~` means the user's own root document and nothing else. There is no fallback to any other anchor family.
 - `~` alone (no segments) resolves to the root document itself.
-- `#` is reserved in segments; `~` names do not carry heads.
+- `#` is reserved in segments, as in every family; names carry no version pins.
 - Segment hygiene (non-empty, no `.`/`..`, no `#` or control characters) follows the shared [Onomancy Name Grammar]. Dots are permitted within labels: since anchor discrimination is entirely by sigil/scheme, a dotted label like `bmann.ca` carries no grammatical meaning — and no verification connotation (see [Choosing Labels]).
 
 # Local-Only by Construction
@@ -100,7 +100,7 @@ The petname store holds the user's _own_ attestations only. Third-party attestat
 # Divergence and Re-Pin
 [Divergence and Re-Pin]: #divergence-and-re-pin
 
-The [Binding Cache] records what each hostname attested — verified certificates and unverified introduction claims alike — so drift is detected by a **document-ID join**, with no per-edge metadata: SSH `known_hosts` semantics.
+The [Binding Cache] records what each hostname attested — verified certificates and unverified introduction claims alike — so drift is detected by a **document-ID join**, with no per-edge metadata: remember what was seen, compare on every use (the SSH `known_hosts` model).
 
 - When a hostname's current binding attests a **different** document ID than its last-known (verified or claimed) one, implementations MUST surface divergence for every petname edge whose target is the superseded document. Surfacing follows the events-vs-states doctrine ([Prompt Grading]): a **fresh ✓** contradiction is an event and MAY prompt; a claim-only or stale ⚠ contradiction is a badge, with the interactive re-pin flow offered at use time or on user initiative — the weakest evidence must not be able to schedule prompts that stronger evidence deliberately cannot.
 - Divergence MUST NOT be silently accepted (auto-repointing the edge) and SHOULD NOT hard-fail resolution; the pinned target keeps resolving while the user is prompted.

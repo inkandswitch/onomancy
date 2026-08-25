@@ -21,7 +21,7 @@ bijoux = { workspace = true }
 blake3 = { workspace = true }
 bs58 = { workspace = true }
 ed25519-dalek = { workspace = true }
-idna = { workspace = true, optional = true }
+
 serde = { workspace = true, optional = true, features = ["alloc", "derive"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -34,8 +34,8 @@ testresult = { workspace = true }
 
 [features]
 default = []
-arbitrary = ["dep:arbitrary", "std"]         # derive needs std's thread_local
-idna = ["dep:idna"]                          # U-label → A-label input layer
+arbitrary = ["dep:arbitrary", "std"] # derive needs std's thread_local
+
 serde = ["dep:serde"]
 std = ["ed25519-dalek/std", "thiserror/std"]
 
