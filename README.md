@@ -29,9 +29,9 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 
 | Crate                                        | Purpose                                                                                |
 |----------------------------------------------|----------------------------------------------------------------------------------------|
-| [`onomancy_core`](./onomancy_core)           | `no_std`-leaning vocabulary: name grammar, TXT codec, certificate & statement units    |
+| [`onomancy_core`](./onomancy_core)           | Substrate-neutral kernel: generic name grammar (`Name<A>`), digests, signed-unit skeleton, wire primitives |
+| [`onomancy_dnssec`](./onomancy_dnssec)       | The DNS anchoring protocol: `@` names, certificate/statement/TXT codecs, sans-IO RFC 4034/4035 validation, IANA trust anchors baked in |
 | [`onomancy_protocol`](./onomancy_protocol)   | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation         |
-| [`onomancy_dnssec`](./onomancy_dnssec)       | Sans-IO RFC 4034/4035 chain validation, IANA trust anchors baked in                    |
 | [`onomancy_automerge`](./onomancy_automerge) | Automerge substrate adapter: namestores, decision documents, petnames                  |
 | [`onomancy_chain`](./onomancy_chain)         | Sans-IO DNSSEC chain building: questions out, records in, framed links                 |
 | [`onomancy_publish`](./onomancy_publish)     | Ceremonies (bind · refresh · rotate · migrate) emitting self-verified Plans            |
@@ -45,9 +45,9 @@ Libraries implement the protocol (`onomancy_*`); agents that practice it are ono
 ```mermaid
 graph TD
     subgraph pure ["sans-IO: pure functions (host + Wasm)"]
-        core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
+        core["onomancy_core<br/><i>substrate-neutral kernel:<br/>Name&lt;A&gt; · digests · Signed · wire</i>"]
+        dnssec["onomancy_dnssec<br/><i>the DNS anchoring protocol:<br/>@ names · units · TXT · validation</i>"]
         proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
-        dnssec["onomancy_dnssec<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
         chain["onomancy_chain<br/><i>chain-building state machine<br/>(questions out, records in)</i>"]
         publish["onomancy_publish<br/><i>ceremonies → Plans</i>"]
 
@@ -64,20 +64,19 @@ graph TD
 
     onomancer["onomancer (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
 
+    dnssec --> core
+    proto --> dnssec
     proto --> core
-    dnssec -- "implements ChainValidator" --> proto
+    chain --> dnssec
     chain --> core
     hickory -- "drives" --> chain
     wasm -- "drives" --> chain
-    wasm --> dnssec
     publish --> proto
-    automerge -- "implements Namestore,<br/>DecisionsView" --> proto
+    automerge -- "implements Namestore" --> proto
     keyhive -- "implements AuthorityVerifier" --> proto
-    hickory -- "implements ChainProvider" --> proto
-    wasm --> core
-    wasm -- "implements ChainProvider" --> proto
+    hickory -- "implements ChainProvider" --> dnssec
+    wasm -- "implements ChainProvider" --> dnssec
     onomancer --> publish
-    onomancer --> dnssec
     onomancer --> hickory
     onomancer --> automerge
     onomancer --> keyhive
