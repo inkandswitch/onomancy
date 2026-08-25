@@ -128,7 +128,7 @@ fn derive_both_ways(
 fn accept(binding: &RealBinding) -> Decisions {
     let mut acceptances = Map::default();
     let mut cited = Set::default();
-    cited.insert(binding.cert.digest().into());
+    cited.insert(binding.cert.digest().erase());
     acceptances.insert(
         proto_utils::host(),
         vec![Acceptance {

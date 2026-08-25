@@ -29,7 +29,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use crate::{
     delegation::{self, DelegationBytes},
-    digest::Digest,
+    digest::{Blake3, Digest},
     name::{
         dns::{CanonicalDnsNameError, DnsName},
         doc::DocAnchor,
@@ -49,7 +49,7 @@ use crate::{
 /// Keyhive verification, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuccessorStatement {
-    digest: Digest<SuccessorStatement>,
+    digest: Digest<Blake3, SuccessorStatement>,
     signed: Signed<Succession>,
     authority: Vec<DelegationBytes>,
 }
@@ -126,9 +126,9 @@ impl SuccessorStatement {
 
     /// The typed digest of the unit's canonical bytes, computed over
     /// the received (or built) bytes and cached; erase via `.into()`
-    /// for the store-level `ContentHash`.
+    /// for the store-level form via [`erase`](crate::digest::Digest::erase).
     #[must_use]
-    pub const fn digest(&self) -> Digest<SuccessorStatement> {
+    pub const fn digest(&self) -> Digest<Blake3, SuccessorStatement> {
         self.digest
     }
 

@@ -27,7 +27,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use crate::{
     delegation::{self, DelegationBytes},
-    digest::Digest,
+    digest::{Blake3, Digest},
     name::doc::DocAnchor,
     signed::{
         Signed,
@@ -45,7 +45,7 @@ use crate::{
 /// verification (`AuthorityVerifier`), not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RotationStatement {
-    digest: Digest<RotationStatement>,
+    digest: Digest<Blake3, RotationStatement>,
     signed: Signed<Rotation>,
     authority: Vec<DelegationBytes>,
 }
@@ -119,9 +119,9 @@ impl RotationStatement {
 
     /// The typed digest of the unit's canonical bytes, computed over
     /// the received (or built) bytes and cached; erase via `.into()`
-    /// for the store-level `ContentHash`.
+    /// for the store-level form via [`erase`](crate::digest::Digest::erase).
     #[must_use]
-    pub const fn digest(&self) -> Digest<RotationStatement> {
+    pub const fn digest(&self) -> Digest<Blake3, RotationStatement> {
         self.digest
     }
 

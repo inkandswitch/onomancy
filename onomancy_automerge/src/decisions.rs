@@ -16,7 +16,7 @@ use automerge::{Automerge, ObjId, ObjType, Prop, ReadDoc, ScalarValue, Value};
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
     collections::Set,
-    content_hash::ContentHash,
+    digest::{Blake3, Digest},
     name::{dns::DnsName, doc::DocAnchor},
 };
 use onomancy_protocol::verifier_state::decisions::{Acceptance, Claim, Decisions};
@@ -136,7 +136,10 @@ impl<'a> DecisionsView<'a> {
         acceptances
     }
 
-    fn resets(self, root: &ObjId) -> onomancy_core::collections::Map<DnsName, Set<ContentHash>> {
+    fn resets(
+        self,
+        root: &ObjId,
+    ) -> onomancy_core::collections::Map<DnsName, Set<Digest<Blake3, [u8]>>> {
         let mut resets = onomancy_core::collections::Map::default();
         let Some(map) = self.object(root, "resets", ObjType::Map) else {
             return resets;
@@ -208,12 +211,12 @@ impl<'a> DecisionsView<'a> {
 
     /// A list of 32-byte content hashes; a single malformed element
     /// voids the whole entry (the derivation never guesses).
-    fn hash_list<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<Set<ContentHash>> {
+    fn hash_list<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<Set<Digest<Blake3, [u8]>>> {
         let list = self.object(obj, prop, ObjType::List)?;
         let mut hashes = Set::default();
 
         for index in 0..self.doc.length(&list) {
-            hashes.insert(ContentHash::from(self.bytes32(&list, index)?));
+            hashes.insert(Digest::from_bytes(self.bytes32(&list, index)?));
         }
 
         Some(hashes)
@@ -338,13 +341,13 @@ mod tests {
             .expect("acceptance entry");
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].document, anchor(1));
-        assert!(accepted[0].cited.contains(&ContentHash::from([7; 32])));
+        assert!(accepted[0].cited.contains(&Digest::from_bytes([7; 32])));
 
         let excluded = decisions
             .resets
             .get(&hostname("mallory.example"))
             .expect("reset entry");
-        assert!(excluded.contains(&ContentHash::from([9; 32])));
+        assert!(excluded.contains(&Digest::from_bytes([9; 32])));
         Ok(())
     }
 

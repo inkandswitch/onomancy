@@ -56,7 +56,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use self::{binding::Binding, chain::DnssecChain};
 use crate::{
     delegation::{self, DelegationBytes},
-    digest::Digest,
+    digest::{Blake3, Digest},
     name::{
         dns::{CanonicalDnsNameError, DnsName},
         doc::{DocAnchor, Head},
@@ -78,7 +78,7 @@ use crate::{
 /// validation and Keyhive verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Certificate {
-    digest: Digest<Certificate>,
+    digest: Digest<Blake3, Certificate>,
     signed: Signed<Binding>,
     delegation_chain: Vec<DelegationBytes>,
     lineage: Vec<RotationStatement>,
@@ -220,10 +220,9 @@ impl Certificate {
     /// The typed digest of the unit's canonical bytes — the store-item
     /// identity, which changes when attachments change. Computed over
     /// the received bytes at decode (or the built bytes at signing)
-    /// and cached; erase via `.into()` for the store-level
-    /// `ContentHash`.
+    /// and cached; [`erase`](Digest::erase) for the store-level form.
     #[must_use]
-    pub const fn digest(&self) -> Digest<Certificate> {
+    pub const fn digest(&self) -> Digest<Blake3, Certificate> {
         self.digest
     }
 

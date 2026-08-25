@@ -55,7 +55,7 @@ fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostSt
 fn accept(document: DocAnchor, cited: &Binding) -> Decisions {
     let mut acceptances = Map::default();
     let mut set = Set::default();
-    set.insert(cited.cert.digest().into());
+    set.insert(cited.cert.digest().erase());
     acceptances.insert(
         host(),
         vec![Acceptance {
@@ -309,7 +309,7 @@ fn b8_reset_excludes_the_challenger() -> TestResult {
     // Fresh challenger would displace (see B2) — but it is excluded.
     let mut decisions = accept(doc(1), &incumbent);
     let mut excluded = Set::default();
-    excluded.insert(poison.cert.digest().into());
+    excluded.insert(poison.cert.digest().erase());
     decisions.resets.insert(host(), excluded);
 
     let state = run(&[&incumbent, &poison], &decisions, vec![]);
@@ -330,7 +330,7 @@ fn outranked_acceptances_surface_as_losers() -> TestResult {
 
     let mut decisions = accept(doc(1), &older);
     let mut cited = Set::default();
-    cited.insert(newer.cert.digest().into());
+    cited.insert(newer.cert.digest().erase());
     decisions
         .acceptances
         .get_mut(&host())
@@ -581,7 +581,7 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     let reset_a = {
         let mut decisions = Decisions::default();
         let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().into());
+        excluded.insert(carrier_a.cert.digest().erase());
         decisions.resets.insert(host(), excluded);
         decisions
     };
@@ -597,8 +597,8 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     let reset_both = {
         let mut decisions = Decisions::default();
         let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().into());
-        excluded.insert(carrier_b.cert.digest().into());
+        excluded.insert(carrier_a.cert.digest().erase());
+        excluded.insert(carrier_b.cert.digest().erase());
         decisions.resets.insert(host(), excluded);
         decisions
     };
@@ -704,7 +704,7 @@ mod props {
                 // dependence hid the first time.
                 let mut decisions = accept(doc(specs[0].0 % 3), &bindings[0]);
                 let mut excluded = Set::default();
-                excluded.insert(bindings[bindings.len() - 1].cert.digest().into());
+                excluded.insert(bindings[bindings.len() - 1].cert.digest().erase());
                 decisions.resets.insert(host(), excluded);
 
                 // The item pool: records, a statement carried by TWO

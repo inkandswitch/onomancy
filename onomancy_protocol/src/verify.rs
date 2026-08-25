@@ -111,7 +111,7 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
     // derivation's own stage-1 path, verbatim.
     let evidence = verifier_state::validate_record(
         &certificate,
-        certificate.digest().into(),
+        certificate.digest().erase(),
         validator,
         authority,
     )

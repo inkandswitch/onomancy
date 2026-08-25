@@ -48,8 +48,8 @@ use alloc::{vec, vec::Vec};
 use onomancy_core::{
     certificate::Certificate,
     collections::{Map, Set},
-    content_hash::ContentHash,
     delegation::DelegationBytes,
+    digest::{Blake3, Digest},
     freshness::{ChainWindow, Freshness, Grade},
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
@@ -287,7 +287,7 @@ fn derive_host<A: AuthorityVerifier>(
 /// provenance.
 #[derive(Debug, Default)]
 struct Evidence {
-    held: Set<ContentHash>,
+    held: Set<Digest<Blake3, [u8]>>,
     records: Vec<BindingEvidence>,
     rotations: Vec<RotationEvidence>,
     successors: Vec<SuccessorEvidence>,
@@ -298,7 +298,7 @@ struct Evidence {
 pub(crate) struct BindingEvidence {
     pub(crate) document: DocAnchor,
     pub(crate) generation: GenerationKey,
-    pub(crate) hash: ContentHash,
+    pub(crate) hash: Digest<Blake3, [u8]>,
     pub(crate) hostname: DnsName,
     pub(crate) key: ZoneStateKey,
     /// Whether the delegation chain lies on the delegation path for the attested `g=` (D10).
@@ -312,12 +312,12 @@ pub(crate) struct BindingEvidence {
 /// survive a reset).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Provenance {
-    carriers: Vec<ContentHash>,
+    carriers: Vec<Digest<Blake3, [u8]>>,
     standalone: bool,
 }
 
 impl Provenance {
-    fn record(&mut self, carrier: Option<ContentHash>) {
+    fn record(&mut self, carrier: Option<Digest<Blake3, [u8]>>) {
         match carrier {
             None => self.standalone = true,
             Some(hash) => {
@@ -328,7 +328,11 @@ impl Provenance {
         }
     }
 
-    fn excluded(&self, own_hash: ContentHash, excluded: &Set<ContentHash>) -> bool {
+    fn excluded(
+        &self,
+        own_hash: Digest<Blake3, [u8]>,
+        excluded: &Set<Digest<Blake3, [u8]>>,
+    ) -> bool {
         if excluded.contains(&own_hash) {
             return true;
         }
@@ -344,7 +348,7 @@ impl Provenance {
 /// A valid rotation statement (document-scoped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RotationEvidence {
-    hash: ContentHash,
+    hash: Digest<Blake3, [u8]>,
     provenance: Provenance,
     replaced: GenerationKey,
     root_doc: DocAnchor,
@@ -357,7 +361,7 @@ struct SuccessorEvidence {
     /// The statement's authority carriage, kept for stage 5's
     /// departing-hop path-membership check (bridging-hop grading).
     carriage: Vec<DelegationBytes>,
-    hash: ContentHash,
+    hash: Digest<Blake3, [u8]>,
     hostname: DnsName,
     predecessor: DocAnchor,
     provenance: Provenance,
@@ -440,7 +444,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
 /// TXT cross-check, D10 path-membership input.
 pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     certificate: &Certificate,
-    hash: ContentHash,
+    hash: Digest<Blake3, [u8]>,
     validator: &V,
     authority: &A,
 ) -> Option<BindingEvidence> {
@@ -491,7 +495,7 @@ fn extract_rotation<A: AuthorityVerifier>(
     evidence: &mut Evidence,
     authority: &A,
     statement: &RotationStatement,
-    carrier: Option<ContentHash>,
+    carrier: Option<Digest<Blake3, [u8]>>,
 ) {
     // Signature validity was settled at decode; carriage authority is
     // the remaining validity condition (B9: invalid statements are
@@ -504,7 +508,7 @@ fn extract_rotation<A: AuthorityVerifier>(
         return;
     }
 
-    let hash = statement.digest().into();
+    let hash = statement.digest().erase();
 
     if let Some(existing) = evidence.rotations.iter_mut().find(|r| r.hash == hash) {
         existing.provenance.record(carrier);
@@ -527,7 +531,7 @@ fn extract_successor<A: AuthorityVerifier>(
     evidence: &mut Evidence,
     authority: &A,
     statement: &SuccessorStatement,
-    carrier: Option<ContentHash>,
+    carrier: Option<Digest<Blake3, [u8]>>,
 ) {
     if !authority.authorizes(
         statement.predecessor_doc(),
@@ -537,7 +541,7 @@ fn extract_successor<A: AuthorityVerifier>(
         return;
     }
 
-    let hash = statement.digest().into();
+    let hash = statement.digest().erase();
 
     if let Some(existing) = evidence.successors.iter_mut().find(|s| s.hash == hash) {
         existing.provenance.record(carrier);
@@ -561,8 +565,8 @@ fn extract_successor<A: AuthorityVerifier>(
 
 /// Rotation statements are document-scoped: an exclusion from ANY
 /// hostname's reset removes the statement for its document everywhere.
-fn global_rotation_exclusions(decisions: &Decisions) -> Set<ContentHash> {
-    let mut all: Set<ContentHash> = Set::default();
+fn global_rotation_exclusions(decisions: &Decisions) -> Set<Digest<Blake3, [u8]>> {
+    let mut all: Set<Digest<Blake3, [u8]>> = Set::default();
     for excluded in decisions.resets.values() {
         all.extend(excluded.iter().copied());
     }
@@ -627,7 +631,7 @@ impl LineageView {
     }
 }
 
-fn build_lineage(evidence: &Evidence, excluded: &Set<ContentHash>) -> LineageView {
+fn build_lineage(evidence: &Evidence, excluded: &Set<Digest<Blake3, [u8]>>) -> LineageView {
     let mut rotations: Vec<&RotationEvidence> = evidence
         .rotations
         .iter()
@@ -849,7 +853,7 @@ impl<'e> ProofGraph<'e> {
     fn for_hostname(
         evidence: &'e Evidence,
         hostname: &DnsName,
-        excluded: &Set<ContentHash>,
+        excluded: &Set<Digest<Blake3, [u8]>>,
     ) -> Self {
         let mut statements: Vec<&'e SuccessorEvidence> = evidence
             .successors

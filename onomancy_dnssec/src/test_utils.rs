@@ -22,7 +22,7 @@ use crate::{
     crypto,
     wire::{
         algorithm::Algorithm,
-        digest::DigestType,
+        digest_type::DigestType,
         dnskey::Dnskey,
         name::Name,
         record::{CLASS_IN, Record},

@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use onomancy_core::{
     certificate::{Certificate, chain::DnssecChain},
-    content_hash::ContentHash,
+    digest::{Blake3, Digest},
     name::dns::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
@@ -49,18 +49,18 @@ impl Item {
     /// let whichever spelling arrived first silently suppress the
     /// others — an order-dependent evidence drop.
     #[must_use]
-    pub fn content_hash(&self) -> ContentHash {
+    pub fn content_hash(&self) -> Digest<Blake3, [u8]> {
         match self {
-            Self::Record(certificate) => certificate.digest().into(),
-            Self::Rotation(statement) => statement.digest().into(),
-            Self::Successor(statement) => statement.digest().into(),
+            Self::Record(certificate) => certificate.digest().erase(),
+            Self::Rotation(statement) => statement.digest().erase(),
+            Self::Successor(statement) => statement.digest().erase(),
             Self::ChainRefresh { hostname, chain } => chain_item_hash(b'R', hostname, chain),
         }
     }
 }
 
 /// Domain-separated hash for the two chain-item kinds.
-fn chain_item_hash(kind: u8, hostname: &DnsName, chain: &DnssecChain) -> ContentHash {
+fn chain_item_hash(kind: u8, hostname: &DnsName, chain: &DnssecChain) -> Digest<Blake3, [u8]> {
     let mut buf = Vec::new();
     buf.extend_from_slice(b"ono-chain-item/");
     buf.push(kind);
@@ -69,5 +69,5 @@ fn chain_item_hash(kind: u8, hostname: &DnsName, chain: &DnssecChain) -> Content
     buf.push(0);
     chain.write_framed(&mut buf);
 
-    ContentHash::of(&buf)
+    Digest::hash(&buf)
 }

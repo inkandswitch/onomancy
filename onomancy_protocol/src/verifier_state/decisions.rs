@@ -11,7 +11,7 @@ use alloc::{string::String, vec::Vec};
 
 use onomancy_core::{
     collections::{Map, Set},
-    content_hash::ContentHash,
+    digest::{Blake3, Digest},
     name::{dns::DnsName, doc::DocAnchor},
 };
 
@@ -28,7 +28,7 @@ pub struct Decisions {
     pub claims: Vec<Claim>,
     /// Per-hostname exclusion sets: content hashes of items that
     /// contribute to no derivation output at their natural scope.
-    pub resets: Map<DnsName, Set<ContentHash>>,
+    pub resets: Map<DnsName, Set<Digest<Blake3, [u8]>>>,
 }
 
 /// A claim: an alleged name recorded at introduction. Feeds divergence
@@ -54,5 +54,5 @@ pub struct Acceptance {
     /// cited item a record for this hostname, at least one attesting
     /// `document`. An acceptance citing an excluded item is inert; one
     /// citing an absent item is not-yet-evaluable.
-    pub cited: Set<ContentHash>,
+    pub cited: Set<Digest<Blake3, [u8]>>,
 }

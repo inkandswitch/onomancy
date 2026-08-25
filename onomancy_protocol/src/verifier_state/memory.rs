@@ -13,8 +13,8 @@ use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
     certificate::chain::DnssecChain,
     collections::{Map, Set},
-    content_hash::ContentHash,
     delegation::DelegationBytes,
+    digest::{Blake3, Digest},
     name::{dns::DnsName, doc::DocAnchor},
     txt::generation_key::GenerationKey,
 };
@@ -22,16 +22,16 @@ use onomancy_core::{
 use super::seam::{AuthorityVerifier, ChainProof, ChainValidator, InvalidChain};
 
 /// Content-address a chain's framing, the lookup key both fakes use.
-fn chain_key(chain: &DnssecChain) -> ContentHash {
+fn chain_key(chain: &DnssecChain) -> Digest<Blake3, [u8]> {
     let mut framed = Vec::new();
     chain.write_framed(&mut framed);
-    ContentHash::of(&framed)
+    Digest::hash(&framed)
 }
 
 /// A [`ChainValidator`] backed by a proof table.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryValidator {
-    proofs: Map<(DnsName, ContentHash), ChainProof>,
+    proofs: Map<(DnsName, Digest<Blake3, [u8]>), ChainProof>,
 }
 
 impl MemoryValidator {

@@ -332,7 +332,7 @@ impl WalkState {
                 .chain(self.keys.iter());
 
             for key in hinted {
-                match crypto::verify_rrsig(link, rrsig, key) {
+                match rrsig.verify(link, key) {
                     Ok(()) => {
                         self.intersect(rrsig)?;
                         return Ok(rrsig.clone());

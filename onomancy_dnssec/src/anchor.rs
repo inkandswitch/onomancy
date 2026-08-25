@@ -10,14 +10,11 @@
 
 use alloc::{vec, vec::Vec};
 
+use onomancy_core::digest::Digest;
+
 use crate::{
-    crypto,
-    wire::{
-        algorithm::Algorithm,
-        digest::{DsDigest, Sha256Digest},
-        dnskey::Dnskey,
-        name::Name,
-    },
+    crypto::{self, ds_digest::DsDigest},
+    wire::{algorithm::Algorithm, dnskey::Dnskey, name::Name},
 };
 
 /// A DS-form trust anchor: a digest commitment to a zone key.
@@ -59,7 +56,7 @@ pub fn iana_root_anchors() -> Vec<TrustAnchor> {
 
     let ksk_2017 = TrustAnchor {
         algorithm: Algorithm::RSA_SHA256,
-        digest: DsDigest::Sha256(Sha256Digest::from(hex_to_bytes(
+        digest: DsDigest::Sha256(Digest::from_bytes(hex_to_bytes(
             b"E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D",
         ))),
         key_tag: 20326,
@@ -68,7 +65,7 @@ pub fn iana_root_anchors() -> Vec<TrustAnchor> {
 
     let ksk_2024 = TrustAnchor {
         algorithm: Algorithm::RSA_SHA256,
-        digest: DsDigest::Sha256(Sha256Digest::from(hex_to_bytes(
+        digest: DsDigest::Sha256(Digest::from_bytes(hex_to_bytes(
             b"683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16",
         ))),
         key_tag: 38696,
@@ -108,7 +105,7 @@ const fn hex_to_bytes(hex: &[u8; 64]) -> [u8; 32] {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::wire::digest::DigestType;
+    use crate::wire::digest_type::DigestType;
 
     #[test]
     fn iana_anchors_are_well_formed() {

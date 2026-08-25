@@ -11,7 +11,6 @@ extern crate alloc;
 
 pub mod certificate;
 pub mod collections;
-pub mod content_hash;
 pub mod delegation;
 pub mod digest;
 pub mod freshness;

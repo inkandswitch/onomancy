@@ -1,52 +1,11 @@
-//! DS digest vocabulary: digest type codes and typed digests.
-//!
-//! The codes are DNS's, not ours: the IANA DS digest-type registry.
+//! Typed DS digests: computed commitments to an owner-qualified
+//! DNSKEY.
 
-use core::fmt;
+use onomancy_core::digest::Digest;
 
-/// A DS digest-type code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DigestType(pub u8);
+use crate::wire::digest_type::DigestType;
 
-impl DigestType {
-    /// SHA-256 (2) — the only type this implementation computes;
-    /// everything else fails validation (the D13 doctrine applied to
-    /// digests).
-    pub const SHA256: Self = Self(2);
-
-    /// Whether this implementation can compute the digest.
-    #[must_use]
-    pub const fn supported(self) -> bool {
-        matches!(self, Self::SHA256)
-    }
-}
-
-impl fmt::Display for DigestType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::SHA256 => f.write_str("SHA-256"),
-            Self(code) => write!(f, "DIGEST{code}"),
-        }
-    }
-}
-
-/// A computed SHA-256 DS digest: exactly 32 bytes, by type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Sha256Digest([u8; 32]);
-
-impl Sha256Digest {
-    /// The digest bytes.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl From<[u8; 32]> for Sha256Digest {
-    fn from(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-}
+use super::sha256::Sha256;
 
 /// A digest whose [`DigestType`] is DERIVED from its payload, never
 /// stored beside it — the tag and the bytes cannot disagree, and only
@@ -63,7 +22,7 @@ impl From<[u8; 32]> for Sha256Digest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DsDigest {
     /// SHA-256 (DS digest type 2).
-    Sha256(Sha256Digest),
+    Sha256(Digest<Sha256, OwnedDnskey>),
 }
 
 impl DsDigest {
@@ -86,8 +45,14 @@ impl DsDigest {
     }
 }
 
-impl From<Sha256Digest> for DsDigest {
-    fn from(digest: Sha256Digest) -> Self {
+impl From<Digest<Sha256, OwnedDnskey>> for DsDigest {
+    fn from(digest: Digest<Sha256, OwnedDnskey>) -> Self {
         Self::Sha256(digest)
     }
 }
+
+/// Marker: RFC 4509's DS preimage — the owner name (canonical wire
+/// form) followed by the DNSKEY rdata. Not any single unit's encoding,
+/// which is why the digest is indexed by this marker rather than by
+/// [`Dnskey`](super::dnskey::Dnskey) itself.
+pub struct OwnedDnskey;

@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 
 use onomancy_core::wire::{Reader, WireError};
 
-use super::{algorithm::Algorithm, digest::DigestType};
+use super::{algorithm::Algorithm, digest_type::DigestType};
 
 /// A parsed DS RDATA.
 #[derive(Debug, Clone, PartialEq, Eq)]

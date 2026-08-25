@@ -11,14 +11,17 @@ pub mod item;
 
 use self::item::Item;
 
-use onomancy_core::{collections::Set, content_hash::ContentHash};
+use onomancy_core::{
+    collections::Set,
+    digest::{Blake3, Digest},
+};
 
 /// The grow-only record store. Union-merged, deduplicated by content
 /// hash; insertion order is deliberately unobservable to `derive`.
 #[derive(Debug, Clone, Default)]
 pub struct Store {
     items: Vec<Item>,
-    seen: Set<ContentHash>,
+    seen: Set<Digest<Blake3, [u8]>>,
 }
 
 impl Store {

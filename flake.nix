@@ -192,7 +192,16 @@
         # Chromium + Firefox driving the wasm-bodge build.
         ci-e2e = pkgs.writeShellApplication {
           name = "onomancy-ci-e2e";
-          runtimeInputs = [ rust-toolchain pkgs.esbuild pkgs.nodejs wasm-bodge ];
+          runtimeInputs = [
+            rust-toolchain
+            pkgs.esbuild
+            pkgs.nodejs
+            # wasm-bodge shells out to `wasm-bindgen`; the CLI must match
+            # the workspace's wasm-bindgen crate version (same pin as
+            # ci-browser).
+            unstable.wasm-bindgen-cli
+            wasm-bodge
+          ];
           text = ''
             export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
             export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true

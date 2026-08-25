@@ -28,7 +28,7 @@
 
 pub mod algorithm;
 pub mod cname;
-pub mod digest;
+pub mod digest_type;
 pub mod dnskey;
 pub mod ds;
 pub mod name;

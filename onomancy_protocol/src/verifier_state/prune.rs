@@ -25,7 +25,7 @@ use alloc::vec::Vec;
 
 use onomancy_core::{
     collections::{Map, Set},
-    content_hash::ContentHash,
+    digest::{Blake3, Digest},
     name::doc::DocAnchor,
     time::UnixSeconds,
 };
@@ -56,7 +56,7 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
     let evidence = validate_and_extract(store, validator, authority);
 
     // Everything an acceptance cites is load-bearing.
-    let mut cited: Set<ContentHash> = Set::default();
+    let mut cited: Set<Digest<Blake3, [u8]>> = Set::default();
     for acceptances in decisions.acceptances.values() {
         for acceptance in acceptances {
             cited.extend(acceptance.cited.iter().copied());
@@ -64,7 +64,7 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
     }
 
     // Group binding evidence by (hostname, document); decide per item.
-    let mut keep: Set<ContentHash> = cited.clone();
+    let mut keep: Set<Digest<Blake3, [u8]>> = cited.clone();
     let mut groups: Map<(&str, DocAnchor), Vec<&BindingEvidence>> = Map::default();
     for record in &evidence.records {
         groups
@@ -224,7 +224,7 @@ mod tests {
 
         // An acceptance citing the WEAK record pins it in place.
         let mut cited = Set::default();
-        cited.insert(weak.cert.digest().into());
+        cited.insert(weak.cert.digest().erase());
         let mut acceptances = Map::default();
         acceptances.insert(
             host(),

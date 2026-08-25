@@ -18,7 +18,7 @@ use std::{fs, path::PathBuf};
 
 use onomancy_core::{
     certificate::{Certificate, DecodeCertificateError},
-    content_hash::ContentHash,
+    digest::{Blake3, Digest},
     signed::payload::Malformed,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
@@ -66,21 +66,21 @@ fn accept_vectors_roundtrip_with_stable_digests() -> TestResult {
     for vector in vectors() {
         let bytes = checked_in(&vector);
 
-        let digest: ContentHash = match vector.expect {
+        let digest: Digest<Blake3, [u8]> = match vector.expect {
             Expect::Certificate => {
                 let unit = Certificate::decode(&bytes)?;
                 assert_eq!(bytes, unit.encode(), "{}: byte identity", vector.name);
-                unit.digest().into()
+                unit.digest().erase()
             }
             Expect::Rotation => {
                 let unit = RotationStatement::decode(&bytes)?;
                 assert_eq!(bytes, unit.encode(), "{}: byte identity", vector.name);
-                unit.digest().into()
+                unit.digest().erase()
             }
             Expect::Successor => {
                 let unit = SuccessorStatement::decode(&bytes)?;
                 assert_eq!(bytes, unit.encode(), "{}: byte identity", vector.name);
-                unit.digest().into()
+                unit.digest().erase()
             }
             Expect::RejectCertificate => continue,
         };
@@ -167,8 +167,8 @@ fn reattach_pair_shares_identity_but_not_hash() -> TestResult {
 
     assert!(a.same_certificate(&b), "same signed region");
     assert_ne!(
-        ContentHash::from(a.digest()),
-        ContentHash::from(b.digest()),
+        a.digest().erase(),
+        b.digest().erase(),
         "different attached regions, different hashes"
     );
     Ok(())
