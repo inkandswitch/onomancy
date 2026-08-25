@@ -7,18 +7,20 @@
 use alloc::{format, string::String, vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
-use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
-    name::{dns::DnsName, doc::DocAnchor},
+use crate::{
+    chain::{ChainLink, DnssecChain},
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_core::anchor::doc::DocAnchor;
 
 use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
 use crate::{
-    anchor::TrustAnchor,
+    trust_anchor::TrustAnchor,
     wire::{
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{CLASS_IN, Record},
+        rr_type::RrType,
     },
 };
 
@@ -35,8 +37,7 @@ pub enum Expectation {
     Binding,
 
     /// MUST fail validation (mutation vectors — including denial-only
-    /// and wildcard chains, since negative proofs are out at v0,
-    /// ADR-045).
+    /// and wildcard chains, since negative proofs are out at v0).
     Invalid,
 }
 
@@ -116,7 +117,7 @@ fn valid_binding() -> DnssecChain {
 }
 
 /// An NSEC at the zone apex — a denial link, which the walk skips
-/// unverified at v0 (ADR-045).
+/// unverified at v0.
 fn absence_nsec() -> Record {
     let mut rdata = Vec::new();
     // Never panics: the literal is valid.
@@ -220,7 +221,7 @@ fn missing_leaf() -> DnssecChain {
 
 /// The leaf signed as `*.expede.wtf` (labels = 2): wildcard-expanded
 /// answers are rejected outright at v0 (their no-closer-match proof
-/// would be a negative proof, ADR-045).
+/// would be a negative proof).
 fn wildcard() -> DnssecChain {
     let root = fixture_root();
     let child = fixture_child();

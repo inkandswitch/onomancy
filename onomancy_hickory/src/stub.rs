@@ -9,18 +9,23 @@
 //! when the upstream's validator calls them bogus: judging is not the
 //! resolver's job here.
 
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    io,
+    net::SocketAddr,
+    process,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
-use hickory_proto::{
-    op::Message,
-    rr::{Name, Record, RecordType},
+use hickory_proto::{ProtoError, op::Message, rr::Record, serialize::binary::DecodeError};
+use onomancy_chain::{
+    answer::{self, Refused},
+    question::Question,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
+    time,
 };
-
-use crate::chain_assembly::{self, Query, Refused};
 
 /// UDP receive buffer: generous for signed `RRsets` under the payload cap.
 const UDP_BUFFER: usize = 4096;
@@ -49,27 +54,28 @@ impl StubResolver {
         Self { timeout, ..self }
     }
 
-    /// Query `name`/`rtype`, returning the answer-section records.
+    /// Answer one of the chain builder's questions, returning the
+    /// answer-section records.
     ///
     /// `NXDOMAIN` and empty answers return `Ok(vec![])` — what they
-    /// mean is the assembler's business (a suffix that is not a zone
+    /// mean is the builder's business (a suffix that is not a zone
     /// cut probes exactly like this).
     ///
     /// # Errors
     ///
     /// Returns [`QueryError`] for transport failures, timeouts,
     /// malformed responses, and non-`NoError`/`NXDomain` rcodes.
-    pub async fn query(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
-        let request = chain_assembly::build_query(name, rtype, weak_id());
+    pub async fn query(&self, question: &Question) -> Result<Vec<Record>, QueryError> {
+        let request = question.message(weak_id());
         let id = request.metadata.id;
-        let wire = request.to_vec().map_err(|_| QueryError::Encode)?;
+        let wire = request.to_vec().map_err(QueryError::Encode)?;
 
         let response = match self.exchange_udp(&wire, id).await? {
             UdpOutcome::Complete(message) => message,
             UdpOutcome::Truncated => self.exchange_tcp(&wire, id).await?,
         };
 
-        Ok(chain_assembly::accepted_answers(response)?)
+        Ok(answer::accepted(response)?)
     }
 
     async fn exchange_udp(&self, wire: &[u8], id: u16) -> Result<UdpOutcome, QueryError> {
@@ -78,12 +84,17 @@ impl StubResolver {
         socket.send(wire).await?;
 
         let mut buffer = vec![0u8; UDP_BUFFER];
-        let received = tokio::time::timeout(self.timeout, socket.recv(&mut buffer))
+        let received = time::timeout(self.timeout, socket.recv(&mut buffer))
             .await
             .map_err(|_| QueryError::Timeout)??;
 
-        let message = Message::from_vec(buffer.get(..received).unwrap_or_default())
-            .map_err(|_| QueryError::MalformedResponse)?;
+        let datagram = match buffer.get(..received) {
+            Some(datagram) => datagram,
+            // `recv` never reports more bytes than the buffer holds;
+            // treat the impossible overrun as an empty datagram.
+            None => &[],
+        };
+        let message = Message::from_vec(datagram).map_err(QueryError::Malformed)?;
 
         if message.metadata.id != id {
             return Err(QueryError::IdMismatch);
@@ -100,7 +111,7 @@ impl StubResolver {
         let exchange = async {
             let mut stream = TcpStream::connect(self.server).await?;
 
-            let length = u16::try_from(wire.len()).map_err(|_| QueryError::Encode)?;
+            let length = u16::try_from(wire.len()).map_err(|_| QueryError::OversizedQuery)?;
             stream.write_all(&length.to_be_bytes()).await?;
             stream.write_all(wire).await?;
 
@@ -109,10 +120,10 @@ impl StubResolver {
             let mut buffer = vec![0u8; usize::from(u16::from_be_bytes(length))];
             stream.read_exact(&mut buffer).await?;
 
-            Message::from_vec(&buffer).map_err(|_| QueryError::MalformedResponse)
+            Message::from_vec(&buffer).map_err(QueryError::Malformed)
         };
 
-        let message = tokio::time::timeout(self.timeout, exchange)
+        let message = time::timeout(self.timeout, exchange)
             .await
             .map_err(|_| QueryError::Timeout)??;
 
@@ -124,24 +135,17 @@ impl StubResolver {
     }
 }
 
-impl Query for StubResolver {
-    type Error = QueryError;
-
-    async fn answers(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
-        self.query(name, rtype).await
-    }
-}
-
 /// A weak query ID: fine here because transport is untrusted anyway —
 /// DNSSEC validation downstream is the only trust boundary.
 fn weak_id() -> u16 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.subsec_nanos())
-        .unwrap_or(0);
+    let nanos = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.subsec_nanos(),
+        // A pre-epoch clock still yields a valid (weak) ID.
+        Err(_) => 0,
+    };
 
     #[allow(clippy::cast_possible_truncation)] // deliberate folding
-    let folded = (nanos ^ (nanos >> 16) ^ std::process::id()) as u16;
+    let folded = (nanos ^ (nanos >> 16) ^ process::id()) as u16;
     folded
 }
 
@@ -153,6 +157,8 @@ fn unspecified_for(server: SocketAddr) -> SocketAddr {
     }
 }
 
+/// How a UDP exchange ended: a full message, or a truncated one that
+/// must be retried over TCP.
 enum UdpOutcome {
     Complete(Message),
     Truncated,
@@ -161,9 +167,9 @@ enum UdpOutcome {
 /// A query failed at the transport level — never a validity verdict.
 #[derive(Debug, thiserror::Error)]
 pub enum QueryError {
-    /// The request could not be encoded (oversized name, internal).
+    /// The request could not be encoded to wire form.
     #[error("query could not be encoded")]
-    Encode,
+    Encode(#[source] ProtoError),
 
     /// The response ID did not match the query.
     #[error("response ID mismatch")]
@@ -171,11 +177,15 @@ pub enum QueryError {
 
     /// Socket-level failure.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
 
     /// The response bytes did not parse as a DNS message.
     #[error("malformed DNS response")]
-    MalformedResponse,
+    Malformed(#[source] DecodeError),
+
+    /// The encoded query exceeds the 16-bit TCP length prefix.
+    #[error("query exceeds the TCP length prefix")]
+    OversizedQuery,
 
     /// The upstream refused the query (SERVFAIL, REFUSED, …).
     #[error(transparent)]

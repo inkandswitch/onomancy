@@ -3,8 +3,11 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
-use onomancy_core::{cert::Certificate, time::UnixSeconds};
-use onomancy_dnssec::validator::{Validator, WalkError};
+use onomancy_core::time::UnixSeconds;
+use onomancy_dnssec::{
+    certificate::Certificate,
+    validator::{Validator, WalkError},
+};
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_publish::ceremony::refresh::Refresh as RefreshCeremony;
 
@@ -37,7 +40,7 @@ impl Refresh {
         let certificate = Certificate::decode(&std::fs::read(&self.cert)?)?;
 
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(certificate.hostname()))??;
+        let chain = crate::block_on(provider.fetch_chain(certificate.hostname()))??;
         let proof = Validator::iana().validate_detailed(certificate.hostname(), &chain)?;
 
         let plan = RefreshCeremony {
@@ -61,9 +64,9 @@ pub(crate) enum RefreshError {
 
     /// The certificate did not decode.
     #[error("certificate: {0}")]
-    Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
+    Certificate(#[from] onomancy_dnssec::certificate::DecodeCertificateError),
 
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 

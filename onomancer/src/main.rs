@@ -30,6 +30,7 @@ mod resolve;
 mod rotate;
 mod seed;
 mod store_dir;
+mod vouch;
 mod watch;
 
 use std::{
@@ -72,6 +73,9 @@ enum Command {
     /// Plan a generation rotation (ceremony: statement + TXT + cert).
     Rotate(rotate::Rotate),
 
+    /// Mint a dev-bridge `<anchor>.carriage` from a document key.
+    Vouch(vouch::Vouch),
+
     /// Re-judge a hostname's evidence on an interval, surfacing
     /// changes as events.
     Watch(watch::Watch),
@@ -87,6 +91,7 @@ fn main() -> ExitCode {
         Command::Refresh(command) => command.run().map_err(Into::into),
         Command::Resolve(command) => command.run().map_err(Into::into),
         Command::Rotate(command) => command.run().map_err(Into::into),
+        Command::Vouch(command) => command.run().map_err(Into::into),
         Command::Watch(command) => command.run().map_err(Into::into),
     };
 

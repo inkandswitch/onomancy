@@ -1,6 +1,6 @@
 # Onomancy Specifications
 
-Normative specifications for **Onomancy**, a local-first edgename protocol, written in the [BCP 14] keyword convention. _Onomancy_ is the protocol (grammar, records, certificate, and resolution semantics) and _Onomancer_ is the reference implementation (the tool that helps you practice onomancy). The [design](../design/) directory holds the rationale, threat model, and ADR narrative these specifications are derived from.
+Normative specifications for **Onomancy**, a local-first edgename protocol, written in the [BCP 14] keyword convention. _Onomancy_ is the protocol (grammar, records, certificate, and resolution semantics) and _Onomancer_ is the reference implementation (the tool that helps you practice onomancy). The [design](../design/) directory holds the rationale and threat model these specifications are derived from.
 
 | Spec                       | Scope                                                                                                                                                                         |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -13,12 +13,12 @@ Normative specifications for **Onomancy**, a local-first edgename protocol, writ
 
 ## Anchors vs Edges
 
-|                   | Anchor                                                                               | Edges (path segments)                               |
-|-------------------|--------------------------------------------------------------------------------------|-----------------------------------------------------|
-| Question answered | Where does trust start?                                                              | Where does the walk go?                             |
-| Appears in a name | Once, at the front (`~`, `@expede.wtf`, `automerge:2nBe…`)                           | Zero or more, after the anchor (`/bob/pics`)        |
-| Decided by        | The name's spelling, at parse time                                                   | The contents of namestores, at resolution time      |
-| Specified in      | [Onomancy Name Grammar] (spelling), then [DNS Anchoring], [Petname Anchoring] (doc anchors need no anchoring step: the URL is the root) | [Onomancy Path Resolution]                          |
+|                   | Anchor                                                                                                                                  | Edges (path segments)                          |
+|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------|
+| Question answered | Where does trust start?                                                                                                                 | Where does the walk go?                        |
+| Appears in a name | Once, at the front (`~`, `@expede.wtf`, `automerge:2nBe…`)                                                                              | Zero or more, after the anchor (`/bob/pics`)   |
+| Decided by        | The name's spelling, at parse time                                                                                                      | The contents of namestores, at resolution time |
+| Specified in      | [Onomancy Name Grammar] (spelling), then [DNS Anchoring], [Petname Anchoring] (doc anchors need no anchoring step: the URL is the root) | [Onomancy Path Resolution]                     |
 
 ### Anchors
 

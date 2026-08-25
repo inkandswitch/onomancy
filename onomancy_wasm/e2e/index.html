@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>onomancy wasm e2e harness</title>
+  </head>
+  <body>
+    <p>Harness page for the Playwright tests: loads the built package and
+      exposes it on <code>window.onomancy</code>.</p>
+    <script type="module">
+      import * as onomancy from "/dist/esm/web.js";
+
+      onomancy.setup();
+      window.onomancy = onomancy;
+      window.onomancyReady = true;
+    </script>
+  </body>
+</html>

@@ -17,13 +17,25 @@ rust-version.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+automerge = { workspace = true, optional = true }
 console_error_panic_hook = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
+ed25519-dalek = { workspace = true, optional = true }
+# Seed minting + automerge's RNG; the `wasm_js` feature unlocks the
+# backend that .cargo/config.toml's `getrandom_backend` cfg selects.
+getrandom = { workspace = true, features = ["wasm_js"], optional = true }
+# The RustCrypto stack (rand_core 0.6 under ed25519-dalek and p256)
+# still speaks getrandom 0.2 on wasm32; this dep exists only to switch
+# on its `js` backend. No onomancy code calls 0.2 — seed minting uses
+# the 0.4 entry above.
+getrandom_02 = { package = "getrandom", version = "0.2", default-features = false, features = [
+  "js",
+] }
 hickory-proto = { workspace = true, optional = true }
 js-sys = { workspace = true }
+onomancy_automerge = { workspace = true, optional = true }
+onomancy_chain = { workspace = true, optional = true }
 onomancy_core = { workspace = true }
-onomancy_dnssec = { workspace = true, optional = true, features = ["std"] }
-onomancy_hickory = { workspace = true, optional = true } # chain_assembly only — no sockets
+onomancy_dnssec = { workspace = true, features = ["std"] }
 onomancy_protocol = { workspace = true, optional = true, features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -41,14 +53,21 @@ web-sys = { workspace = true, optional = true, features = [
 wasm-bindgen-test = "=0.3.71"
 
 [features]
-default = ["doh"]
+default = ["doh", "names"]
+names = [
+  "dep:automerge",
+  "dep:ed25519-dalek",
+  "dep:getrandom",
+  "dep:onomancy_automerge",
+  "dep:onomancy_protocol",
+  "std",
+]
 doh = [
   "dep:hickory-proto",
-  "dep:onomancy_dnssec",
-  "dep:onomancy_hickory",
+  "dep:onomancy_chain",
   "dep:onomancy_protocol",
   "dep:web-sys",
-  "onomancy_core/idna",
+  "onomancy_dnssec/idna",
   "std",
 ]
 live = []

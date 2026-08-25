@@ -3,10 +3,8 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use onomancy_core::{
-    name::{dns::DnsName, doc::DocAnchor},
-    txt::generation_key::GenerationKey,
-};
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{dns_name::DnsName, txt::generation_key::GenerationKey};
 use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::bind::Bind as BindCeremony, signer::Signer};
 
@@ -91,7 +89,7 @@ pub(crate) enum BindError {
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// Artifact or runtime IO failed.
     #[error(transparent)]

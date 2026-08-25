@@ -4,10 +4,9 @@ use std::path::PathBuf;
 
 use clap::Args;
 use ed25519_dalek::VerifyingKey;
-use onomancy_core::{
-    cert::Certificate,
-    name::{dns::DnsName, doc::DocAnchor},
-    txt::generation_key::GenerationKey,
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{
+    certificate::Certificate, dns_name::DnsName, txt::generation_key::GenerationKey,
 };
 use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::rotate::Rotate as RotateCeremony, signer::Signer};
@@ -126,7 +125,7 @@ pub(crate) enum RotateError {
 
     /// The prior certificate did not decode.
     #[error("prior certificate: {0}")]
-    Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
+    Certificate(#[from] onomancy_dnssec::certificate::DecodeCertificateError),
 
     /// A generation-key argument was malformed.
     #[error(transparent)]
@@ -134,7 +133,7 @@ pub(crate) enum RotateError {
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// Artifact or runtime IO failed.
     #[error(transparent)]

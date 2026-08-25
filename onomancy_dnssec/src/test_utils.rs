@@ -12,20 +12,21 @@ use alloc::{vec, vec::Vec};
 pub mod fixtures;
 use ed25519_dalek::{Signer as _, SigningKey};
 
-use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
-    name::dns::DnsName,
+use crate::{
+    chain::{ChainLink, DnssecChain},
+    dns_name::DnsName,
 };
 
 use crate::{
-    anchor::TrustAnchor,
     crypto,
+    trust_anchor::TrustAnchor,
     wire::{
         algorithm::Algorithm,
+        digest_type::DigestType,
         dnskey::Dnskey,
-        ds::DigestType,
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{CLASS_IN, Record},
+        rr_type::RrType,
     },
 };
 
@@ -54,7 +55,7 @@ pub fn zone(name: &str, seed: u8) -> Zone {
     let mut rdata = Vec::new();
     rdata.extend_from_slice(&0x0101u16.to_be_bytes()); // ZONE | SEP
     rdata.push(3);
-    rdata.push(Algorithm::ED25519.0);
+    rdata.push(Algorithm::ED25519.code());
     rdata.extend_from_slice(signing.verifying_key().as_bytes());
 
     let name: Name = name.parse().expect("zone name literal parses");
@@ -104,8 +105,8 @@ impl Zone {
         let key = child.dnskey();
         let mut rdata = Vec::new();
         rdata.extend_from_slice(&key.key_tag().to_be_bytes());
-        rdata.push(Algorithm::ED25519.0);
-        rdata.push(DigestType::SHA256.0);
+        rdata.push(Algorithm::ED25519.code());
+        rdata.push(DigestType::SHA256.code());
         rdata.extend_from_slice(crypto::ds_digest(&child.name, &key).as_bytes());
 
         Record {
@@ -117,7 +118,7 @@ impl Zone {
         }
     }
 
-    /// Sign an `RRset` (RFC 4035 §5.3.2 assembly) into an RRSIG
+    /// Sign an `RRset` (RFC 4035 §5.3.2 construction) into an RRSIG
     /// record, with the owner's own label count.
     ///
     /// # Panics
@@ -143,8 +144,8 @@ impl Zone {
         let owner = &rrset[0].owner;
 
         let mut preamble = Vec::new();
-        preamble.extend_from_slice(&rrset[0].rtype.0.to_be_bytes());
-        preamble.push(Algorithm::ED25519.0);
+        preamble.extend_from_slice(&rrset[0].rtype.code().to_be_bytes());
+        preamble.push(Algorithm::ED25519.code());
         preamble.push(u8::try_from(labels).expect("small label counts"));
         preamble.extend_from_slice(&rrset[0].ttl.to_be_bytes());
         preamble.extend_from_slice(&window.1.to_be_bytes()); // expiration
@@ -177,7 +178,7 @@ impl Zone {
         let mut message = preamble.clone();
         for rdata in rdatas {
             message.extend_from_slice(&owner_wire);
-            message.extend_from_slice(&rrset[0].rtype.0.to_be_bytes());
+            message.extend_from_slice(&rrset[0].rtype.code().to_be_bytes());
             message.extend_from_slice(&CLASS_IN.to_be_bytes());
             message.extend_from_slice(&rrset[0].ttl.to_be_bytes());
             message.extend_from_slice(&u16::try_from(rdata.len()).expect("small").to_be_bytes());

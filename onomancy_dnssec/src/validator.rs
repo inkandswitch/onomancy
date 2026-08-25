@@ -19,7 +19,7 @@
 //! reports the window, not a verdict about the present), and the
 //! anchors are a constructor input.
 //!
-//! Negative proofs are out of the protocol at v0 (ADR-045): NSEC and
+//! Negative proofs are out of the protocol at v0: NSEC and
 //! NSEC3 links are skipped unverified (they can prove nothing to this
 //! walk), a chain without a provable TXT leaf is invalid, and
 //! wildcard-expanded answers are rejected outright — the no-closer-
@@ -27,26 +27,30 @@
 
 use alloc::{string::String, vec::Vec};
 
-use onomancy_core::{
-    cert::chain::DnssecChain,
-    freshness::ChainWindow,
-    name::dns::DnsName,
-    time::UnixSeconds,
-    txt::record::{Classified, TxtRecord},
-};
-use onomancy_protocol::verifier_state::seam::{ChainProof, ChainValidator, InvalidChain};
+use onomancy_core::time::UnixSeconds;
 
 use crate::{
-    anchor::TrustAnchor,
+    chain::DnssecChain,
+    chain_proof::{ChainProof, ChainValidator, InvalidChain},
+    dns_name::DnsName,
+    freshness::ValidityWindow,
+    txt::record::{Classified, TxtRecord},
+};
+
+use crate::{
     crypto::{self, VerifyError},
     link::{Link, ParseLinkError},
+    trust_anchor::TrustAnchor,
     wire::{
-        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, record::RrType, rrsig::Rrsig, txt::Txt,
+        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, rr_type::RrType, rrsig::Rrsig, txt::Txt,
     },
 };
 
 /// Maximum CNAME indirections followed on the `_onomancy` owner name.
-const MAX_CNAME_HOPS: usize = 8;
+///
+/// Public so the chain builder (`onomancy_chain`) can pin parity in a
+/// test — the two limits must never drift apart silently.
+pub const MAX_CNAME_HOPS: usize = 8;
 
 /// The chain-validation walk, rooted at a trust-anchor set.
 #[derive(Debug, Clone)]
@@ -64,7 +68,7 @@ impl Validator {
     /// A validator trusting the baked-in IANA root KSKs.
     #[must_use]
     pub fn iana() -> Self {
-        Self::new(crate::anchor::iana_root_anchors())
+        Self::new(crate::trust_anchor::iana_root_anchors())
     }
 
     /// Validate a chain for `hostname`'s `_onomancy` owner name, with
@@ -119,7 +123,7 @@ impl Validator {
                 }
 
                 (RrType::NSEC | RrType::NSEC3, None) => {
-                    // Denial links prove nothing at v0 (ADR-045):
+                    // Denial links prove nothing at v0:
                     // skipped unverified, never chain-poisoning.
                 }
 
@@ -287,7 +291,7 @@ impl WalkState {
 
         // A wildcard-expanded answer (RRSIG label count below the
         // owner's) would need a no-closer-match proof — a negative
-        // proof, which v0 does not evaluate (ADR-045). Reject: a
+        // proof, which v0 does not evaluate. Reject: a
         // legitimate wildcard at `_onomancy` is pathological anyway,
         // and accepting one unproven would let a stripped exact-match
         // answer go undetected.
@@ -329,7 +333,7 @@ impl WalkState {
                 .chain(self.keys.iter());
 
             for key in hinted {
-                match crypto::verify_rrsig(link, rrsig, key) {
+                match rrsig.verify(link, key) {
                     Ok(()) => {
                         self.intersect(rrsig)?;
                         return Ok(rrsig.clone());
@@ -357,8 +361,8 @@ impl WalkState {
     }
 
     /// The final ∩-window.
-    fn window(&self) -> Result<ChainWindow, WalkError> {
-        ChainWindow::new(self.window_inception, self.window_expiration)
+    fn window(&self) -> Result<ValidityWindow, WalkError> {
+        ValidityWindow::new(self.window_inception, self.window_expiration)
             .map_err(|_| WalkError::EmptyWindow)
     }
 }
@@ -413,7 +417,7 @@ pub enum WalkError {
     },
 
     /// The chain ended without a TXT leaf: it proves nothing
-    /// (negative proofs are out of the protocol at v0, ADR-045).
+    /// (negative proofs are out of the protocol at v0).
     #[error("no TXT leaf: the chain proves nothing")]
     MissingLeaf,
 
@@ -457,7 +461,7 @@ pub enum WalkError {
     Verify(#[from] VerifyError),
 
     /// A wildcard-expanded answer: its no-closer-match proof would be
-    /// a negative proof, which v0 does not evaluate (ADR-045).
+    /// a negative proof, which v0 does not evaluate.
     #[error("wildcard-expanded answers are rejected at v0")]
     WildcardExpansion,
 

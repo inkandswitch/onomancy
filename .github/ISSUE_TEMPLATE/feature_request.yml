@@ -1,0 +1,112 @@
+name: Feature request
+description: Propose new functionality or a behavior change in Onomancy.
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an idea. For protocol changes, remember
+        the normative rules live in `specs/` and the rationale in
+        `design/` — substantial proposals should engage with both.
+        Consider opening a
+        [Discussion](https://github.com/inkandswitch/onomancy/discussions)
+        first so the shape can be hashed out before filing.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I have searched existing issues and discussions for similar proposals.
+          required: true
+
+  - type: checkboxes
+    id: crates
+    attributes:
+      label: Affected crate(s)
+      description: Where would this live? Leave empty if unsure.
+      options:
+        - label: onomancer (the agent binary)
+        - label: onomancy_automerge
+        - label: onomancy_chain
+        - label: onomancy_core
+        - label: onomancy_dnssec
+        - label: onomancy_hickory
+        - label: onomancy_keyhive
+        - label: onomancy_protocol
+        - label: onomancy_publish
+        - label: onomancy_wasm
+        - label: New crate
+        - label: Specs (`specs/`)
+        - label: Nix / packaging
+        - label: CI / tooling
+        - label: Docs
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: |
+        The git SHA or crate version you're proposing this against.
+        Helps us know whether the feature already landed.
+      placeholder: "commit f220984 / onomancy_core 0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: |
+        What use case isn't currently served, or what friction are you
+        hitting? Lead with the "why" — concrete scenarios are more
+        useful than abstract requests.
+      placeholder: |
+        Gossiping a certificate over Bluetooth requires an
+        out-of-band introduction format, but there's no QR-sized
+        encoding for {document URL, display name}.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior or workaround
+      description: |
+        Concretely: what happens today, or what workaround are you
+        using? Include commands, error messages, or steps that let
+        someone evaluating the proposal see the same friction. For
+        features that don't exist yet, describe what users do instead
+        and where that breaks down.
+      placeholder: |
+        Today we copy the full `.onc` file over AirDrop and re-verify
+        on the receiving device. That works, but there's no way to
+        carry a suggested petname alongside it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: |
+        A sketch of how it might work. Code snippets, API shapes,
+        wire-format diagrams, or spec-rule changes welcome. It's fine
+        to leave this open-ended if you'd rather discuss alternatives.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Other approaches you've thought about and rejected, with reasons.
+        Helpful even (especially) when you're not sure which is best.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: |
+        Links to prior art, related issues, design docs, or anything
+        else that informs the proposal.

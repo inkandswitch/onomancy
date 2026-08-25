@@ -9,19 +9,14 @@
 
 use automerge::{Automerge, ObjType, ReadDoc, transaction::Transactable};
 use onomancy_core::{
+    anchor::doc::{self, DocAnchor},
     collections::Map,
-    name::{
-        dns::DnsName,
-        doc::{self, DocAnchor},
-        segment::Segment,
-    },
+    name::segment::Segment,
 };
-use onomancy_protocol::{resolve::namestore::Namestore, verifier_state::decisions::Decisions};
+use onomancy_dnssec::dns_name::DnsName;
+use onomancy_protocol::{resolve::namestore::Namestore, verifier::state::decisions::Decisions};
 
-use crate::{
-    RESERVED_KEY,
-    namestore::{DocumentNamestore, path_key},
-};
+use crate::namestore::{DocumentNamestore, RESERVED_KEY, path_key};
 
 /// Write access to the petname edges of the user's own root document.
 ///
@@ -164,7 +159,7 @@ pub enum WriteError {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use onomancy_protocol::verifier_state::decisions::Claim;
+    use onomancy_protocol::verifier::state::decisions::Claim;
     use testresult::TestResult;
 
     fn anchor(seed: u8) -> DocAnchor {

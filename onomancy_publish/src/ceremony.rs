@@ -14,20 +14,20 @@ pub mod rotate;
 
 use alloc::boxed::Box;
 use onomancy_core::{
-    cert::Certificate,
-    collections::Map,
-    freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
-    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
-    wire::OversizeUnit,
+    anchor::doc::DocAnchor, collections::Map, time::UnixSeconds, wire::OversizeUnit,
 };
-use onomancy_protocol::verifier_state::{
+use onomancy_dnssec::{
+    certificate::Certificate,
+    chain_proof::ChainProof,
+    dns_name::DnsName,
+    freshness::ValidityWindow,
+    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
+};
+use onomancy_protocol::verifier::state::{
     VerifierState,
     decisions::Decisions,
-    memory::{MemoryAuthority, MemoryValidator},
-    seam::ChainProof,
-    store::{Item, Store},
+    memory::{authority::MemoryAuthority, validator::MemoryValidator},
+    store::{Store, item::Item},
 };
 
 /// The simulated chain window around `now`: comfortably fresh, zero
@@ -55,7 +55,7 @@ pub(crate) fn simulate(
     now: UnixSeconds,
     intent: &Intent,
 ) -> Result<(), CeremonyError> {
-    let window = ChainWindow::new(
+    let window = ValidityWindow::new(
         UnixSeconds::from(u64::from(now).saturating_sub(SIMULATED_WINDOW_SLACK)),
         UnixSeconds::from(u64::from(now).saturating_add(SIMULATED_WINDOW_SLACK)),
     )
@@ -82,7 +82,7 @@ pub(crate) fn simulate(
         &MemoryAuthority::default(),
     );
 
-    let Some(host) = state.hosts.get(hostname) else {
+    let Some(host) = state.bindings.get(hostname) else {
         return Err(CeremonyError::DerivesNothing);
     };
 

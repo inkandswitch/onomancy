@@ -1,6 +1,6 @@
 # onomancy_hickory
 
-The host DNSSEC chain courier: `ChainProvider` over real DNS, built on [hickory-proto]'s message types with a deliberately minimal stub transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`).
+The host DNSSEC chain courier: `ChainProvider` over real DNS — a deliberately minimal stub transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`, built on [hickory-proto]'s message types) driving the sans-IO chain builder (`onomancy_chain`).
 
 ```text
 HickoryProvider::chain(hostname)
@@ -18,11 +18,11 @@ Nothing this crate returns is trusted. Query IDs are weak, the transport is spoo
 
 ## Cross-zone aliases
 
-A CNAME hop out of the descended subtree triggers a fresh root-down cut descent for the target's branch, mirroring the validator's re-root rule: the chain reads *root keys → source cuts → CNAME → target cuts → TXT*, every link verified from the same trust anchors.
+A CNAME hop out of the descended subtree triggers a fresh root-down cut descent for the target's branch, mirroring the validator's re-root rule: the chain reads *root keys → source cuts → CNAME → target cuts → TXT*, every link verified from the same trust anchors. (The walk itself lives in `onomancy_chain`; this crate only answers its questions.)
 
 ## Upstreams
 
-`HickoryProvider::system()` discovers resolvers from `/etc/resolv.conf` (falling back to a public resolver when none parse); explicit constructors take one server, `.or(addr)` appends fallbacks. Assembly tries upstreams in order and returns the last failure only when all fail.
+`HickoryProvider::system()` discovers resolvers from `/etc/resolv.conf` (falling back to a public resolver when none parse); explicit constructors take one server, `.or(addr)` appends fallbacks. Fetching tries upstreams in order and returns the last failure only when all fail.
 
 ## Known limitations
 

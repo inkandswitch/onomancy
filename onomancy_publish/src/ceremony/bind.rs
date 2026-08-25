@@ -3,18 +3,19 @@
 use alloc::{format, vec};
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
-    name::{
-        dns::DnsName,
-        doc::{DocAnchor, Head},
-    },
-    statement::rotation::RotationStatement,
+    anchor::doc::{DocAnchor, Head},
     time::UnixSeconds,
+};
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
+    dns_name::DnsName,
+    statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -22,7 +23,7 @@ use alloc::boxed::Box;
 
 /// Bind `hostname` to `document`, attesting `generation`.
 ///
-/// Assemble the intent keylessly; the signer surfaces only in
+/// Build the intent keylessly; the signer surfaces only in
 /// [`Bind::plan`].
 #[derive(Debug, Clone)]
 pub struct Bind {
@@ -46,7 +47,7 @@ pub struct Bind {
     /// `generation` lies on `document`'s path (D10). Opaque here —
     /// minted by `onomancy_keyhive::mint`, verified by the agent's
     /// authority.
-    pub carriage: alloc::vec::Vec<onomancy_core::delegation::DelegationBytes>,
+    pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 impl Bind {

@@ -1,11 +1,6 @@
 //! The TXT RDATA view: character strings.
 //!
-//! ```text
-//! ┌─────┬───────────┬─────┬───────────┬─ …
-//! │ len │  string   │ len │  string   │
-//! │ u8  │ (0–255 B) │ u8  │ (0–255 B) │
-//! └─────┴───────────┴─────┴───────────┴─ …
-//! ```
+//! The layout is DNS's, not ours: RFC 1035 §3.3.14.
 //!
 //! Multiple strings within one TXT RDATA MUST be concatenated before
 //! parsing the Onomancy grammar — the multi-string form exists only

@@ -1,15 +1,18 @@
-//! `onomancer record`: the DNS-publishable TXT record, and optionally
-//! a signed ONC certificate.
+//! `onomancer record`: the DNS-publishable TXT record,
+//! and optionally a signed ONC certificate.
 
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
-    name::{dns::DnsName, doc::DocAnchor},
-    time::UnixSeconds,
-    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
+    anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds,
     wire::OversizeUnit,
+};
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
+    dns_name::DnsName,
+    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 use onomancy_hickory::provider::FetchChainError;
 
@@ -121,7 +124,7 @@ impl Record {
                 predecessor: None,
                 // Empty until Keyhive delegation lands: verification
                 // of the carriage is the AuthorityVerifier seam's job.
-                delegation_chain: vec![],
+                delegation_chain: DelegationChain::default(),
                 lineage: vec![],
                 chain,
             },
@@ -140,19 +143,19 @@ fn fetch_chain(
     hostname: &DnsName,
 ) -> Result<DnssecChain, RecordError> {
     let provider = crate::provider(resolver);
-    Ok(crate::block_on(provider.assemble(hostname))??)
+    Ok(crate::block_on(provider.fetch_chain(hostname))??)
 }
 
 /// Record generation failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RecordError {
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// File or runtime IO failed.
     #[error(transparent)]

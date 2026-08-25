@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
 use clap::Args;
-use onomancy_core::name::dns::DnsName;
+use onomancy_dnssec::dns_name::DnsName;
 
 use crate::{
     resolve::{ResolveError, stateful_pass},

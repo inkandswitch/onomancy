@@ -8,16 +8,17 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
-    name::{dns::DnsName, doc::DocAnchor},
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds};
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
+    dns_name::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
-    time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -49,7 +50,7 @@ pub struct Migrate {
     /// The successor document's authority carriage: D10 path proof
     /// for the new `g=`, attached to the successor certificate.
     /// Opaque here — minted by `onomancy_keyhive::mint`.
-    pub carriage: Vec<onomancy_core::delegation::DelegationBytes>,
+    pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 impl Migrate {
@@ -74,7 +75,7 @@ impl Migrate {
             &self.successor,
             &self.hostname,
             predecessor_authority.key(),
-            vec![],
+            DelegationChain::default(),
         )?;
 
         let serial = Serial::from(now_ms);

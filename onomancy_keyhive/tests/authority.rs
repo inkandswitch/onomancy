@@ -3,21 +3,22 @@
 //! signers against it — the checks that were vacuous under the
 //! permissive memory fake, exercised for real.
 
-use ed25519_dalek::VerifyingKey;
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use future_form::Sendable;
 use futures::executor::block_on;
 use keyhive_core::{
     access::Access,
-    event::{static_event::StaticEvent, Event},
+    event::{Event, static_event::StaticEvent},
     keyhive::Keyhive,
     listener::no_listener::NoListener,
     principal::{identifier::Identifier, individual::op::KeyOp, membered::Membered},
     store::ciphertext::memory::MemoryCiphertextStore,
 };
 use keyhive_crypto::signer::memory::MemorySigner;
-use onomancy_core::{name::doc::DocAnchor, txt::generation_key::GenerationKey};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
+use onomancy_dnssec::txt::generation_key::GenerationKey;
 use onomancy_keyhive::{authority::KeyhiveAuthority, carriage::Carriage};
-use onomancy_protocol::verifier_state::seam::AuthorityVerifier;
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 use rand::rngs::OsRng;
 use testresult::TestResult;
 
@@ -47,7 +48,7 @@ struct Fixture {
     anchor: DocAnchor,
     admin_key: VerifyingKey,
     reader_key: VerifyingKey,
-    carriage: Vec<onomancy_core::delegation::DelegationBytes>,
+    carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 fn prekey_event(op: &KeyOp) -> StaticEvent<[u8; 32]> {
@@ -171,7 +172,11 @@ fn the_root_key_speaks_for_itself() -> TestResult {
     let f = block_on(fixture())?;
 
     assert!(
-        KeyhiveAuthority.authorizes(&f.anchor, f.anchor.verifying_key(), &[]),
+        KeyhiveAuthority.authorizes(
+            &f.anchor,
+            f.anchor.verifying_key(),
+            &DelegationChain::default()
+        ),
         "identity rule: the document root key needs no chain"
     );
     Ok(())
@@ -181,10 +186,11 @@ fn the_root_key_speaks_for_itself() -> TestResult {
 fn tampered_carriages_prove_nothing() -> TestResult {
     let f = block_on(fixture())?;
 
-    let mut tampered = f.carriage.clone();
-    let mut bytes = tampered.pop().ok_or("nonempty")?.as_bytes().to_vec();
+    let mut entries = f.carriage.entries().to_vec();
+    let mut bytes = entries.pop().ok_or("nonempty")?.as_bytes().to_vec();
     *bytes.last_mut().ok_or("nonempty entry")? ^= 0xFF;
-    tampered.push(bytes.into());
+    entries.push(bytes.into());
+    let tampered = DelegationChain::from(entries);
 
     assert!(
         !KeyhiveAuthority.authorizes(&f.anchor, &f.admin_key, &tampered),
@@ -210,8 +216,33 @@ fn delegated_keys_are_on_path_at_any_access() -> TestResult {
         "an undelegated key is off the path"
     );
     assert!(
-        !KeyhiveAuthority.on_path(&[], &unknown_generation),
+        !KeyhiveAuthority.on_path(&DelegationChain::default(), &unknown_generation),
         "an empty carriage puts nothing on the path"
+    );
+    Ok(())
+}
+
+#[test]
+fn document_carriages_vouch_their_anchor_and_nothing_else() -> TestResult {
+    use onomancy_keyhive::mint::document_carriage;
+
+    let doc_key = SigningKey::from_bytes(&[7; 32]);
+    let anchor = DocAnchor::from(doc_key.verifying_key());
+    let other = DocAnchor::from(SigningKey::from_bytes(&[8; 32]).verifying_key());
+
+    let carriage = document_carriage(&doc_key)?;
+
+    assert!(
+        KeyhiveAuthority.vouches_document(&anchor, &carriage),
+        "a minted carriage roots at its own document"
+    );
+    assert!(
+        !KeyhiveAuthority.vouches_document(&other, &carriage),
+        "and vouches no other anchor"
+    );
+    assert!(
+        !KeyhiveAuthority.vouches_document(&anchor, &DelegationChain::default()),
+        "an empty carriage vouches nothing"
     );
     Ok(())
 }

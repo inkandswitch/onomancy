@@ -8,17 +8,17 @@
 //! permissive memory fake.
 //!
 //! ```text
-//!  Certificate / Statement            KeyhiveAuthority
-//!  ┌─────────────────────┐   replay   ┌──────────────────────┐
+//!  Certificate / Statement               KeyhiveAuthority
+//!  ┌─────────────────────┐   replay  ┌───────────────────────┐
 //!  │ carriage:           │──────────▶│ throwaway Keyhive     │
-//!  │  [kh0‖StaticEvent]… │            │ instance: verify ops, │
-//!  │ (UNSIGNED attached  │            │ materialize groups,   │
-//!  │  region — churn =   │            │ query membership      │
+//!  │  [kh0‖StaticEvent]… │           │ instance: verify ops, │
+//!  │ (UNSIGNED attached  │           │ materialize groups,   │
+//!  │  region — churn =   │           │ query membership      │
 //!  │  re-attach)         │◀──────────│ → authorized? on path?│
-//!  └─────────────────────┘   verdict  └──────────────────────┘
+//!  └─────────────────────┘   verdict └───────────────────────┘
 //! ```
 //!
-//! Keyhive 0.5 is pre-alpha (ADR-056): its event encoding may churn.
+//! Keyhive 0.5 is pre-alpha: its event encoding may churn.
 //! That is absorbed by design — carriage bytes ride the certificate's
 //! unsigned attached region, so a re-encode means re-attaching
 //! evidence, never re-signing the unit. The [`carriage`] envelope

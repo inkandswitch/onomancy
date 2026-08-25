@@ -7,16 +7,16 @@
 
 use std::{fs, path::PathBuf};
 
-use onomancy_core::{cert::chain::DnssecChain, txt::serial::Serial};
-use onomancy_protocol::verifier_state::seam::ChainProof;
-use testresult::TestResult;
-
 use onomancy_dnssec::{
+    chain::DnssecChain,
+    chain_proof::ChainProof,
     test_utils::fixtures::{
         Expectation, FIXTURE_SERIAL, all_fixtures, fixture_anchor, fixture_hostname,
     },
+    txt::serial::Serial,
     validator::Validator,
 };
+use testresult::TestResult;
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

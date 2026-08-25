@@ -15,13 +15,14 @@
 use automerge::{Automerge, ObjId, ObjType, Prop, ReadDoc, ScalarValue, Value};
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::Set,
-    content_hash::ContentHash,
-    name::{dns::DnsName, doc::DocAnchor},
+    digest::{Blake3, Digest},
 };
-use onomancy_protocol::verifier_state::decisions::{Acceptance, Claim, Decisions};
+use onomancy_dnssec::dns_name::DnsName;
+use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions};
 
-use crate::RESERVED_KEY;
+use crate::namestore::RESERVED_KEY;
 
 /// The decisions schema version this reader understands.
 pub const SCHEMA_VERSION: u64 = 0;
@@ -136,7 +137,10 @@ impl<'a> DecisionsView<'a> {
         acceptances
     }
 
-    fn resets(self, root: &ObjId) -> onomancy_core::collections::Map<DnsName, Set<ContentHash>> {
+    fn resets(
+        self,
+        root: &ObjId,
+    ) -> onomancy_core::collections::Map<DnsName, Set<Digest<Blake3, [u8]>>> {
         let mut resets = onomancy_core::collections::Map::default();
         let Some(map) = self.object(root, "resets", ObjType::Map) else {
             return resets;
@@ -158,8 +162,9 @@ impl<'a> DecisionsView<'a> {
         resets
     }
 
-    // ————— shape readers: `None` is "contributes nothing" —————
-
+    /// Shape reader: `None` means "contributes nothing" — the
+    /// derivation never guesses. Every reader below shares this
+    /// contract.
     fn object<O: AsRef<ObjId>, P: Into<Prop>>(
         self,
         obj: O,
@@ -189,7 +194,7 @@ impl<'a> DecisionsView<'a> {
 
     fn document<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<DocAnchor> {
         let bytes = self.bytes32(obj, prop)?;
-        // Point validity at decode (ADR-043 §9) applies to decisions
+        // Point validity at decode applies to decisions
         // documents too: a non-key "document" contributes nothing.
         let key = VerifyingKey::from_bytes(&bytes).ok()?;
         Some(DocAnchor::from(key))
@@ -208,12 +213,12 @@ impl<'a> DecisionsView<'a> {
 
     /// A list of 32-byte content hashes; a single malformed element
     /// voids the whole entry (the derivation never guesses).
-    fn hash_list<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<Set<ContentHash>> {
+    fn hash_list<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<Set<Digest<Blake3, [u8]>>> {
         let list = self.object(obj, prop, ObjType::List)?;
         let mut hashes = Set::default();
 
         for index in 0..self.doc.length(&list) {
-            hashes.insert(ContentHash::from(self.bytes32(&list, index)?));
+            hashes.insert(Digest::from_bytes(self.bytes32(&list, index)?));
         }
 
         Some(hashes)
@@ -338,13 +343,13 @@ mod tests {
             .expect("acceptance entry");
         assert_eq!(accepted.len(), 1);
         assert_eq!(accepted[0].document, anchor(1));
-        assert!(accepted[0].cited.contains(&ContentHash::from([7; 32])));
+        assert!(accepted[0].cited.contains(&Digest::from_bytes([7; 32])));
 
         let excluded = decisions
             .resets
             .get(&hostname("mallory.example"))
             .expect("reset entry");
-        assert!(excluded.contains(&ContentHash::from([9; 32])));
+        assert!(excluded.contains(&Digest::from_bytes([9; 32])));
         Ok(())
     }
 

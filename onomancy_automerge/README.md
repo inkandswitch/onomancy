@@ -23,7 +23,10 @@ The verifiable protocol records — certificates, DNSSEC chains, TXT records, st
 
 ## Deliberate non-goals
 
-- **No Keyhive.** Authority verification (`AuthorityVerifier`) is `onomancy_keyhive`'s single job — resolver-only consumers skip the CGKA crypto entirely (ADR-043 §10).
+- **No Keyhive.** Authority verification (`AuthorityVerifier`) is `onomancy_keyhive`'s single job — resolver-only consumers skip the CGKA crypto entirely.
 - **No IO.** Every reader answers from documents already held; `Replicas::replica` returning `None` means "not replicated here", which the walk reports as `UnsyncedTarget` — the designed outcome under partition. Replication and persistence belong to the substrate and the agent.
 
 [Automerge]: https://automerge.org
+
+> [!WARNING]
+> Held documents are GRADED, not fully verified: `HeldDocuments` vouches each replica at an explicit `Authority` grade, and no grade producible today proves the document's content was authored by the anchor's delegates. `trusted-substrate` checks nothing; `carriage-verified` proves only that a delegation graph roots at the anchor. Full verification waits on upstream signed operations / verified ingest — the seam exists so that upgrade is an impl swap.

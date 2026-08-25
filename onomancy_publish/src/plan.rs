@@ -1,4 +1,4 @@
-//! The Plan: a ceremony's output — neutral, inspectable, applyable.
+//! The Plan: a ceremony's output — neutral, inspectable, ready to apply.
 //!
 //! A Plan is NOT an API call: DNS-hosting interfaces are wildly
 //! heterogeneous (dashboards, RFC 2136, provider APIs, zone files),
@@ -6,8 +6,9 @@
 
 use alloc::{string::String, vec::Vec};
 
-use onomancy_core::{
-    name::{dns::DnsName, doc::DocAnchor},
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 

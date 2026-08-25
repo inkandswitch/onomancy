@@ -50,7 +50,7 @@ Segments follow the shared [Onomancy Name Grammar]; this section defines the `dn
 - Parsers MUST reject IP literals (v4 and v6) under `@`.
 - Names MUST be normalized at parse time: lowercase, trailing dot stripped, [IDNA] U-labels converted to A-labels. The parser, stores, comparisons, and chain validation operate on **A-labels only**; U-labels exist purely at the display layer.
 - DNS length limits apply: 253 octets total, 63 per label.
-- `#` is reserved in segments (heads delimiter); DNS anchors do not carry heads.
+- `#` is reserved in segments, as in every family; names carry no version pins.
 
 # TXT Binding Record
 [TXT Binding Record]: #txt-binding-record
@@ -98,7 +98,7 @@ Ratchet rules:
 seen n=3  →  stale record n=2 arrives          →  reject (replay)
           →  stale record n=4 arrives          →  accept, ratchet to 4
           →  fresh record n=1 arrives          →  accept, ratchet to 1,
-                                                  surface ratchet reset
+                                                  surface serial regression
           →  record n ≈ now + 20 min arrives   →  defer, retry later
 ```
 
@@ -174,15 +174,20 @@ A fork suspends D12 **fork-locally, never document-wide**:
 
 Given two certificates (or cached bindings) for the same name, a verifier determines which is current by a precedence ladder, each rung consulted only when stronger rungs are silent. First, **pool the evidence**: both artifacts' attached regions are self-authenticating, so their lineages and chains MUST be evaluated as a union — one artifact's lineage may order the other.
 
-| Rung | Comparator | Vouched by | Rule |
-|------|-----------|------------|------|
-| 0 | Chain freshness | DNSSEC windows | A fresh ✓ artifact beats any stale ⚠ one outright |
-| 1 | Succession proofs / lineage descent | The document's keys | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
-| 2 | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Within a freshness class, every record has one sort key (`window_end` = the end of the chain's ∩-window, [Graded Freshness]): later window end wins; equal ends → higher serial; equal serials → later `issued_at` — but `issued_at` breaks ties only within a single document: cross-document equality at `(window_end, serial)` is zone equivocation (contested), never resolved by a signer-claimed field. Cross-document capable, durable, static — and a **total order**: full key equality between different documents is **zone equivocation** (contested, surfaced, never auto-resolved) |
+| Rung | Comparator                                                       | Vouched by                                     | Rule                                                                                                                                                                                                                 |
+|------|------------------------------------------------------------------|------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0    | Chain freshness                                                  | DNSSEC windows                                 | A fresh ✓ artifact beats any stale ⚠ one outright                                                                                                                                                                    |
+| 1    | Succession proofs / lineage descent                              | The document's keys                            | Across documents: valid successor statements (incl. bridged chains) establish continuity and order. Same `root_doc`: the generation with signed descent from the other is newer. Equivocation → surface, do not pick |
+| 2    | Zone-state key: `(window_end, serial, issued_at)`, lexicographic | DNSSEC windows, then the zone, then the signer | Later window end wins; equal ends → higher serial; equal serials → later `issued_at` (within one document only; see below)                                                                                           |
 
-The maximal record is defined as the **unique undominated candidate**: the one no other candidate beats on the ladder. Implementations MUST select it by dominance testing (or an equivalent order-insensitive computation), never by a fold whose result can depend on enumeration order: rungs 0–1 together with rung 2 are not guaranteed transitive (a proof can order a pair the keys order oppositely), so pairwise folding is not implementation-independent. Zero or several undominated candidates — dominance cycles, equivocation, forks — derive as **contested**.
+The maximal record is the **unique undominated candidate**: the one no other candidate beats on the ladder. Implementations MUST select it by dominance testing (or an equivalent order-insensitive computation), never by a fold whose result can depend on enumeration order. The reason folding is unsafe: the full ladder is not guaranteed transitive — a rung-1 proof can order a pair one way while the rung-2 keys order it the other — so a pairwise fold's answer can depend on which pair it happened to compare first. Zero or several undominated candidates — dominance cycles, equivocation, forks — derive as **contested**.
 
-Rung 2 is one lexicographic key rather than pairwise comparators, deliberately: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset — a single key per record makes the order total and "the maximal record" well-defined. `window_end` leads because it is DNSSEC-vouched where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window). The key orders **zone states** across documents for the same hostname — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
+Rung 2's key details, in prose:
+
+- `window_end` is the end of the chain's ∩-window ([Graded Freshness]). It leads the key because it is DNSSEC-vouched, where serials are publisher-chosen; serials break exact window ties (e.g. two records published under one chain window).
+- `issued_at` breaks ties only **within a single document**. Cross-document equality at `(window_end, serial)` is zone equivocation — contested, surfaced, never resolved by a signer-claimed field.
+- One lexicographic key per record, rather than pairwise comparators, is deliberate: mixed pairwise rules (windows for disjoint pairs, serials for overlapping ones) are non-transitive and can cycle on honest inputs after a serial reset. A single key makes the order total and "the maximal record" well-defined.
+- The key orders **zone states** — which record is the zone's later word — but confers no _continuity_ (only a successor proof does that) and no _movement_: displacing a verifier's incumbent accepted binding additionally requires fresh evidence, a proof, or a user acceptance ([Binding Cache spec] B1 — a stale later-window record proves the zone moved during a past window, not that its word is current). An unproven cross-document winner is still a surfaced binding change, graded by the displaced binding's tenure ([Succession]).
 
 Two verifiers holding the same evidence MUST reach the same verdict — the ladder is deterministic, including any bridged succession verdicts built from the pooled evidence ([Bridging History Gaps]), and its determinism is a conformance target (see [design/verification.md](../../design/verification.md)).
 
@@ -198,11 +203,11 @@ The certificate is a self-authenticating record: integrity does not depend on th
 
 Retrieval paths:
 
-| Path | Requirement | Notes |
-|------|-------------|-------|
-| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT |
-| Any onomancy server's [Lookup Endpoint] | OPTIONAL | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
-| Gossip / cache | OPTIONAL | Certificates travel peer-to-peer and verify identically (see [Binding Cache]) |
+| Path                                                          | Requirement                | Notes                                                                                              |
+|---------------------------------------------------------------|----------------------------|----------------------------------------------------------------------------------------------------|
+| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT                         |
+| Any onomancy server's [Lookup Endpoint]                       | OPTIONAL                   | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
+| Gossip / cache                                                | OPTIONAL                   | Certificates travel peer-to-peer and verify identically (see [Binding Cache])                      |
 
 Publishers MUST make the certificate retrievable through at least one path; verifiers MUST accept certificate bytes from any source, subject only to [Verification]. A name with no designated endpoint is still fully conformant — it just is not self-bootstrapping for cold verifiers with no peers.
 
@@ -353,8 +358,8 @@ Step 6 is what defeats key borrowing: an attacker's zone can point its TXT recor
 
 - Verifiers MUST validate locally against a baked-in IANA root KSK (exactly one at v0; a trust-anchor set with [RFC 5011]-style rollover is future work — root rollovers overlap, so clients shipped during an overlap SHOULD carry both keys). Verifiers MUST NOT delegate validation to a resolver's AD bit.
 - Verifiers MUST support the signature algorithms in real-world chains (RSA/SHA-256 for the root; ECDSA P-256 at zones, at minimum). A chain whose validation requires an algorithm the verifier does not implement MUST yield invalid ✗ — never stale ⚠, and never an "insecure" verdict: [RFC 4035]'s treat-unknown-as-insecure resolver semantics would be an algorithm-downgrade path here, because an Onomancy binding is only ever KSK-rooted and "insecure" has no meaning for it.
-- Verifiers MUST reject wildcard-synthesized answers ([RFC 4035] §5.3.4: an RRSIG label count below the owner name's). The no-closer-match proof a synthesized answer would require is a negative proof, and negative proofs are outside the protocol at v0 (ADR-045); accepting one unproven would let a stripped exact-match record go undetected. Publishers MUST NOT rely on wildcard TXT records for bindings.
-- Verifiers MUST NOT evaluate NSEC/NSEC3 denial of existence: negative proofs are outside the protocol at v0 (ADR-045). Denial links encountered in a chain are skipped unverified — they prove nothing and MUST NOT invalidate an otherwise-valid chain. Consequences accepted: a missing TXT record is always "absence not proven" (D3 — possible downgrade, never "no binding"), and deliberate unbinding does not propagate; the future owner-signed unbind statement is the planned mechanism, consistent with the doctrine that lifecycle events are statement-vouched, not zone-shape-vouched.
+- Verifiers MUST reject wildcard-synthesized answers ([RFC 4035] §5.3.4: an RRSIG label count below the owner name's). The no-closer-match proof a synthesized answer would require is a negative proof, and negative proofs are outside the protocol at v0; accepting one unproven would let a stripped exact-match record go undetected. Publishers MUST NOT rely on wildcard TXT records for bindings.
+- Verifiers MUST NOT evaluate NSEC/NSEC3 denial of existence: negative proofs are outside the protocol at v0. Denial links encountered in a chain are skipped unverified — they prove nothing and MUST NOT invalidate an otherwise-valid chain. Consequences accepted: a missing TXT record is always "absence not proven" (D3 — possible downgrade, never "no binding"), and deliberate unbinding does not propagate; the future owner-signed unbind statement is the planned mechanism, consistent with the doctrine that lifecycle events are statement-vouched, not zone-shape-vouched.
 - The fetching side (the `ChainProvider` seam) is an **untrusted byte fetcher**: hosts via [hickory], browsers via DNS-over-HTTPS. A malicious provider MUST at worst be able to cause denial of service, never a false verified verdict — all verification runs in core.
 - Revocation is layered: a compromised signer is revoked inside the document's delegation graph, and the [Generation Key] rotation makes that verifier-visible without any list — the attested chokepoint no longer lies on the signer's delegation path. `p=` never changes for key compromise; `g=` does.
 - Revocation knowledge is local-first: it propagates via document sync and gossip, not via any oracle. A revoked-but-not-yet-known signer's certificates continue to verify until the revocation reaches the verifier — an accepted residual, symmetric with graded chain freshness. Online verifiers SHOULD opportunistically sync the binding document's delegation graph (or re-fetch the certificate) when acting on a stale ⚠ verdict.
@@ -413,7 +418,7 @@ Resolution of DNS-anchored names is always **live**. The certificate's `heads` f
 | Tag | Condition | Requirement |
 |-----|-----------|-------------|
 | D1 | Dotless `@` name, IP literal, or malformed DNS name | MUST be a parse error; no fallback |
-| D2 | (Retired, ADR-045: proven absence removed with negative proofs; tag reserved, not renumbered) | — |
+| D2 | (Reserved: proven absence is outside v0; tag not reused) | — |
 | D3 | TXT record absent | MUST treat as possible downgrade; MUST NOT conclude "no binding" (absence is never provable at v0) |
 | D4 | Same-document record whose zone-state key does not exceed the accepted record's, chain stale ⚠ | Replay: dominated — contributes to no derivation output (bytes remain storable) |
 | D4a | Fresh ✓ record with serial lower than the effective serial | Wins rung 0 (deterministic, not discretionary); MUST surface as a ratchet-reset event — additionally a surfaced binding change if the document differs |

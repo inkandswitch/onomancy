@@ -15,11 +15,14 @@
 
 use alloc::vec::Vec;
 
-use onomancy_core::{cert::chain::ChainLink, wire::Reader};
+use onomancy_core::wire::Reader;
+
+use crate::chain::ChainLink;
 
 use crate::wire::{
     name::Name,
-    record::{CLASS_IN, ParseRecordError, Record, RrType},
+    record::{CLASS_IN, ParseRecordError, Record},
+    rr_type::RrType,
     rrsig::{ParseRrsigError, Rrsig},
 };
 
@@ -194,8 +197,8 @@ mod tests {
 
     fn rrsig_record(covered: RrType, signer_owner: &Name) -> Record {
         let mut rdata = Vec::new();
-        rdata.extend_from_slice(&covered.0.to_be_bytes());
-        rdata.push(Algorithm::ED25519.0);
+        rdata.extend_from_slice(&covered.code().to_be_bytes());
+        rdata.push(Algorithm::ED25519.code());
         rdata.push(3);
         rdata.extend_from_slice(&900u32.to_be_bytes());
         rdata.extend_from_slice(&1_755_600_000u32.to_be_bytes());

@@ -1,0 +1,61 @@
+{
+  "name": "@onomancy/wasm",
+  "version": "0.1.0",
+  "description": "Wasm/JavaScript bindings for Onomancer (browser and Node.js)",
+  "license": "(MIT OR Apache-2.0)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inkandswitch/onomancy.git",
+    "directory": "onomancy_wasm"
+  },
+  "keywords": [
+    "dns",
+    "dnssec",
+    "local-first",
+    "naming",
+    "wasm"
+  ],
+  "type": "module",
+  "main": "./dist/cjs/node.cjs",
+  "module": "./dist/esm/bundler.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": [
+    "./dist/esm/bundler.js",
+    "./dist/esm/node.js",
+    "./dist/esm/web.js",
+    "./dist/esm/workerd.js"
+  ],
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "workerd": {
+        "import": "./dist/esm/workerd.js",
+        "require": "./dist/cjs/web.cjs"
+      },
+      "node": {
+        "import": "./dist/esm/node.js",
+        "require": "./dist/cjs/node.cjs"
+      },
+      "browser": {
+        "import": "./dist/esm/bundler.js",
+        "require": "./dist/cjs/web.cjs"
+      },
+      "import": "./dist/esm/web.js",
+      "require": "./dist/cjs/web.cjs"
+    },
+    "./slim": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/esm/slim.js",
+      "require": "./dist/cjs/slim.cjs"
+    },
+    "./wasm": "./dist/wasm.wasm",
+    "./wasm-base64": {
+      "import": "./dist/esm/wasm-base64.js",
+      "require": "./dist/cjs/wasm-base64.cjs"
+    },
+    "./iife": "./dist/iife/index.js"
+  }
+}

@@ -1,0 +1,170 @@
+name: Bug report
+description: Report something that's misbehaving in Onomancy.
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more concrete
+        information you can give us, the faster we can investigate.
+
+        Before filing, please [search existing
+        issues](https://github.com/inkandswitch/onomancy/issues?q=is%3Aissue)
+        to avoid duplicates.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go to [Security Advisories](https://github.com/inkandswitch/onomancy/security/advisories/new)).
+          required: true
+
+  - type: checkboxes
+    id: crates
+    attributes:
+      label: Affected crate(s)
+      description: Check every crate you believe is involved. Leave empty if unsure.
+      options:
+        - label: onomancer (the agent binary)
+        - label: onomancy_automerge
+        - label: onomancy_chain
+        - label: onomancy_core
+        - label: onomancy_dnssec
+        - label: onomancy_hickory
+        - label: onomancy_keyhive
+        - label: onomancy_protocol
+        - label: onomancy_publish
+        - label: onomancy_wasm
+        - label: Specs (`specs/`)
+        - label: Nix / packaging
+        - label: CI / tooling
+        - label: Docs
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: |
+        The git SHA or crate version you observed the issue on. For
+        Wasm builds, include how the package was built.
+      placeholder: "commit f220984 / onomancy_core 0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: |
+        Host OS where you saw the bug. For Wasm bugs, this is the OS
+        the browser / Node.js process is running on.
+      multiple: true
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - iOS
+        - Android
+        - NixOS
+        - Other / N/A (please describe in "Environment" below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: System architecture
+      description: |
+        Hardware or Wasm architecture. For native code this is your CPU;
+        for Wasm bugs choose `wasm32-unknown-unknown`. Use "Other" +
+        the Environment field for unusual targets.
+      multiple: true
+      options:
+        - x86_64
+        - aarch64 (arm64)
+        - wasm32-unknown-unknown
+        - Other (please describe in "Environment" below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Anything else about the runtime environment. Examples:
+
+        - **Browser**: Chromium 132 / Firefox 134 / Safari 18 (Wasm bugs)
+        - **Node.js version** (Wasm-on-Node bugs)
+        - **Resolver**: which recursive resolver / DoH endpoint the
+          courier was pointed at (`--resolver`, `resolv.conf`,
+          Cloudflare DoH, …) — essential for chain-fetching bugs
+        - **Zone**: the DNS operator hosting the `_onomancy` record
+          (Cloudflare, Route 53, self-hosted BIND, …) and the zone's
+          DNSSEC algorithm, if known
+        - **Network**: captive portal, VPN, DNS-intercepting middlebox
+
+        Anything that someone trying to reproduce should mirror.
+      placeholder: |
+        - onomancer on NixOS, resolver 1.1.1.1:53
+        - Zone signed by Cloudflare (algorithm 13)
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the actual observed behavior.
+      placeholder: |
+        `onomancer resolve --hostname example.com` reports
+        `no TXT RRset with signatures at _onomancy.example.com`
+        even though the record is visible with `dig +dnssec`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+      placeholder: |
+        The chain should frame and validate to a fresh ✓ verdict.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: |
+        Minimal steps or code that reproduces the issue. A failing test
+        case is ideal; for chain bugs, a captured `--chain-out` fixture
+        is even better.
+      placeholder: |
+        1. `onomancer resolve --hostname example.com --chain-out repro.chain`
+        2. Observe the MissingRrset error
+        3. `dig +dnssec TXT _onomancy.example.com @1.1.1.1` shows the record
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: |
+        Paste any errors or `RUST_LOG=debug` output here. Long traces
+        are fine — they'll be collapsed automatically.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: |
+        Anything else that might help — related issues, zone topology
+        (CNAMEs, zone cuts), recent changes that may have introduced
+        the regression.

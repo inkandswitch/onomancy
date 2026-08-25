@@ -17,20 +17,22 @@
 //! - [`name`] — [`Name`](name::Name): canonical owner names, with the
 //!   RFC 4034 §6.1 canonical ordering
 //! - [`record`] — [`Record`](record::Record) framing and
-//!   [`RrType`](record::RrType)
+//!   [`RrType`](rr_type::RrType)
 //! - [`algorithm`] — [`Algorithm`](algorithm::Algorithm) codes and the
 //!   D13 supported-set
 //! - RDATA views: [`rrsig`], [`dnskey`], [`ds`], [`txt`], [`cname`]
 //!
 //! Deliberately absent: NSEC/NSEC3 views. Negative proofs are out of
-//! the protocol at v0 (ADR-045) — denial links in a chain are skipped
+//! the protocol at v0 — denial links in a chain are skipped
 //! unverified, since they can prove nothing to this walk.
 
 pub mod algorithm;
 pub mod cname;
+pub mod digest_type;
 pub mod dnskey;
 pub mod ds;
 pub mod name;
 pub mod record;
+pub mod rr_type;
 pub mod rrsig;
 pub mod txt;

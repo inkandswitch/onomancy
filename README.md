@@ -27,29 +27,33 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 
 ## Workspace
 
-| Crate                                  | Purpose                                                                              |
-|----------------------------------------|--------------------------------------------------------------------------------------|
-| [`onomancy_core`](./onomancy_core)   | `no_std`-leaning vocabulary: name grammar, TXT codec, certificate & statement units  |
-| [`onomancy_protocol`](./onomancy_protocol) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
-| [`onomancy_dnssec`](./onomancy_dnssec) | Sans-IO RFC 4034/4035 chain validation, IANA trust anchors baked in                  |
-| [`onomancy_automerge`](./onomancy_automerge) | Automerge substrate adapter: namestores, decision documents, petnames                |
-| [`onomancy_hickory`](./onomancy_hickory) | Host chain courier: stub DNS transport + chain assembly                              |
-| [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
-| [`onomancer`](./onomancer)           | The agent (binary): keygen · record · resolve                                        |
+| Crate                                        | Purpose                                                                                |
+|----------------------------------------------|----------------------------------------------------------------------------------------|
+| [`onomancy_core`](./onomancy_core)           | Substrate-neutral kernel: generic name grammar (`Name<A>`), digests, signed-unit skeleton, wire primitives |
+| [`onomancy_dnssec`](./onomancy_dnssec)       | The DNS anchoring protocol: `@` names, certificate/statement/TXT codecs, sans-IO RFC 4034/4035 validation, IANA trust anchors baked in |
+| [`onomancy_protocol`](./onomancy_protocol)   | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation         |
+| [`onomancy_automerge`](./onomancy_automerge) | Automerge substrate adapter: namestores, decision documents, petnames                  |
+| [`onomancy_chain`](./onomancy_chain)         | Sans-IO DNSSEC chain building: questions out, records in, framed links                 |
+| [`onomancy_publish`](./onomancy_publish)     | Ceremonies (bind · refresh · rotate · migrate) emitting self-verified Plans            |
+| [`onomancy_keyhive`](./onomancy_keyhive)     | Keyhive authority verification: delegation-chain replay behind `AuthorityVerifier`     |
+| [`onomancy_hickory`](./onomancy_hickory)     | Host chain courier: stub DNS transport driving the chain builder                       |
+| [`onomancy_wasm`](./onomancy_wasm)           | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
+| [`onomancer`](./onomancer)                   | The agent (binary): keygen · record · resolve                                          |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
 
 ```mermaid
 graph TD
     subgraph pure ["sans-IO: pure functions (host + Wasm)"]
-        core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
+        core["onomancy_core<br/><i>substrate-neutral kernel:<br/>Name&lt;A&gt; · digests · Signed · wire</i>"]
+        dnssec["onomancy_dnssec<br/><i>the DNS anchoring protocol:<br/>@ names · units · TXT · validation</i>"]
         proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
-        dnssec["onomancy_dnssec<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
-        publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
+        chain["onomancy_chain<br/><i>chain-building state machine<br/>(questions out, records in)</i>"]
+        publish["onomancy_publish<br/><i>ceremonies → Plans</i>"]
 
         subgraph adapters ["substrate adapters (pure over held documents)"]
             automerge["onomancy_automerge<br/><i>namestores · decision view ·<br/>Head ⇄ ChangeHash</i>"]
-            keyhive["onomancy_keyhive†<br/><i>delegation-chain verification</i>"]
+            keyhive["onomancy_keyhive<br/><i>delegation-chain verification</i>"]
         end
     end
 
@@ -60,23 +64,25 @@ graph TD
 
     onomancer["onomancer (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
 
+    dnssec --> core
+    proto --> dnssec
     proto --> core
-    dnssec -- "implements ChainValidator" --> proto
+    chain --> dnssec
+    chain --> core
+    hickory -- "drives" --> chain
+    wasm -- "drives" --> chain
     publish --> proto
-    automerge -- "implements Namestore,<br/>DecisionsView" --> proto
+    automerge -- "implements Namestore" --> proto
     keyhive -- "implements AuthorityVerifier" --> proto
-    keyhive --> automerge
-    hickory -- "implements ChainProvider" --> proto
-    wasm --> core
-    wasm -- "implements ChainProvider" --> proto
+    hickory -- "implements ChainProvider" --> dnssec
+    wasm -- "implements ChainProvider" --> dnssec
     onomancer --> publish
-    onomancer --> dnssec
     onomancer --> hickory
     onomancer --> automerge
     onomancer --> keyhive
 ```
 
-† planned (onomancy_publish, onomancy_keyhive — the latter gated on upstream coordination, see design/keyhive-coordination.md). The crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, decision state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
+The crate layout follows the role stack (verifier / publisher over one pure core), not client/server: every participant is a verifier and servers are keyless byte couriers. Everything outside the network boundary is pure: cryptographic verification (DNSSEC chains, Keyhive delegation proofs) runs over supplied bytes against locally-held trust anchors, and document reads (namestores, decision state) run over locally-held replicas — statements carry their authority proofs verbatim and resolution never blocks on sync, so gossip is enough. The substrate adapters differ from the algorithm crates only in what they depend on (Automerge/Keyhive library types), not in purity; replication and persistence belong to the substrate and the agent, never to these crates.
 
 ## Development
 
@@ -93,6 +99,8 @@ Or bring your own toolchain pinned by [`rust-toolchain.toml`](./rust-toolchain.t
 cargo test --workspace --all-features
 cargo clippy --workspace --all-features --all-targets
 ```
+
+See [HACKING.md](./HACKING.md) for the engineering patterns and abstractions, and [GUIDANCE.md](./GUIDANCE.md) for publisher and verifier operational notes.
 
 ## License
 

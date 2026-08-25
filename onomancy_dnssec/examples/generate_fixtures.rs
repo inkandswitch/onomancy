@@ -12,8 +12,7 @@
 
 use std::{fs, path::Path};
 
-use onomancy_core::cert::chain::DnssecChain;
-use onomancy_dnssec::test_utils::fixtures::all_fixtures;
+use onomancy_dnssec::{chain::DnssecChain, test_utils::fixtures::all_fixtures};
 
 fn main() -> std::io::Result<()> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");

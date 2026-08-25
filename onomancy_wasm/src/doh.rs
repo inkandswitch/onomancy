@@ -1,27 +1,33 @@
 //! DNS-over-HTTPS chain courier (RFC 8484) for browsers and workers.
 //!
-//! The same [`chain_assembly`](onomancy_hickory::chain_assembly)
-//! logic as the host courier, over `fetch()` instead of sockets: POST
+//! The same sans-IO chain builder (`onomancy_chain`) as the
+//! host courier, driven over `fetch()` instead of sockets: POST
 //! `application/dns-message` bodies to one `DoH` endpoint, message ID 0
 //! (RFC 8484 cache friendliness). The transport is exactly as
 //! untrusted as the socket one — the verifier's own DNSSEC
 //! validation is the only trust boundary, and `DoH` merely narrows who
 //! sees the queries (the on-path observer becomes the `DoH` resolver).
 
-use hickory_proto::{
-    op::Message,
-    rr::{Name, Record, RecordType},
+use hickory_proto::{ProtoError, op::Message, rr::Record, serialize::binary::DecodeError};
+use js_sys::{Function, Promise, Reflect, Uint8Array, global};
+use onomancy_chain::{
+    answer::{self, Refused},
+    builder::{BuildError, ChainBuilder, Step},
+    question::Question,
 };
-use js_sys::{Reflect, Uint8Array};
-use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
-use onomancy_hickory::chain_assembly::{self, AssembleError, Query, Refused};
-use onomancy_protocol::chain_provider::ChainProvider;
-use wasm_bindgen::{JsCast, JsError, JsValue};
+use onomancy_dnssec::{chain::DnssecChain, chain_provider::ChainProvider, dns_name::DnsName};
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, Request, RequestInit, Response};
 
 /// The RFC 8484 media type, both directions.
 const DNS_MESSAGE: &str = "application/dns-message";
+
+/// The largest body accepted from a `DoH` endpoint: the DNS wire
+/// maximum (a 16-bit message length). Anything larger cannot be a DNS
+/// message, and buffering it unbounded would hand a malicious
+/// endpoint the verifier's memory.
+const MAX_RESPONSE_BYTES: u64 = 65_535;
 
 /// The `DoH` chain courier: [`ChainProvider`] over one `DoH` endpoint.
 #[derive(Debug, Clone)]
@@ -64,13 +70,13 @@ impl DohProvider {
 
         // `fetch` from the global scope: works in windows, workers,
         // and other JS hosts alike (no `Window` assumption).
-        let global = js_sys::global();
-        let fetch: js_sys::Function = Reflect::get(&global, &JsValue::from_str("fetch"))
+        let scope = global();
+        let fetch: Function = Reflect::get(&scope, &JsValue::from_str("fetch"))
             .map_err(|failure| js_failure(&failure))?
             .dyn_into()
             .map_err(|_| DohError::NoFetch)?;
-        let promise: js_sys::Promise = fetch
-            .call1(&global, &request)
+        let promise: Promise = fetch
+            .call1(&scope, &request)
             .map_err(|failure| js_failure(&failure))?
             .dyn_into()
             .map_err(|_| DohError::NoFetch)?;
@@ -87,6 +93,16 @@ impl DohProvider {
             });
         }
 
+        // Refuse oversized bodies before buffering when the endpoint
+        // declares a length; chunked responses carry none and are
+        // re-checked after.
+        if let Ok(Some(declared)) = response.headers().get("content-length")
+            && let Ok(bytes) = declared.parse::<u64>()
+            && bytes > MAX_RESPONSE_BYTES
+        {
+            return Err(DohError::Oversized { bytes });
+        }
+
         let buffer = JsFuture::from(
             response
                 .array_buffer()
@@ -94,36 +110,65 @@ impl DohProvider {
         )
         .await
         .map_err(|failure| js_failure(&failure))?;
-        Ok(Uint8Array::new(&buffer).to_vec())
+
+        let array = Uint8Array::new(&buffer);
+        let bytes = u64::from(array.length());
+        if bytes > MAX_RESPONSE_BYTES {
+            return Err(DohError::Oversized { bytes });
+        }
+
+        Ok(array.to_vec())
     }
-}
 
-impl Query for DohProvider {
-    type Error = DohError;
-
-    async fn answers(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, DohError> {
+    /// Answer one of the chain builder's questions over `DoH`.
+    async fn query(&self, question: &Question) -> Result<Vec<Record>, DohError> {
         // ID 0 per RFC 8484: DoH responses are matched by the HTTP
         // exchange, and a fixed ID keeps them cacheable.
-        let request = chain_assembly::build_query(name, rtype, 0);
-        let wire = request.to_vec().map_err(|_| DohError::Encode)?;
+        let request = question.message(0);
+        let wire = request.to_vec().map_err(DohError::Encode)?;
 
         let message =
-            Message::from_vec(&self.exchange(&wire).await?).map_err(|_| DohError::Malformed)?;
+            Message::from_vec(&self.exchange(&wire).await?).map_err(DohError::Malformed)?;
 
         if message.metadata.id != 0 {
             return Err(DohError::IdMismatch);
         }
 
-        Ok(chain_assembly::accepted_answers(message)?)
+        Ok(answer::accepted(message)?)
     }
 }
 
 impl ChainProvider for DohProvider {
-    type Error = AssembleError<DohError>;
+    type Error = FetchChainError;
 
     async fn chain(&self, hostname: &DnsName) -> Result<DnssecChain, Self::Error> {
-        chain_assembly::assemble(self, hostname).await
+        let (mut builder, mut question) = ChainBuilder::start(hostname)?;
+
+        loop {
+            let records = self.query(&question).await?;
+
+            match builder.answer(records)? {
+                Step::Ask(next, asked) => {
+                    builder = next;
+                    question = asked;
+                }
+                Step::Done(chain) => return Ok(chain),
+            }
+        }
     }
+}
+
+/// The `DoH` courier failed to fetch a chain — in the machine or on
+/// the wire, never a validity verdict (that is the validator's).
+#[derive(Debug, thiserror::Error)]
+pub enum FetchChainError {
+    /// The answers could not be framed into a chain.
+    #[error(transparent)]
+    Build(#[from] BuildError),
+
+    /// A `DoH` exchange failed at the transport level.
+    #[error(transparent)]
+    Transport(#[from] DohError),
 }
 
 /// A JS-side failure, stringified: `JsValue` is neither `Send` nor
@@ -138,9 +183,9 @@ fn js_failure(value: &JsValue) -> DohError {
 /// verdict.
 #[derive(Debug, thiserror::Error)]
 pub enum DohError {
-    /// The request could not be encoded (oversized name, internal).
+    /// The request could not be encoded to wire form.
     #[error("query could not be encoded")]
-    Encode,
+    Encode(#[source] ProtoError),
 
     /// The response ID was not the fixed `DoH` ID.
     #[error("response ID mismatch")]
@@ -155,7 +200,7 @@ pub enum DohError {
 
     /// The response bytes did not parse as a DNS message.
     #[error("malformed DNS response")]
-    Malformed,
+    Malformed(#[source] DecodeError),
 
     /// No `fetch` in the global scope (not a browser/worker host).
     #[error("no global fetch()")]
@@ -164,6 +209,13 @@ pub enum DohError {
     /// `fetch` resolved to something other than a `Response`.
     #[error("fetch yielded a non-Response")]
     NotAResponse,
+
+    /// The response body exceeds the DNS wire maximum.
+    #[error("response of {bytes} bytes exceeds the DNS wire maximum")]
+    Oversized {
+        /// The declared or buffered body length.
+        bytes: u64,
+    },
 
     /// The upstream refused the query (SERVFAIL, REFUSED, …).
     #[error(transparent)]
@@ -175,63 +227,4 @@ pub enum DohError {
         /// The status code.
         code: u16,
     },
-}
-
-/// Resolve a hostname's Onomancy binding live over `DoH`: fetch the
-/// chain, validate it from the baked-in IANA anchors, and grade it at
-/// the current time.
-///
-/// Returns `{ hostname, links, freshness, records: string[] }`.
-///
-/// # Errors
-///
-/// Rejects (as a JS error) on malformed hostnames, transport
-/// failures, and invalid chains.
-#[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveHostname)]
-pub async fn resolve_hostname(hostname: &str, doh_url: Option<String>) -> Result<JsValue, JsError> {
-    let hostname =
-        DnsName::parse_display(hostname).map_err(|error| JsError::new(&error.to_string()))?;
-    let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);
-
-    let chain = provider
-        .chain(&hostname)
-        .await
-        .map_err(|error| JsError::new(&error.to_string()))?;
-
-    let proof = onomancy_dnssec::validator::Validator::iana()
-        .validate_detailed(&hostname, &chain)
-        .map_err(|error| JsError::new(&error.to_string()))?;
-
-    // The JS clock, as a value — grading is the only place it enters.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // epoch seconds fit
-    let now = onomancy_core::time::UnixSeconds::from((js_sys::Date::now() / 1000.0) as u64);
-    let freshness = match proof.window.grade(now) {
-        onomancy_core::freshness::Grade::Fresh => "fresh",
-        onomancy_core::freshness::Grade::Stale => "stale",
-        onomancy_core::freshness::Grade::NotYetBegun => "deferred",
-    };
-
-    let records = js_sys::Array::new();
-    for record in &proof.records {
-        records.push(&JsValue::from_str(&record.to_string()));
-    }
-
-    let verdict = js_sys::Object::new();
-    let set = |key: &str, value: &JsValue| {
-        // Reflect::set on a fresh plain object cannot fail.
-        drop(Reflect::set(&verdict, &JsValue::from_str(key), value));
-    };
-    set("hostname", &JsValue::from_str(hostname.as_str()));
-    set(
-        "links",
-        &JsValue::from_f64(
-            u32::try_from(chain.links().len())
-                .unwrap_or(u32::MAX)
-                .into(),
-        ),
-    );
-    set("freshness", &JsValue::from_str(freshness));
-    set("records", &records.into());
-
-    Ok(verdict.into())
 }

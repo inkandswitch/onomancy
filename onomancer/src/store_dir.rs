@@ -10,11 +10,11 @@
 
 use std::path::{Path, PathBuf};
 
-use onomancy_core::{
-    cert::Certificate,
+use onomancy_dnssec::{
+    certificate::Certificate,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
-use onomancy_protocol::verifier_state::store::{Item, Store};
+use onomancy_protocol::verifier::state::store::{Store, item::Item};
 
 /// Load every unit file in `dir` into a store. Creates the directory
 /// if missing (an empty store). Files with foreign extensions are
@@ -84,7 +84,7 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::cert::DecodeCertificateError,
+        source: onomancy_dnssec::certificate::DecodeCertificateError,
     },
 
     /// The directory could not be read or written.
@@ -97,7 +97,7 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::statement::rotation::DecodeRotationError,
+        source: onomancy_dnssec::statement::rotation::DecodeRotationError,
     },
 
     /// A `.ons` file did not decode as a successor statement.
@@ -106,6 +106,6 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::statement::successor::DecodeSuccessorError,
+        source: onomancy_dnssec::statement::successor::DecodeSuccessorError,
     },
 }

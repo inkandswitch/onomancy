@@ -1,20 +1,6 @@
-//! The signature glue: canonical signed-data assembly, per-algorithm
-//! verification, and the DS digest check.
-//!
-//! # The Signed Data (RFC 4035 §5.3.2)
-//!
-//! ```text
-//! signed_data = RRSIG preamble (verbatim RDATA before the signature)
-//!             ‖ for each RR, sorted by RDATA (RFC 4034 §6.3):
-//!                 signed owner ‖ type ‖ class ‖ ORIGINAL TTL
-//!                 ‖ RDLENGTH ‖ RDATA
-//! ```
-//!
-//! Two deliberate reconstructions happen here and nowhere else:
-//! the received TTL is replaced by the RRSIG's original TTL, and a
-//! wildcard-expanded owner is collapsed back to its `*.<suffix>` form
-//! (the RRSIG label count says so — and the same count is D14's
-//! trigger for demanding a no-closer-match proof upstream).
+//! The cryptographic operations: per-algorithm signature
+//! verification and the DS digest check. Signed-data construction
+//! (RFC 4035 §5.3.2) lives with [`Rrsig`](crate::wire::rrsig::Rrsig).
 //!
 //! # Algorithms (D13)
 //!
@@ -22,117 +8,21 @@
 //! else fails verification — unsupported is invalid ✗, never
 //! insecure-but-ok.
 
-use alloc::{vec, vec::Vec};
-use core::cmp::Ordering;
+pub mod ds_digest;
+pub mod sha256;
+
+use alloc::vec::Vec;
+use onomancy_core::digest::Digest;
 use p256::ecdsa::signature::Verifier as _;
-use sha2::{Digest as _, Sha256};
+use sha2::Digest as _;
 
-use crate::{
-    link::Link,
-    wire::{
-        algorithm::Algorithm,
-        dnskey::Dnskey,
-        ds::{DigestType, Ds, DsDigest, Sha256Digest},
-        name::Name,
-        record::CLASS_IN,
-        rrsig::Rrsig,
-    },
+use self::{
+    ds_digest::{DsDigest, OwnedDnskey},
+    sha256::Sha256,
 };
-
-/// Verify one RRSIG over a link's `RRset` with one DNSKEY.
-///
-/// Pure: bytes and parsed views in, verdict out. Key selection
-/// (matching key tags, trying rollover siblings) is the walk's job;
-/// this function answers for exactly one (signature, key) pair.
-///
-/// # Errors
-///
-/// Returns [`VerifyError`] when the algorithm is unsupported or
-/// mismatched, the key is not a zone key, the signed-owner
-/// reconstruction is impossible, the key bytes are malformed, or the
-/// signature simply does not verify.
-pub fn verify_rrsig(link: &Link, rrsig: &Rrsig, key: &Dnskey) -> Result<(), VerifyError> {
-    if !key.is_zone_key() {
-        // RFC 4034 §2.1.1: a cleared ZONE bit MUST NOT verify RRsets.
-        return Err(VerifyError::NotAZoneKey);
-    }
-
-    if key.algorithm() != rrsig.algorithm() {
-        return Err(VerifyError::AlgorithmMismatch {
-            key: key.algorithm(),
-            signature: rrsig.algorithm(),
-        });
-    }
-
-    let message = signed_data(link, rrsig)?;
-    verify_signature(
-        rrsig.algorithm(),
-        key.public_key(),
-        &message,
-        rrsig.signature(),
-    )
-}
-
-/// Assemble the RFC 4035 §5.3.2 signed data for one (link, RRSIG)
-/// pair.
-///
-/// # Errors
-///
-/// Returns [`VerifyError::LabelCount`] when the RRSIG label count
-/// exceeds the owner's (no valid reconstruction exists).
-pub fn signed_data(link: &Link, rrsig: &Rrsig) -> Result<Vec<u8>, VerifyError> {
-    let signed_owner = signed_owner(link.owner(), rrsig)?;
-
-    let mut owner_wire = Vec::new();
-    signed_owner.write(&mut owner_wire);
-
-    // Canonical RRset order: RDATA as left-justified octet strings,
-    // ascending, duplicates dropped (RFC 4034 §6.3).
-    let mut rdatas: Vec<&[u8]> = link.rrset().iter().map(|r| r.rdata.as_slice()).collect();
-    rdatas.sort_unstable();
-    rdatas.dedup();
-
-    let mut message = rrsig.preamble().to_vec();
-
-    for rdata in rdatas {
-        message.extend_from_slice(&owner_wire);
-        message.extend_from_slice(&link.rtype().0.to_be_bytes());
-        message.extend_from_slice(&CLASS_IN.to_be_bytes());
-        message.extend_from_slice(&rrsig.original_ttl().to_be_bytes());
-        // RDATA length fits u16: it was framed from a u16 RDLENGTH.
-        message.extend_from_slice(&u16::try_from(rdata.len()).unwrap_or(u16::MAX).to_be_bytes());
-        message.extend_from_slice(rdata);
-    }
-
-    Ok(message)
-}
-
-/// Reconstruct the signed owner name: the owner itself, or its
-/// wildcard source when the RRSIG label count says the answer was
-/// expanded (`labels < owner labels` ⇒ `*.<rightmost labels>`).
-fn signed_owner(owner: &Name, rrsig: &Rrsig) -> Result<Name, VerifyError> {
-    let owner_labels = owner.labels().len();
-    let signed_labels = usize::from(rrsig.labels());
-
-    match signed_labels.cmp(&owner_labels) {
-        Ordering::Equal => Ok(owner.clone()),
-        Ordering::Less => {
-            let mut labels: Vec<Vec<u8>> = vec![b"*".to_vec()];
-            labels.extend(
-                owner
-                    .labels()
-                    .iter()
-                    .skip(owner_labels - signed_labels)
-                    .cloned(),
-            );
-            Ok(Name::from_labels(labels))
-        }
-        Ordering::Greater => Err(VerifyError::LabelCount {
-            owner: owner_labels,
-            signature: signed_labels,
-        }),
-    }
-}
+use crate::wire::{
+    algorithm::Algorithm, digest_type::DigestType, dnskey::Dnskey, ds::Ds, name::Name,
+};
 
 /// Verify one raw signature under one algorithm.
 ///
@@ -210,9 +100,9 @@ fn verify_rsa_sha256(
     )
     .map_err(|_| VerifyError::MalformedKey)?;
 
-    let hashed = Sha256::digest(message);
+    let hashed = sha2::Sha256::digest(message);
 
-    key.verify(rsa::Pkcs1v15Sign::new::<Sha256>(), &hashed, signature)
+    key.verify(rsa::Pkcs1v15Sign::new::<sha2::Sha256>(), &hashed, signature)
         .map_err(|_| VerifyError::BadSignature)
 }
 
@@ -248,12 +138,12 @@ fn split_rsa_key(blob: &[u8]) -> Result<(&[u8], &[u8]), VerifyError> {
 /// The SHA-256 DS digest for a DNSKEY at an owner name:
 /// `H(owner canonical wire ‖ DNSKEY RDATA)`.
 #[must_use]
-pub fn ds_digest(owner: &Name, key: &Dnskey) -> Sha256Digest {
+pub fn ds_digest(owner: &Name, key: &Dnskey) -> Digest<Sha256, OwnedDnskey> {
     let mut input = Vec::new();
     owner.write(&mut input);
     input.extend_from_slice(key.rdata());
 
-    Sha256Digest::from(<[u8; 32]>::from(Sha256::digest(&input)))
+    Digest::hash(&input)
 }
 
 /// Whether a DS record commits to this DNSKEY at this owner.
@@ -336,176 +226,30 @@ pub enum VerifyError {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::wire::record::{Record, RrType};
-    use alloc::format;
-    use ed25519_dalek::Signer as _;
-    use onomancy_core::cert::chain::ChainLink;
-
-    /// Build a TXT link signed for real with a test Ed25519 zone key.
-    fn signed_link(rdatas: &[&[u8]], owner: &str, labels: u8) -> (Link, Dnskey) {
-        let signing = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
-
-        // DNSKEY: ZONE flag, protocol 3, ED25519.
-        let mut key_rdata = Vec::new();
-        key_rdata.extend_from_slice(&0x0100u16.to_be_bytes());
-        key_rdata.push(3);
-        key_rdata.push(Algorithm::ED25519.0);
-        key_rdata.extend_from_slice(signing.verifying_key().as_bytes());
-        let dnskey = Dnskey::parse(&key_rdata).expect("valid DNSKEY");
-
-        let owner_name: Name = owner.parse().expect("parses");
-
-        // RRSIG preamble (unsigned yet): covered/alg/labels/ttl/
-        // windows/tag/signer.
-        let mut preamble = Vec::new();
-        preamble.extend_from_slice(&RrType::TXT.0.to_be_bytes());
-        preamble.push(Algorithm::ED25519.0);
-        preamble.push(labels);
-        preamble.extend_from_slice(&900u32.to_be_bytes());
-        preamble.extend_from_slice(&1_755_600_000u32.to_be_bytes());
-        preamble.extend_from_slice(&1_754_000_000u32.to_be_bytes());
-        preamble.extend_from_slice(&dnskey.key_tag().to_be_bytes());
-        preamble.extend_from_slice(b"\x06expede\x03wtf\x00");
-
-        // Assemble the signed data by the same rules and sign it.
-        let mut sorted: Vec<&[u8]> = rdatas.to_vec();
-        sorted.sort_unstable();
-        sorted.dedup();
-
-        let mut message = preamble.clone();
-        let signed_name: Name = if usize::from(labels) < owner_name.labels().len() {
-            format!(
-                "*.{}",
-                owner
-                    .split('.')
-                    .skip(owner_name.labels().len() - usize::from(labels))
-                    .collect::<Vec<_>>()
-                    .join(".")
-            )
-            .parse()
-            .expect("wildcard form parses")
-        } else {
-            owner_name.clone()
-        };
-        let mut owner_wire = Vec::new();
-        signed_name.write(&mut owner_wire);
-
-        for rdata in &sorted {
-            message.extend_from_slice(&owner_wire);
-            message.extend_from_slice(&RrType::TXT.0.to_be_bytes());
-            message.extend_from_slice(&CLASS_IN.to_be_bytes());
-            message.extend_from_slice(&900u32.to_be_bytes());
-            message.extend_from_slice(&u16::try_from(rdata.len()).expect("small").to_be_bytes());
-            message.extend_from_slice(rdata);
-        }
-
-        let signature = signing.sign(&message);
-
-        let mut rrsig_rdata = preamble;
-        rrsig_rdata.extend_from_slice(&signature.to_bytes());
-
-        // Frame the link: data records (received TTL differs from the
-        // original on purpose) + the RRSIG.
-        let mut bytes = Vec::new();
-        for rdata in rdatas {
-            Record {
-                owner: owner_name.clone(),
-                rtype: RrType::TXT,
-                class: CLASS_IN,
-                ttl: 42, // received TTL ≠ original: must not matter
-                rdata: rdata.to_vec(),
-            }
-            .write(&mut bytes);
-        }
-        Record {
-            owner: owner_name,
-            rtype: RrType::RRSIG,
-            class: CLASS_IN,
-            ttl: 42,
-            rdata: rrsig_rdata,
-        }
-        .write(&mut bytes);
-
-        let link = Link::parse(&ChainLink::from(bytes)).expect("link parses");
-        (link, dnskey)
-    }
-
-    #[test]
-    fn ed25519_rrsig_verifies_end_to_end() {
-        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 3);
-        let rrsig = &link.signatures()[0];
-
-        verify_rrsig(&link, rrsig, &key).expect("genuine signature verifies");
-    }
-
-    #[test]
-    fn rrset_order_does_not_matter_but_content_does() {
-        // Two records, framed in the order NOT matching canonical
-        // RDATA order: canonical sorting must fix it.
-        let (link, key) = signed_link(&[b"\x02zz", b"\x02aa"], "_onomancy.expede.wtf", 3);
-        verify_rrsig(&link, &link.signatures()[0], &key).expect("order-insensitive");
-
-        // A different RRset under the same signature must fail.
-        let (tampered, _) = signed_link(&[b"\x02zz", b"\x02ab"], "_onomancy.expede.wtf", 3);
-        assert_eq!(
-            verify_rrsig(&tampered, &link.signatures()[0], &key),
-            Err(VerifyError::BadSignature)
-        );
-    }
-
-    #[test]
-    fn wildcard_expansion_reconstructs_the_signed_owner() {
-        // Signed as *.expede.wtf (labels=2), answered at the full
-        // owner name.
-        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 2);
-        verify_rrsig(&link, &link.signatures()[0], &key).expect("wildcard reconstruction");
-    }
-
-    #[test]
-    fn excess_label_counts_are_rejected() {
-        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 3);
-        let mut preamble = link.signatures()[0].preamble().to_vec();
-        preamble[3] = 9; // labels byte
-        preamble.extend_from_slice(link.signatures()[0].signature());
-        let forged = Rrsig::parse(&preamble).expect("frame parses");
-
-        assert!(matches!(
-            verify_rrsig(&link, &forged, &key),
-            Err(VerifyError::LabelCount { .. })
-        ));
-    }
-
-    #[test]
-    fn non_zone_keys_never_verify() {
-        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 3);
-        let mut rdata = key.rdata().to_vec();
-        rdata[0] = 0;
-        rdata[1] = 0; // clear ZONE
-        let revoked = Dnskey::parse(&rdata).expect("parses");
-
-        assert_eq!(
-            verify_rrsig(&link, &link.signatures()[0], &revoked),
-            Err(VerifyError::NotAZoneKey)
-        );
-    }
 
     #[test]
     fn unsupported_algorithms_are_invalid_not_insecure() {
-        assert!(matches!(
-            verify_signature(Algorithm(253), &[], b"m", &[]),
-            Err(VerifyError::UnsupportedAlgorithm(Algorithm(253)))
-        ));
+        assert_eq!(
+            verify_signature(Algorithm::new(253), &[], b"m", &[]),
+            Err(VerifyError::UnsupportedAlgorithm(Algorithm::new(253)))
+        );
     }
 
     #[test]
     fn ds_digest_commits_to_owner_and_key() {
-        let (_, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 3);
+        // DNSKEY: ZONE flag, protocol 3, ED25519, any 32-byte point.
+        let mut key_rdata = Vec::new();
+        key_rdata.extend_from_slice(&0x0100u16.to_be_bytes());
+        key_rdata.push(3);
+        key_rdata.push(Algorithm::ED25519.code());
+        key_rdata.extend_from_slice(&[7; 32]);
+        let key = Dnskey::parse(&key_rdata).expect("valid DNSKEY");
         let owner: Name = "expede.wtf".parse().expect("parses");
 
         let mut ds_rdata = Vec::new();
         ds_rdata.extend_from_slice(&key.key_tag().to_be_bytes());
-        ds_rdata.push(Algorithm::ED25519.0);
-        ds_rdata.push(DigestType::SHA256.0);
+        ds_rdata.push(Algorithm::ED25519.code());
+        ds_rdata.push(DigestType::SHA256.code());
         ds_rdata.extend_from_slice(ds_digest(&owner, &key).as_bytes());
         let ds = Ds::parse(&ds_rdata).expect("parses");
 

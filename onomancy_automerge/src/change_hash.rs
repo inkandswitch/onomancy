@@ -6,7 +6,7 @@
 //! Orphan rules keep these as free functions — neither type is ours.
 
 use automerge::ChangeHash;
-use onomancy_core::name::doc::Head;
+use onomancy_core::anchor::doc::Head;
 
 /// The Automerge change hash a head pins.
 #[must_use]

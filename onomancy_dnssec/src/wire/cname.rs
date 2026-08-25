@@ -1,4 +1,5 @@
-//! The CNAME RDATA view: indirection on the `_onomancy` owner name.
+//! The CNAME RDATA view (RFC 1035 §3.3.1): indirection on the
+//! `_onomancy` owner name.
 //!
 //! The one protocol-relevant CNAME: chain validation follows (bounded)
 //! indirection from the `_onomancy` owner name to wherever the TXT

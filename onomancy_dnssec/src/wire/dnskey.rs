@@ -1,11 +1,6 @@
 //! The DNSKEY RDATA view: zone keys.
 //!
-//! ```text
-//! ┌────────┬──────────┬───────────┬────────────┐
-//! │ flags  │ protocol │ algorithm │ public key │
-//! │ u16BE  │ u8 (=3)  │    u8     │   (rest)   │
-//! └────────┴──────────┴───────────┴────────────┘
-//! ```
+//! The layout is DNS's, not ours: RFC 4034 §2.1.
 //!
 //! The verbatim RDATA is retained: both the key tag (RFC 4034
 //! Appendix B) and the DS digest (`owner ‖ RDATA`) are computed over
@@ -56,7 +51,7 @@ impl Dnskey {
         }
 
         Ok(Self {
-            algorithm: Algorithm(algorithm),
+            algorithm: Algorithm::new(algorithm),
             flags,
             public_key,
             rdata: rdata.to_vec(),

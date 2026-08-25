@@ -6,29 +6,29 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use onomancy_core::{
+    anchor::doc::DocAnchor,
     collections::{Map, Set},
-    name::doc::DocAnchor,
     time::UnixSeconds,
-    txt::serial::Serial,
 };
+use onomancy_dnssec::txt::serial::Serial;
 use testresult::TestResult;
 
 use onomancy_protocol::{
     test_utils::{
         Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
     },
-    verifier_state::{
+    verifier::state::{
         VerifierState,
+        binding_state::{BindingGrade, BindingState, ContinuityGrade},
         decisions::{Acceptance, Claim, Decisions},
-        memory::{MemoryAuthority, MemoryValidator},
-        output::{BindingGrade, ContinuityGrade, HostState},
-        store::{Item, Store},
+        memory::{authority::MemoryAuthority, validator::MemoryValidator},
+        store::{Store, item::Item},
     },
 };
 
 const NOW: u64 = 1_755_000_000;
 
-fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostState {
+fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> BindingState {
     let mut validator = MemoryValidator::default();
     let mut store = Store::default();
 
@@ -49,13 +49,17 @@ fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostSt
         &MemoryAuthority::default(),
     );
 
-    derivation.hosts.get(&host()).cloned().unwrap_or_default()
+    derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn accept(document: DocAnchor, cited: &Binding) -> Decisions {
     let mut acceptances = Map::default();
     let mut set = Set::default();
-    set.insert(cited.cert.digest().into());
+    set.insert(cited.cert.digest().erase());
     acceptances.insert(
         host(),
         vec![Acceptance {
@@ -296,7 +300,11 @@ fn d10_fresh_record_g_not_on_path_is_rejected() -> TestResult {
         &MemoryAuthority::default().off_path(&generation(11)),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     assert!(state.accepted.is_none(), "D10 rejects the record");
     Ok(())
 }
@@ -309,7 +317,7 @@ fn b8_reset_excludes_the_challenger() -> TestResult {
     // Fresh challenger would displace (see B2) — but it is excluded.
     let mut decisions = accept(doc(1), &incumbent);
     let mut excluded = Set::default();
-    excluded.insert(poison.cert.digest().into());
+    excluded.insert(poison.cert.digest().erase());
     decisions.resets.insert(host(), excluded);
 
     let state = run(&[&incumbent, &poison], &decisions, vec![]);
@@ -330,7 +338,7 @@ fn outranked_acceptances_surface_as_losers() -> TestResult {
 
     let mut decisions = accept(doc(1), &older);
     let mut cited = Set::default();
-    cited.insert(newer.cert.digest().into());
+    cited.insert(newer.cert.digest().erase());
     decisions
         .acceptances
         .get_mut(&host())
@@ -392,7 +400,7 @@ fn divergent_claims_badge_but_do_not_move_bindings() -> TestResult {
     Ok(())
 }
 
-// ───── ADR-042: the protected prefix and fork repair ─────
+// ───── the protected prefix and fork repair ─────
 
 #[test]
 fn d12_protected_prefix_survives_a_fork() -> TestResult {
@@ -543,7 +551,11 @@ fn b9_unauthorized_statements_have_no_lineage_effect() -> TestResult {
         &MemoryAuthority::default().deny(doc(1), generation(12).verifying_key()),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     let accepted = state.accepted.expect("old generation still accepted");
     assert_eq!(accepted.generation, generation(11), "no D12 from garbage");
     assert!(state.forks.is_empty(), "never fork evidence either");
@@ -581,7 +593,7 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     let reset_a = {
         let mut decisions = Decisions::default();
         let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().into());
+        excluded.insert(carrier_a.cert.digest().erase());
         decisions.resets.insert(host(), excluded);
         decisions
     };
@@ -597,8 +609,8 @@ fn statements_survive_resets_via_independent_carriers() -> TestResult {
     let reset_both = {
         let mut decisions = Decisions::default();
         let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().into());
-        excluded.insert(carrier_b.cert.digest().into());
+        excluded.insert(carrier_a.cert.digest().erase());
+        excluded.insert(carrier_b.cert.digest().erase());
         decisions.resets.insert(host(), excluded);
         decisions
     };
@@ -704,7 +716,7 @@ mod props {
                 // dependence hid the first time.
                 let mut decisions = accept(doc(specs[0].0 % 3), &bindings[0]);
                 let mut excluded = Set::default();
-                excluded.insert(bindings[bindings.len() - 1].cert.digest().into());
+                excluded.insert(bindings[bindings.len() - 1].cert.digest().erase());
                 decisions.resets.insert(host(), excluded);
 
                 // The item pool: records, a statement carried by TWO
@@ -803,7 +815,11 @@ fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
         &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     assert!(
         state.accepted.is_none(),
         "an unauthorized signer's certificate must be inert"

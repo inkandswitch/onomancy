@@ -14,16 +14,19 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
-    freshness::ChainWindow,
-    name::{dns::DnsName, doc::DocAnchor},
-    statement::{rotation::RotationStatement, successor::SuccessorStatement},
-    time::UnixSeconds,
-    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
+    anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds,
     wire::OversizeUnit,
 };
+use onomancy_dnssec::{
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
+    dns_name::DnsName,
+    freshness::ValidityWindow,
+    statement::{rotation::RotationStatement, successor::SuccessorStatement},
+    txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
+};
 
-use crate::verifier_state::seam::ChainProof;
+use onomancy_dnssec::chain_proof::ChainProof;
 
 /// The fixed test hostname.
 ///
@@ -68,8 +71,8 @@ pub fn chain(tag: u8) -> DnssecChain {
 /// Panics when `to < from` — test-vector construction error.
 #[must_use]
 #[allow(clippy::expect_used)]
-pub fn window(from: u64, to: u64) -> ChainWindow {
-    ChainWindow::new(UnixSeconds::from(from), UnixSeconds::from(to))
+pub fn window(from: u64, to: u64) -> ValidityWindow {
+    ValidityWindow::new(UnixSeconds::from(from), UnixSeconds::from(to))
         .expect("test windows are ordered")
 }
 
@@ -133,7 +136,7 @@ pub fn binding_carrying(
             hostname: host(),
             heads: vec![],
             predecessor: None,
-            delegation_chain: vec![],
+            delegation_chain: DelegationChain::default(),
             lineage,
             chain: chain.clone(),
         },
@@ -168,7 +171,7 @@ pub fn rotation(
         &doc(doc_seed),
         &generation(replaced_seed),
         &signer(successor_seed),
-        vec![],
+        DelegationChain::default(),
     )
 }
 
@@ -189,6 +192,6 @@ pub fn succession(
         &doc(successor_seed),
         &host(),
         &signer(signer_seed),
-        vec![],
+        DelegationChain::default(),
     )
 }

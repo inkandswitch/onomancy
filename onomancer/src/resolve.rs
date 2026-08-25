@@ -7,25 +7,24 @@ use std::{
 };
 
 use clap::Args;
-use onomancy_core::{
-    cert::Certificate,
-    collections::Map,
+use onomancy_core::{collections::Map, time::UnixSeconds};
+use onomancy_dnssec::{
+    certificate::Certificate,
+    dns_name::DnsName,
     freshness::Freshness,
-    name::dns::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
-    time::UnixSeconds,
+    validator::{Validator, WalkError},
 };
-use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_keyhive::authority::KeyhiveAuthority;
-use onomancy_protocol::{
-    verifier_state::{
+use onomancy_protocol::verifier::{
+    state::{
         VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
-        store::Item,
+        store::item::Item,
     },
-    verify::{self, Rejection},
+    verdict::{self, Rejection},
 };
 
 use crate::{
@@ -91,7 +90,7 @@ impl Resolve {
 
         // The live zone: fetch → walk from the baked-in IANA anchors.
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(&hostname))??;
+        let chain = crate::block_on(provider.fetch_chain(&hostname))??;
 
         say(&format!("chain: {} links fetched", chain.links().len()));
 
@@ -104,9 +103,9 @@ impl Resolve {
 
         let proof = validator.validate_detailed(&hostname, &chain)?;
         let grade = match proof.window.grade(now) {
-            onomancy_core::freshness::Grade::Fresh => "fresh \u{2713}",
-            onomancy_core::freshness::Grade::Stale => "stale \u{26a0}",
-            onomancy_core::freshness::Grade::NotYetBegun => "not yet begun (deferred)",
+            onomancy_dnssec::freshness::Grade::Fresh => "fresh \u{2713}",
+            onomancy_dnssec::freshness::Grade::Stale => "stale \u{26a0}",
+            onomancy_dnssec::freshness::Grade::NotYetBegun => "not yet begun (deferred)",
         };
         say(&format!("DNSSEC: valid, window {grade}"));
 
@@ -120,20 +119,20 @@ impl Resolve {
         };
         let bytes = std::fs::read(cert_path)?;
 
-        // Real authority (ADR-056): carriages replay into a Keyhive
+        // Real authority: carriages replay into a Keyhive
         // delegation graph; doc-key-signed certificates pass by the
         // identity rule.
         let authority = KeyhiveAuthority;
 
-        let verdict = verify::verify(&bytes, &hostname, now, &validator, &authority)?;
+        let verdict = verdict::verify(&bytes, &hostname, now, &validator, &authority)?;
 
         let freshness = match verdict.freshness {
             Freshness::Fresh => "fresh \u{2713}",
             Freshness::Stale => "stale \u{26a0}",
         };
         let generation = match verdict.generation_check {
-            verify::GenerationCheck::OnPath => "on delegation path",
-            verify::GenerationCheck::Provisional => {
+            verdict::GenerationCheck::OnPath => "on delegation path",
+            verdict::GenerationCheck::Provisional => {
                 "provisional ⚠ (stale evidence; re-checked when fresher evidence arrives)"
             }
         };
@@ -158,7 +157,7 @@ pub(crate) fn stateful_pass(
     let now = UnixSeconds::from(now_seconds());
     let validator = Validator::iana();
     let authority = KeyhiveAuthority;
-    let pins: Map<DnsName, Vec<onomancy_core::name::doc::DocAnchor>> = Map::default();
+    let pins: Map<DnsName, Vec<onomancy_core::anchor::doc::DocAnchor>> = Map::default();
     let decisions = Decisions::default();
 
     // What the evidence supported before this run's inputs.
@@ -172,7 +171,7 @@ pub(crate) fn stateful_pass(
         .collect::<Result<_, _>>()?;
 
     let provider = crate::provider(resolver);
-    match crate::block_on(provider.assemble(hostname))? {
+    match crate::block_on(provider.fetch_chain(hostname))? {
         Ok(chain) => {
             say(&format!("chain: {} links fetched", chain.links().len()));
             new_items.push(Item::ChainRefresh {
@@ -253,7 +252,7 @@ fn describe(event: &Event) -> String {
         }
         EventKind::PendingCleared(document) => format!("pending cleared: {document}"),
         EventKind::PendingSurfaced(document) => format!("pending (stale challenger): {document}"),
-        EventKind::RatchetReset { from, to } => format!("RATCHET RESET: serial {from} → {to}"),
+        EventKind::SerialRegression { from, to } => format!("RATCHET RESET: serial {from} → {to}"),
         EventKind::SuccessionForkSurfaced(fork) => format!("SUCCESSION FORK: {fork:?}"),
     };
 
@@ -262,7 +261,7 @@ fn describe(event: &Event) -> String {
 
 /// The post-pass verdict line(s) for one hostname.
 fn summarize(hostname: &DnsName, state: &VerifierState) {
-    let Some(host) = state.hosts.get(hostname) else {
+    let Some(host) = state.bindings.get(hostname) else {
         say(&format!("{hostname}: no evidence held"));
         return;
     };
@@ -298,13 +297,13 @@ fn now_seconds() -> u64 {
 /// Resolution failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ResolveError {
-    /// The chain could not be assembled from live DNS.
+    /// The chain could not be fetched from live DNS.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// File or runtime IO failed.
     #[error(transparent)]
@@ -316,11 +315,11 @@ pub(crate) enum ResolveError {
 
     /// An ingested `.onc` did not decode.
     #[error("certificate: {0}")]
-    Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
+    Certificate(#[from] onomancy_dnssec::certificate::DecodeCertificateError),
 
     /// An ingested `.onr` did not decode.
     #[error("rotation statement: {0}")]
-    Rotation(#[from] onomancy_core::statement::rotation::DecodeRotationError),
+    Rotation(#[from] onomancy_dnssec::statement::rotation::DecodeRotationError),
 
     /// The store directory was unreadable or held corrupt units.
     #[error("store: {0}")]
@@ -328,7 +327,7 @@ pub(crate) enum ResolveError {
 
     /// An ingested `.ons` did not decode.
     #[error("successor statement: {0}")]
-    Successor(#[from] onomancy_core::statement::successor::DecodeSuccessorError),
+    Successor(#[from] onomancy_dnssec::statement::successor::DecodeSuccessorError),
 
     /// An ingested file had no unit extension.
     #[error("not a unit file (expected .onc/.onr/.ons): {0}")]

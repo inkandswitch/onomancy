@@ -6,7 +6,7 @@ use std::{io::Write as _, path::PathBuf};
 
 use clap::Args;
 use ed25519_dalek::SigningKey;
-use onomancy_core::name::doc::DocAnchor;
+use onomancy_core::anchor::doc::DocAnchor;
 
 use crate::{say, seed};
 
@@ -29,7 +29,7 @@ impl Keygen {
     /// the key file cannot be written.
     pub(crate) fn run(&self) -> Result<(), KeygenError> {
         let mut bytes = [0u8; 32];
-        getrandom::getrandom(&mut bytes).map_err(|_| KeygenError::NoEntropy)?;
+        getrandom::fill(&mut bytes).map_err(|_| KeygenError::NoEntropy)?;
 
         let key = SigningKey::from_bytes(&bytes);
         let anchor = DocAnchor::from(key.verifying_key());

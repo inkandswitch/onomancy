@@ -10,11 +10,15 @@ use std::{cell::Cell, net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
-use onomancy_core::name::{Name, anchor::Anchor, doc::DocAnchor};
-use onomancy_dnssec::validator::{Validator, WalkError};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
+use onomancy_dnssec::{
+    supported_name::{ParseSupportedNameError, SupportedName},
+    validator::{Validator, WalkError},
+};
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::resolve::{
-    namestore::Replicas,
+    namestore::{Authority, Replicas, Vouched},
     resolution::{PartialReason, Resolution},
     resolve,
 };
@@ -46,11 +50,11 @@ impl NameWalk {
     ///
     /// # Errors
     ///
-    /// Returns [`NameError`] for unparseable inputs, anchor-resolution
+    /// Returns [`NameError`] for unparsable inputs, anchor-resolution
     /// failures, and IO failures. A partial WALK is a report, not an
     /// error (the designed norm under partition).
     pub(crate) fn run(&self) -> Result<(), NameError> {
-        let name = Name::parse(&self.name)?;
+        let name = SupportedName::parse(&self.name)?;
         let root_anchor = self.anchor_of(&name)?;
         say(&format!("anchor: {root_anchor}"));
 
@@ -66,12 +70,21 @@ impl NameWalk {
         };
 
         match resolve(root, name.segments(), &tracking) {
-            Resolution::Resolved(_) => {
+            Resolution::Resolved { authority, .. } => {
                 let target = tracking
                     .last
                     .get()
                     .map_or_else(|| "(untracked)".into(), |anchor| anchor.to_string());
                 say(&format!("resolved \u{2713} \u{2192} automerge:{target}"));
+                say(&format!(
+                    "authority: {} \u{26a0} {}",
+                    authority.label(),
+                    match authority {
+                        Authority::TrustedSubstrate => "nothing checked \u{2014} dev bridge",
+                        Authority::CarriageVerified =>
+                            "delegation graph verified; content authorship not yet checkable",
+                    }
+                ));
             }
             Resolution::Partial { consumed, reason } => {
                 let why = match reason {
@@ -90,17 +103,18 @@ impl NameWalk {
     }
 
     /// The root document anchor for the name's trust anchor.
-    fn anchor_of(&self, name: &Name) -> Result<DocAnchor, NameError> {
-        match name.anchor() {
-            Anchor::Doc(anchor) => Ok(*anchor),
-            Anchor::Local => match &self.root {
+    fn anchor_of(&self, name: &SupportedName) -> Result<DocAnchor, NameError> {
+        match name {
+            SupportedName::Doc(doc_name) => Ok(*doc_name.anchor()),
+            SupportedName::Local(_) => match &self.root {
                 Some(raw) => Ok(DocAnchor::parse(raw)?),
                 None => Err(NameError::LocalNeedsRoot),
             },
-            Anchor::Dns(hostname) => {
+            SupportedName::Dns(dns_name) => {
+                let hostname = dns_name.anchor();
                 // Live: the zone's word for this hostname's document.
                 let provider = crate::provider(self.resolver);
-                let chain = crate::block_on(provider.assemble(hostname))??;
+                let chain = crate::block_on(provider.fetch_chain(hostname))??;
                 let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 
                 proof
@@ -113,7 +127,12 @@ impl NameWalk {
         }
     }
 
-    /// Every `<doc-anchor>.automerge` in the docs directory.
+    /// Every `<doc-anchor>.automerge` in the docs directory, graded
+    /// by its sibling `<doc-anchor>.carriage` when one exists.
+    ///
+    /// Fail-closed: a carriage that is present but does not vouch its
+    /// anchor REFUSES the document — broken evidence is worse than
+    /// none.
     fn load_docs(&self) -> Result<HeldDocuments, NameError> {
         let mut held = HeldDocuments::default();
 
@@ -133,7 +152,20 @@ impl NameWalk {
             let doc = automerge::Automerge::load(&std::fs::read(&path)?)
                 .map_err(|_| NameError::UnloadableDoc(path.clone()))?;
 
-            held = held.with(anchor, doc);
+            let carriage_path = path.with_extension("carriage");
+            let authority = if carriage_path.exists() {
+                let carriage = DelegationChain::read_framed(&std::fs::read(&carriage_path)?)
+                    .map_err(|_| NameError::UnloadableCarriage(carriage_path.clone()))?;
+
+                if !KeyhiveAuthority.vouches_document(&anchor, &carriage) {
+                    return Err(NameError::CarriageRefused(carriage_path));
+                }
+                Authority::CarriageVerified
+            } else {
+                Authority::TrustedSubstrate
+            };
+
+            held = held.with_vouched(anchor, doc, authority);
         }
 
         Ok(held)
@@ -150,7 +182,7 @@ struct Tracking<'a> {
 impl Replicas for Tracking<'_> {
     type Namestore = DocumentNamestore;
 
-    fn replica(&self, target: &DocAnchor) -> Option<Self::Namestore> {
+    fn replica(&self, target: &DocAnchor) -> Option<Vouched<Self::Namestore>> {
         let replica = self.inner.replica(target);
         if replica.is_some() {
             self.last.set(Some(*target));
@@ -168,10 +200,10 @@ pub(crate) enum NameError {
         /// The offending file.
         path: PathBuf,
         /// Why its stem failed to parse.
-        source: onomancy_core::name::doc::ParseDocAnchorError,
+        source: onomancy_core::anchor::doc::ParseDocAnchorError,
     },
 
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 
@@ -185,7 +217,7 @@ pub(crate) enum NameError {
 
     /// The name did not parse.
     #[error("name: {0}")]
-    Name(#[from] onomancy_core::name::ParseNameError),
+    Name(#[from] ParseSupportedNameError),
 
     /// The zone attests no binding record.
     #[error("the zone attests no binding for this hostname")]
@@ -193,11 +225,20 @@ pub(crate) enum NameError {
 
     /// The `--root` argument was not a document anchor.
     #[error("root anchor: {0}")]
-    Root(#[from] onomancy_core::name::doc::ParseDocAnchorError),
+    Root(#[from] onomancy_core::anchor::doc::ParseDocAnchorError),
 
     /// The root document is not in the docs directory.
     #[error("root document not held: add {0}.automerge to --docs")]
     RootNotHeld(Box<DocAnchor>),
+
+    /// A carriage file was present but did not vouch its document —
+    /// refused rather than downgraded.
+    #[error("carriage does not vouch its document (refusing the doc): {0}")]
+    CarriageRefused(PathBuf),
+
+    /// A carriage file did not parse.
+    #[error("not a framed carriage: {0}")]
+    UnloadableCarriage(PathBuf),
 
     /// A doc file did not load as Automerge.
     #[error("not an automerge document: {0}")]

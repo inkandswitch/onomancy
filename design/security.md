@@ -27,7 +27,7 @@ Threat model, mitigations, and accepted residual risks. Read alongside [assumpti
 | Homograph/confusable DNS names (Cyrillic lookalikes) | Layered: A-label canonicalization + petname pinning + display-layer confusable detection (below) | attentive-user gap until display layer built |
 | Key borrowing via TXT (attacker's zone points at victim's pubkey) | Certificate binds `hostname` and is signed by the key owner — no valid cert for the attacker's hostname can exist | none |
 | Replay of superseded TXT record                      | Serial ratchet (stale must exceed; fresh may reset, surfaced)                         | ratchet poisoning (below) |
-| Stripped-record downgrade ("no binding here")        | Absence is never provable at v0 (ADR-045): a missing record is always a possible downgrade, never "no binding" — fails toward retention | closed by doctrine |
+| Stripped-record downgrade ("no binding here")        | Absence is never provable at v0: a missing record is always a possible downgrade, never "no binding" — fails toward retention | closed by doctrine |
 | Forged certificate                                   | Ed25519 sig + chain from baked-in KSK + TXT pubkey match                              | KSK compromise (below)    |
 | Malicious gossip peer                                | Records are self-authenticating; receiver verifies from own KSK                       | DoS only                  |
 | Malicious onomancer server                           | Serves signed records it cannot forge; delegation revocation cuts it off    | DoS only                  |
@@ -181,7 +181,7 @@ The protocol cannot outrun a hijacked registrar login. Boring hygiene carries re
 - _No borrowed authority in your root doc_ — you never sign attestations about DNS you can't back ([anchors.md](./anchors.md#consequence-1-dns-bindings-are-not-edges-in-your-root-doc))
 - _No expiration_ — revocation is explicit; freshness is advisory
 
-## Leaked generation keys (analysis 2026-08-21, ADR-057)
+## Leaked generation keys
 
 The signing bar (dns-anchor §Who Signs) is the _delegating hop_, so a root-granted generation key can sign certificates. What a leaked current generation key enables — and does not:
 

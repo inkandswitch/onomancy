@@ -7,11 +7,12 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
-use onomancy_core::{
-    name::{dns::DnsName, doc::DocAnchor},
+use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_dnssec::{
+    dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord},
+    validator::{Validator, WalkError},
 };
-use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_keyhive::mint;
 use onomancy_publish::{ceremony::migrate::Migrate as MigrateCeremony, signer::Signer};
@@ -120,7 +121,7 @@ impl Migrate {
         predecessor: &DocAnchor,
     ) -> Result<TxtRecord, MigrateError> {
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(hostname))??;
+        let chain = crate::block_on(provider.fetch_chain(hostname))??;
         let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 
         proof
@@ -140,11 +141,7 @@ pub(crate) enum MigrateError {
     #[error(transparent)]
     Ceremony(#[from] onomancy_publish::ceremony::CeremonyError),
 
-    /// The authority carriage could not be minted.
-    #[error(transparent)]
-    Mint(#[from] onomancy_keyhive::mint::MintError),
-
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 
@@ -154,11 +151,15 @@ pub(crate) enum MigrateError {
 
     /// The hostname did not parse.
     #[error("hostname: {0}")]
-    Hostname(#[from] onomancy_core::name::dns::ParseDnsNameError),
+    Hostname(#[from] onomancy_dnssec::dns_name::ParseDnsNameError),
 
     /// Artifact or runtime IO failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// The authority carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
 
     /// The zone publishes no record for the predecessor document.
     #[error("no live record attests the predecessor document — nothing to migrate from")]

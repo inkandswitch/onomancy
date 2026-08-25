@@ -7,13 +7,21 @@
 //! the greedy longest-key matching above this seam.
 
 use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value};
-use onomancy_core::name::{
-    doc::{self, DocAnchor},
-    segment::Segment,
+use onomancy_core::{
+    anchor::doc::{self, DocAnchor},
+    name::segment::Segment,
 };
-use onomancy_protocol::resolve::namestore::{Namestore, Replicas};
+use onomancy_protocol::resolve::namestore::{Authority, Namestore, Replicas, Vouched};
 
-use crate::RESERVED_KEY;
+/// The reserved top-level key Onomancy data lives under, in every
+/// document role: the flat namestore map in namestore documents
+/// (path-resolution spec, Namestore Layout), the decisions schema in
+/// decision documents (binding-cache spec, Schema).
+///
+/// The namestore location is a coordination point with upstream
+/// automerge-repo (design/names.md, open tension) — treat it as
+/// provisional until that lands.
+pub const RESERVED_KEY: &str = "onomancy";
 
 /// A namestore read from one held Automerge document.
 ///
@@ -110,16 +118,29 @@ fn parse_bare_reference(value: &Value<'_>) -> Option<DocAnchor> {
 /// the [`Replicas`] seam. `None` from [`Replicas::replica`] means
 /// "not replicated here": the walk reports `UnsyncedTarget`, the
 /// designed outcome under partition. Nothing here fetches.
+///
+/// Every held document carries the [`Authority`] grade it was vouched
+/// at; the walk folds the weakest grade crossed into its outcome.
 #[derive(Debug, Default)]
 pub struct HeldDocuments {
-    docs: onomancy_core::collections::Map<DocAnchor, Automerge>,
+    docs: onomancy_core::collections::Map<DocAnchor, (Automerge, Authority)>,
 }
 
 impl HeldDocuments {
-    /// Add (or replace) the held replica for `anchor`, builder-style.
+    /// Add (or replace) the held replica for `anchor` at the
+    /// dev-bridge grade ([`Authority::TrustedSubstrate`]),
+    /// builder-style.
     #[must_use]
-    pub fn with(mut self, anchor: DocAnchor, doc: Automerge) -> Self {
-        self.docs.insert(anchor, doc);
+    pub fn with(self, anchor: DocAnchor, doc: Automerge) -> Self {
+        self.with_vouched(anchor, doc, Authority::TrustedSubstrate)
+    }
+
+    /// Add (or replace) the held replica for `anchor` at an explicit
+    /// grade, builder-style. The grade is the CALLER's claim — verify
+    /// the carriage before claiming [`Authority::CarriageVerified`].
+    #[must_use]
+    pub fn with_vouched(mut self, anchor: DocAnchor, doc: Automerge, authority: Authority) -> Self {
+        self.docs.insert(anchor, (doc, authority));
         self
     }
 }
@@ -127,8 +148,10 @@ impl HeldDocuments {
 impl Replicas for HeldDocuments {
     type Namestore = DocumentNamestore;
 
-    fn replica(&self, target: &DocAnchor) -> Option<Self::Namestore> {
-        self.docs.get(target).cloned().map(DocumentNamestore::new)
+    fn replica(&self, target: &DocAnchor) -> Option<Vouched<Self::Namestore>> {
+        self.docs
+            .get(target)
+            .map(|(doc, authority)| Vouched::new(DocumentNamestore::new(doc.clone()), *authority))
     }
 }
 

@@ -188,12 +188,87 @@
           '';
         };
 
+        # Playwright tests against the built npm package: real
+        # Chromium + Firefox driving the wasm-bodge build.
+        ci-e2e = pkgs.writeShellApplication {
+          name = "onomancy-ci-e2e";
+          runtimeInputs = [
+            rust-toolchain
+            pkgs.esbuild
+            pkgs.nodejs
+            # wasm-bodge shells out to `wasm-bindgen`; the CLI must match
+            # the workspace's wasm-bindgen crate version (same pin as
+            # ci-browser).
+            unstable.wasm-bindgen-cli
+            wasm-bodge
+          ];
+          text = ''
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+
+            # --no-wasm-opt: wasm-bodge optimizes BEFORE wasm-bindgen
+            # runs, and -O4 mangles the closure-descriptor shims
+            # wasm-bindgen still needs — async exports then hit
+            # `unreachable` at runtime.
+            wasm-bodge build \
+              --crate-path onomancy_wasm \
+              --package-json onomancy_wasm/package.json \
+              --out-dir onomancy_wasm/dist \
+              --no-wasm-opt
+
+            cd onomancy_wasm/e2e
+            npm ci --no-audit --no-fund
+
+            # Start the static server here: Playwright's webServer
+            # spawner hardcodes /bin/sh, which NixOS doesn't ship.
+            node serve.mjs 8177 &
+            server_pid=$!
+            trap 'kill "$server_pid"' EXIT
+
+            # grep -v: Playwright acknowledges the skip-validation
+            # env var once per browser launch; drop the spam.
+            node node_modules/@playwright/test/cli.js test "$@" 2>&1 \
+              | { grep -v 'Skipping host requirements validation' || true; }
+          '';
+        };
+
         ci-all = pkgs.writeShellApplication {
           name = "onomancy-ci";
           runtimeInputs = pkgs.lib.attrValues ci-checks;
           text = pkgs.lib.concatMapStringsSep "\n"
             (check: "onomancy-${check}")
             (builtins.attrNames ci-checks);
+        };
+
+        # Build the Wasm module and serve the browser demos (the live
+        # verifier at / and documents-naming-documents at /names.html).
+        demo = pkgs.writeShellApplication {
+          name = "onomancy-demo";
+          runtimeInputs = [
+            rust-toolchain
+            unstable.wasm-bindgen-cli
+            pkgs.binaryen
+            pkgs.python3
+          ];
+          text = ''
+            if [ ! -f Cargo.toml ]; then
+              echo "run from the workspace root" >&2
+              exit 1
+            fi
+            port="''${1:-8080}"
+
+            cargo build -p onomancy_wasm --target wasm32-unknown-unknown --release
+            wasm-bindgen --target web --out-dir onomancy_wasm/demo/pkg \
+              target/wasm32-unknown-unknown/release/onomancy_wasm.wasm
+            wasm-opt -Oz -o onomancy_wasm/demo/pkg/onomancy_wasm_bg.wasm \
+              onomancy_wasm/demo/pkg/onomancy_wasm_bg.wasm
+
+            echo
+            echo "  verifier:  http://localhost:$port/"
+            echo "  names:     http://localhost:$port/names.html"
+            echo
+            exec python3 -m http.server --directory onomancy_wasm/demo "$port"
+          '';
         };
 
         # Built-in command modules from nix-command-utils
@@ -215,6 +290,32 @@
           (wasm.build { wasm-pack = pkgs.wasm-pack; })
           (wasm.release { wasm-pack = pkgs.wasm-pack; gzip = pkgs.gzip; })
           (wasm.doc { cargo = pkgs.cargo; xdg-open = pkgs.xdg-utils; })
+
+          # Onomancy-specific commands
+          (command-utils.asModule.${system} {
+            "wasm:bodge" = command-utils.cmd.${system}
+              "Build the npm package from onomancy_wasm (extra args pass through)" ''
+                export PATH="${pkgs.esbuild}/bin:$PATH"
+                # --no-wasm-opt: wasm-bodge optimizes BEFORE wasm-bindgen
+                # runs, and -O4 mangles the closure-descriptor shims
+                # wasm-bindgen still needs — async exports then hit
+                # `unreachable` at runtime.
+                exec ${wasm-bodge}/bin/wasm-bodge build \
+                  --crate-path onomancy_wasm \
+                  --package-json onomancy_wasm/package.json \
+                  --out-dir onomancy_wasm/dist \
+                  --no-wasm-opt \
+                  "$@"
+              '';
+            "wasm:demo" = command-utils.cmd.${system}
+              "Build & serve the browser demos (port arg, default 8080)" ''
+                exec ${demo}/bin/onomancy-demo "$@"
+              '';
+            "wasm:e2e" = command-utils.cmd.${system}
+              "Playwright browser tests against the built npm package" ''
+                exec ${ci-e2e}/bin/onomancy-ci-e2e "$@"
+              '';
+          })
         ];
       in {
         devShells.default = pkgs.mkShell {
@@ -227,6 +328,7 @@
               nightly-rustfmt
 
               pkgs.binaryen
+              pkgs.esbuild
               pkgs.nodejs
               pkgs.rust-analyzer
               pkgs.wasm-pack
@@ -255,7 +357,12 @@
             type = "app";
             program = "${check}/bin/onomancy-${name}";
           })
-          (ci-checks // { ci = ci-all; ci-browser = ci-browser; });
+          (ci-checks // {
+            ci = ci-all;
+            ci-browser = ci-browser;
+            ci-e2e = ci-e2e;
+            inherit demo;
+          });
 
         formatter = pkgs.alejandra;
       }

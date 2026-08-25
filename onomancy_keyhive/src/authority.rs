@@ -29,10 +29,9 @@ use keyhive_core::{
     principal::identifier::Identifier, store::ciphertext::memory::MemoryCiphertextStore,
 };
 use keyhive_crypto::signer::memory::MemorySigner;
-use onomancy_core::{
-    delegation::DelegationBytes, name::doc::DocAnchor, txt::generation_key::GenerationKey,
-};
-use onomancy_protocol::verifier_state::seam::AuthorityVerifier;
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
+use onomancy_dnssec::txt::generation_key::GenerationKey;
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 use rand::rngs::OsRng;
 
 use crate::carriage::Carriage;
@@ -62,7 +61,7 @@ impl KeyhiveAuthority {
     /// dependency-*compatible*, not perfectly sorted. Returns `None`
     /// when any entry fails to parse or never ingests — an authority
     /// proof with unreadable or dangling pieces proves nothing.
-    async fn replay(carriage: &[DelegationBytes]) -> Option<Instance> {
+    async fn replay(carriage: &DelegationChain) -> Option<Instance> {
         let events = Carriage::parse(carriage).ok()?.events().to_vec();
 
         let instance = Instance::generate(
@@ -100,6 +99,28 @@ impl KeyhiveAuthority {
     /// root key is the document's own authority), and Keyhive already
     /// refused any chain whose links escalate or dangle at ingest.
     ///
+    /// Whether `carriage` is a genuine delegation graph rooted at
+    /// `anchor`: every event signature-checks, the set ingests to a
+    /// fixpoint, and the materialized graph contains the anchor as a
+    /// group or document. Empty or unreadable carriages vouch nothing.
+    ///
+    /// This vouches the CARRIAGE, not the document's content —
+    /// content authorship is not checkable until signed operations
+    /// land upstream. Callers grade such documents
+    /// `Authority::CarriageVerified`, never higher.
+    #[must_use]
+    pub fn vouches_document(&self, anchor: &DocAnchor, carriage: &DelegationChain) -> bool {
+        block_on(async {
+            let Some(instance) = Self::replay(carriage).await else {
+                return false;
+            };
+
+            let id = Identifier(*anchor.verifying_key());
+            instance.get_group(id.into()).await.is_some()
+                || instance.get_document(id.into()).await.is_some()
+        })
+    }
+
     /// Direct membership only for now: naming chains through nested
     /// group intermediaries are future work.
     async fn sanctioned(instance: &Instance, root: &DocAnchor, signer: &VerifyingKey) -> bool {
@@ -134,7 +155,7 @@ impl AuthorityVerifier for KeyhiveAuthority {
         &self,
         root: &DocAnchor,
         signer: &VerifyingKey,
-        carriage: &[DelegationBytes],
+        carriage: &DelegationChain,
     ) -> bool {
         if signer == root.verifying_key() {
             return true;
@@ -149,7 +170,7 @@ impl AuthorityVerifier for KeyhiveAuthority {
         })
     }
 
-    fn on_path(&self, carriage: &[DelegationBytes], generation: &GenerationKey) -> bool {
+    fn on_path(&self, carriage: &DelegationChain, generation: &GenerationKey) -> bool {
         block_on(async {
             let Some(instance) = Self::replay(carriage).await else {
                 return false;
