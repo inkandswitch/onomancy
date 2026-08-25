@@ -1,7 +1,7 @@
-//! Sans-IO DNSSEC chain assembly: questions out, records in, framed
+//! Sans-IO DNSSEC chain building: questions out, records in, framed
 //! links.
 //!
-//! [`assembly::Assembly`] mirrors the validator's expected grammar
+//! [`builder::ChainBuilder`] mirrors the validator's expected grammar
 //! (root DNSKEY; DS + child DNSKEY per signed cut; CNAME hops; TXT
 //! leaf) but PROVES nothing — it selects and frames bytes; the
 //! sans-IO validator (`onomancy_dnssec`) renders every verdict.
@@ -16,9 +16,9 @@
 //! never this crate's.
 //!
 //! ```text
-//! Assembly::start(hostname) ──► Question ──► driver (any IO)
-//!        ▲                                       │
-//!        └───────── answer(records) ◄────────────┘
+//! ChainBuilder::start(hostname) ──► Question ──► driver (any IO)
+//!        ▲                                          │
+//!        └────────── answer(records) ◄──────────────┘
 //!                        │
 //!                        ├─► Step::Ask(machine, question)   (loop)
 //!                        └─► Step::Done(DnssecChain)
@@ -27,5 +27,5 @@
 #![forbid(unsafe_code)]
 
 pub mod answer;
-pub mod assembly;
+pub mod builder;
 pub mod question;

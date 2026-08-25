@@ -1,7 +1,7 @@
 //! The host DNSSEC chain courier: `ChainProvider` over real DNS.
 //!
 //! This crate is a byte courier and nothing more (ADR-006/ADR-040):
-//! it drives the sans-IO assembly machine (`onomancy_chain`) over
+//! it drives the sans-IO chain builder (`onomancy_chain`) over
 //! OS sockets, answering its questions — root DNSKEY, then DS +
 //! DNSKEY per signed zone cut, then the TXT leaf at
 //! `_onomancy.<hostname>` — so the machine can frame the link format

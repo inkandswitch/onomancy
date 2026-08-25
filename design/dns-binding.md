@@ -58,7 +58,7 @@ Two refinements defang ratchet poisoning: serials more than 5 minutes in the fut
 
 ### Generation Key
 
-Revocation needs a record-visible signal, or a revoked admin with an old-but-genuine delegation chain keeps verifying until sync luck delivers the news. Rather than shipping revocation lists (negative facts can't travel in attacker-assembled records) or enumerating the authorized set (grant churn), the record attests one **chokepoint**: `g=` names a key that every certificate's delegation chain must pass through, at any depth — a solo user attests their admin key directly; an org interposes a dedicated generation key over its signers.
+Revocation needs a record-visible signal, or a revoked admin with an old-but-genuine delegation chain keeps verifying until sync luck delivers the news. Rather than shipping revocation lists (negative facts can't travel in attacker-supplied records) or enumerating the authorized set (grant churn), the record attests one **chokepoint**: `g=` names a key that every certificate's delegation chain must pass through, at any depth — a solo user attests their admin key directly; an org interposes a dedicated generation key over its signers.
 
 ```
 doc ──▶ admin ──▶ Gₙ ──▶ {alice, bob, carol}

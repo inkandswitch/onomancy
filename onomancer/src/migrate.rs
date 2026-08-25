@@ -120,7 +120,7 @@ impl Migrate {
         predecessor: &DocAnchor,
     ) -> Result<TxtRecord, MigrateError> {
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(hostname))??;
+        let chain = crate::block_on(provider.fetch_chain(hostname))??;
         let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 
         proof
@@ -144,7 +144,7 @@ pub(crate) enum MigrateError {
     #[error(transparent)]
     Mint(#[from] onomancy_keyhive::mint::MintError),
 
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 

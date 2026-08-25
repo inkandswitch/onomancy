@@ -1,24 +1,21 @@
-//! The assembly walk as a sans-IO state machine.
+//! The chain-building walk as a sans-IO state machine.
 //!
 //! One question is in flight at a time; the next question depends
 //! only on accumulated answers, so the whole walk is a
-//! needs-query-out / records-in machine. [`Assembly::answer`]
+//! needs-query-out / records-in machine. [`ChainBuilder::answer`]
 //! consumes the machine and either hands it back with the next
 //! [`Question`] or yields the framed [`DnssecChain`] — a finished or
 //! failed machine cannot be answered again.
 
-// Foreign-enum wildcards are deliberate: any RData shape this
-// assembler does not recognize is simply not the record it is
-// looking for.
-#![allow(clippy::wildcard_enum_match_arm)]
-
 use hickory_proto::{
+    ProtoError,
     rr::{Name, RData, Record, RecordType},
     serialize::binary::{BinEncodable, BinEncoder},
 };
 use onomancy_core::{
     cert::chain::{ChainLink, DnssecChain},
     name::dns::DnsName,
+    wire::MAX_UNIT_BYTES,
 };
 
 use crate::question::Question;
@@ -26,28 +23,28 @@ use crate::question::Question;
 /// Bounded CNAME indirection, matching the validator's own limit.
 pub const MAX_CNAME_HOPS: usize = 8;
 
-/// The chain-assembly state machine: root DNSKEY, DS + DNSKEY per
+/// The chain-builder state machine: root DNSKEY, DS + DNSKEY per
 /// signed cut, then the TXT leaf with bounded CNAME re-roots.
 #[derive(Debug)]
-pub struct Assembly {
-    links: Vec<ChainLink>,
+pub struct ChainBuilder {
+    links: Links,
     /// The deepest cut descended so far (the root before any cut).
     current_zone: Name,
     phase: Phase,
 }
 
-impl Assembly {
-    /// Begin assembling the chain for `hostname`'s `_onomancy` owner
+impl ChainBuilder {
+    /// Begin building the chain for `hostname`'s `_onomancy` owner
     /// name. The first question is always the root DNSKEY `RRset`.
     ///
     /// # Errors
     ///
-    /// Returns [`AssembleError::UnrepresentableName`] when the
+    /// Returns [`BuildError::UnrepresentableName`] when the
     /// hostname does not fit under the `_onomancy` label.
-    pub fn start(hostname: &DnsName) -> Result<(Self, Question), AssembleError> {
+    pub fn start(hostname: &DnsName) -> Result<(Self, Question), BuildError> {
         let owner = onomancy_owner(hostname)?;
-        let assembly = Self {
-            links: Vec::new(),
+        let builder = Self {
+            links: Links::default(),
             current_zone: Name::root(),
             phase: Phase::RootKeys { owner },
         };
@@ -55,7 +52,7 @@ impl Assembly {
             name: Name::root(),
             rtype: RecordType::DNSKEY,
         };
-        Ok((assembly, question))
+        Ok((builder, question))
     }
 
     /// Feed the answer-section records for the question this machine
@@ -65,11 +62,18 @@ impl Assembly {
     /// round, [`Step::Done`] is the framed chain. Framability is not
     /// validity: a framed chain may still fail the validator.
     ///
+    /// Non-matching records error at the frame — with one deliberate
+    /// exception: a DS probe whose answer holds no matching DS data
+    /// reads as "not a signed cut" and the descent moves on (ADR-045:
+    /// absence is never proven at v0), so records answering the wrong
+    /// question are absorbed there rather than rejected.
+    ///
     /// # Errors
     ///
-    /// Returns [`AssembleError`] for answers that cannot be framed
-    /// (no TXT leaf, missing signatures, runaway CNAME chains).
-    pub fn answer(self, records: Vec<Record>) -> Result<Step, AssembleError> {
+    /// Returns [`BuildError`] for answers that cannot be framed
+    /// (no TXT leaf, missing signatures, runaway CNAME chains, a
+    /// chain past the unit cap).
+    pub fn answer(self, records: Vec<Record>) -> Result<Step, BuildError> {
         let Self {
             mut links,
             current_zone,
@@ -78,8 +82,14 @@ impl Assembly {
 
         match phase {
             Phase::RootKeys { owner } => {
-                links.push(frame_rrset(&records, &Name::root(), RecordType::DNSKEY)?);
-                descend(links, owner.clone(), Resume::Leaf { owner })
+                links.push(frame_rrset(&records, &Name::root(), RecordType::DNSKEY)?)?;
+                descend(
+                    links,
+                    owner.clone(),
+                    1,
+                    Name::root(),
+                    Resume::Leaf { owner },
+                )
             }
 
             Phase::Descent(descent) => descent.answer(links, &records),
@@ -101,8 +111,8 @@ impl Assembly {
 #[must_use]
 #[allow(clippy::large_enum_variant)] // transient: destructured immediately, never stored
 pub enum Step {
-    /// Ask this question, then feed the answer to [`Assembly::answer`].
-    Ask(Assembly, Question),
+    /// Ask this question, then feed the answer to [`ChainBuilder::answer`].
+    Ask(ChainBuilder, Question),
 
     /// Every link is framed; the machine is spent.
     Done(DnssecChain),
@@ -121,8 +131,35 @@ enum Phase {
     Leaf { owner: Name },
 }
 
-/// A root-down cut descent: probe every suffix of `name`, framing a
-/// DS + DNSKEY link pair per signed cut.
+/// The framed links plus a running byte total enforcing the unit cap:
+/// a chain that could never ride a certificate's attached region
+/// (`MAX_UNIT_BYTES`) is unframeable by construction, bounding what a
+/// malicious resolver can make the machine hold.
+#[derive(Debug, Default)]
+struct Links {
+    links: Vec<ChainLink>,
+    bytes: usize,
+}
+
+impl Links {
+    fn push(&mut self, link: ChainLink) -> Result<(), BuildError> {
+        self.bytes = self.bytes.saturating_add(link.as_bytes().len());
+
+        if self.bytes > MAX_UNIT_BYTES {
+            return Err(BuildError::OversizeChain { bytes: self.bytes });
+        }
+
+        self.links.push(link);
+        Ok(())
+    }
+
+    fn into_chain(self) -> DnssecChain {
+        DnssecChain::from(self.links)
+    }
+}
+
+/// A cut descent down one branch: probe each suffix of `name` from a
+/// starting depth, framing a DS + DNSKEY link pair per signed cut.
 #[derive(Debug)]
 struct Descent {
     /// The full name whose branch is being descended.
@@ -138,11 +175,7 @@ struct Descent {
 }
 
 impl Descent {
-    fn answer(
-        mut self,
-        mut links: Vec<ChainLink>,
-        records: &[Record],
-    ) -> Result<Step, AssembleError> {
+    fn answer(mut self, mut links: Links, records: &[Record]) -> Result<Step, BuildError> {
         let zone = self.name.trim_to(usize::from(self.depth));
 
         match self.awaiting {
@@ -151,7 +184,7 @@ impl Descent {
                     return self.next_cut(links); // not a zone cut, or an unsigned one
                 }
 
-                links.push(frame_rrset(records, &zone, RecordType::DS)?);
+                links.push(frame_rrset(records, &zone, RecordType::DS)?)?;
                 self.awaiting = Cut::Dnskey;
                 let question = Question {
                     name: zone,
@@ -161,7 +194,7 @@ impl Descent {
             }
 
             Cut::Dnskey => {
-                links.push(frame_rrset(records, &zone, RecordType::DNSKEY)?);
+                links.push(frame_rrset(records, &zone, RecordType::DNSKEY)?)?;
                 self.deepest = zone;
                 self.next_cut(links)
             }
@@ -169,7 +202,7 @@ impl Descent {
     }
 
     /// Move to the next suffix's DS probe, or finish the descent.
-    fn next_cut(mut self, links: Vec<ChainLink>) -> Result<Step, AssembleError> {
+    fn next_cut(mut self, links: Links) -> Result<Step, BuildError> {
         if self.depth >= self.name.num_labels() {
             return finish_descent(links, self.deepest, self.resume);
         }
@@ -184,8 +217,8 @@ impl Descent {
     }
 
     /// Repack this descent into a suspended machine.
-    fn suspend(self, links: Vec<ChainLink>) -> Assembly {
-        Assembly {
+    fn suspend(self, links: Links) -> ChainBuilder {
+        ChainBuilder {
             links,
             // Unread while descending; `finish_descent` sets the real one.
             current_zone: Name::root(),
@@ -207,14 +240,15 @@ enum Resume {
     /// Ask for the TXT leaf at the `_onomancy` owner (first descent).
     Leaf { owner: Name },
 
-    /// Continue walking an already-held leaf answer (re-root descent).
+    /// Continue walking an already-held leaf answer (mid-walk descent).
     Walk(Walk),
 }
 
 /// The CNAME walk over one leaf answer: recursive resolvers return
 /// the whole CNAME chain plus the final TXT in a single answer
-/// section, so no further leaf queries are needed — only re-root
-/// descents for cross-zone hops.
+/// section, so no further leaf queries are needed — only cut descents
+/// for hop targets (root-down on a cross-zone hop, below the current
+/// zone for an in-zone target under a deeper cut).
 #[derive(Debug)]
 struct Walk {
     answers: Vec<Record>,
@@ -225,28 +259,25 @@ struct Walk {
 
 impl Walk {
     /// Frame leaf links until done, out of hops, or suspended on a
-    /// cross-zone re-root descent. Pure: consumes no new answers.
-    fn advance(
-        mut self,
-        mut links: Vec<ChainLink>,
-        current_zone: &Name,
-    ) -> Result<Step, AssembleError> {
+    /// cut descent for a hop target. Pure: consumes no new answers.
+    fn advance(mut self, mut links: Links, current_zone: &Name) -> Result<Step, BuildError> {
         loop {
             if self.remaining == 0 {
-                return Err(AssembleError::TooManyCnames);
+                return Err(BuildError::TooManyCnames);
             }
             self.remaining -= 1;
 
             if has_data(&self.answers, &self.current, RecordType::TXT) {
-                links.push(frame_rrset(&self.answers, &self.current, RecordType::TXT)?);
-                return Ok(Step::Done(DnssecChain::from(links)));
+                links.push(frame_rrset(&self.answers, &self.current, RecordType::TXT)?)?;
+                return Ok(Step::Done(links.into_chain()));
             }
 
+            #[allow(clippy::wildcard_enum_match_arm)] // any other RData is not a CNAME
             let Some(target) = self.answers.iter().find_map(|record| match &record.data {
                 RData::CNAME(cname) if record.name == self.current => Some(cname.0.clone()),
                 _ => None,
             }) else {
-                return Err(AssembleError::MissingRrset {
+                return Err(BuildError::MissingRrset {
                     owner: self.current.to_ascii(),
                     rtype: RecordType::TXT,
                 });
@@ -256,60 +287,69 @@ impl Walk {
                 &self.answers,
                 &self.current,
                 RecordType::CNAME,
-            )?);
+            )?)?;
 
-            // A hop out of the deepest descended zone re-descends the
-            // target's branch root-down, matching the validator's
-            // re-root rule.
-            let rerooted = !current_zone.zone_of(&target);
+            // Descend whatever signed cuts the target's branch holds
+            // that are not already framed: a hop out of the deepest
+            // descended zone re-descends root-down (the validator's
+            // re-root rule); a hop WITHIN it may still land under a
+            // deeper cut, so probe the labels below the current zone.
+            let (from_depth, base) = if current_zone.zone_of(&target) {
+                (current_zone.num_labels() + 1, current_zone.clone())
+            } else {
+                (1, Name::root())
+            };
             self.current = target.clone();
 
-            if rerooted {
-                return descend(links, target, Resume::Walk(self));
+            if from_depth <= target.num_labels() {
+                return descend(links, target, from_depth, base, Resume::Walk(self));
             }
         }
     }
 }
 
-/// Start a root-down descent of `name`'s branch: ask about the
-/// shallowest suffix, or resume immediately when there is none.
-fn descend(links: Vec<ChainLink>, name: Name, resume: Resume) -> Result<Step, AssembleError> {
-    if name.num_labels() == 0 {
-        return finish_descent(links, Name::root(), resume);
+/// Descend `name`'s branch from `from_depth` (1-based): ask about
+/// that suffix, or resume immediately when no suffixes remain.
+/// `deepest` seeds the resulting zone when no new cut is framed.
+fn descend(
+    links: Links,
+    name: Name,
+    from_depth: u8,
+    deepest: Name,
+    resume: Resume,
+) -> Result<Step, BuildError> {
+    if from_depth > name.num_labels() {
+        return finish_descent(links, deepest, resume);
     }
 
     let descent = Descent {
-        depth: 1,
+        depth: from_depth,
         awaiting: Cut::Ds,
-        deepest: Name::root(),
+        deepest,
         resume,
         name,
     };
     let question = Question {
-        name: descent.name.trim_to(1),
+        name: descent.name.trim_to(usize::from(from_depth)),
         rtype: RecordType::DS,
     };
     Ok(Step::Ask(descent.suspend(links), question))
 }
 
 /// Resume after a descent: the deepest cut becomes the current zone.
-fn finish_descent(
-    links: Vec<ChainLink>,
-    deepest: Name,
-    resume: Resume,
-) -> Result<Step, AssembleError> {
+fn finish_descent(links: Links, deepest: Name, resume: Resume) -> Result<Step, BuildError> {
     match resume {
         Resume::Leaf { owner } => {
             let question = Question {
                 name: owner.clone(),
                 rtype: RecordType::TXT,
             };
-            let assembly = Assembly {
+            let builder = ChainBuilder {
                 links,
                 current_zone: deepest,
                 phase: Phase::Leaf { owner },
             };
-            Ok(Step::Ask(assembly, question))
+            Ok(Step::Ask(builder, question))
         }
 
         Resume::Walk(walk) => walk.advance(links, &deepest),
@@ -317,9 +357,8 @@ fn finish_descent(
 }
 
 /// `_onomancy.<hostname>.` as a hickory name.
-fn onomancy_owner(hostname: &DnsName) -> Result<Name, AssembleError> {
-    Name::from_ascii(format!("_onomancy.{hostname}."))
-        .map_err(|_| AssembleError::UnrepresentableName)
+fn onomancy_owner(hostname: &DnsName) -> Result<Name, BuildError> {
+    Name::from_ascii(format!("_onomancy.{hostname}.")).map_err(BuildError::UnrepresentableName)
 }
 
 /// Whether `answers` holds any data record of `rtype` at `owner`.
@@ -335,7 +374,7 @@ fn frame_rrset(
     answers: &[Record],
     owner: &Name,
     rtype: RecordType,
-) -> Result<ChainLink, AssembleError> {
+) -> Result<ChainLink, BuildError> {
     let data: Vec<&Record> = answers
         .iter()
         .filter(|record| record.record_type() == rtype && record.name == *owner)
@@ -346,7 +385,7 @@ fn frame_rrset(
         .collect();
 
     if data.is_empty() || signatures.is_empty() {
-        return Err(AssembleError::MissingRrset {
+        return Err(BuildError::MissingRrset {
             owner: owner.to_ascii(),
             rtype,
         });
@@ -363,40 +402,42 @@ fn frame_rrset(
 /// The type an RRSIG record covers (the first two RDATA octets),
 /// `None` for non-RRSIG records.
 ///
-/// Without hickory's DNSSEC feature, RRSIG RDATA arrives as opaque
-/// `Unknown` bytes — RFC 3597 forbids compression inside unknown-type
-/// RDATA (and RFC 4034 forbids it in RRSIG specifically), so the raw
-/// bytes are exactly the wire form the validator needs.
+/// Read from re-encoded wire bytes, never from the `RData` enum
+/// shape: with hickory's DNSSEC feature off, RRSIG rides as RFC 3597
+/// `Unknown` bytes, but Cargo feature unification in a downstream
+/// build can silently switch it to the typed variant — the wire form
+/// is identical either way, so this stays correct under both.
 fn covered_type(record: &Record) -> Option<u16> {
-    match &record.data {
-        RData::Unknown { code, rdata } if *code == RecordType::RRSIG => {
-            let bytes = rdata.anything.as_slice();
-            Some(u16::from_be_bytes([*bytes.first()?, *bytes.get(1)?]))
-        }
-        _ => None,
+    if record.record_type() != RecordType::RRSIG {
+        return None;
     }
+
+    let mut rdata = Vec::new();
+    let mut encoder = BinEncoder::new(&mut rdata);
+    encoder.set_canonical_form(true);
+    record.data.emit(&mut encoder).ok()?;
+
+    Some(u16::from_be_bytes([*rdata.first()?, *rdata.get(1)?]))
 }
 
 /// Append one record in uncompressed, DNSSEC-canonical wire form.
-fn encode_canonical(record: &Record, bytes: &mut Vec<u8>) -> Result<(), AssembleError> {
+fn encode_canonical(record: &Record, bytes: &mut Vec<u8>) -> Result<(), BuildError> {
     let mut buffer = Vec::new();
     let mut encoder = BinEncoder::new(&mut buffer);
     encoder.set_canonical_form(true);
-    record
-        .emit(&mut encoder)
-        .map_err(|_| AssembleError::Encode)?;
+    record.emit(&mut encoder).map_err(BuildError::Encode)?;
     bytes.extend_from_slice(&buffer);
     Ok(())
 }
 
-/// Chain assembly failed — unframeable answers, never a transport
+/// Chain builder failed — unframeable answers, never a transport
 /// failure (the driver's) and never a validity verdict (the
 /// validator's).
 #[derive(Debug, thiserror::Error)]
-pub enum AssembleError {
+pub enum BuildError {
     /// A record could not be re-encoded to wire form.
     #[error("record could not be re-encoded")]
-    Encode,
+    Encode(#[source] ProtoError),
 
     /// An expected `RRset` (or its covering RRSIG) was absent.
     #[error("no {rtype} RRset with signatures at {owner}")]
@@ -407,6 +448,15 @@ pub enum AssembleError {
         rtype: RecordType,
     },
 
+    /// The framed links outgrew the certificate unit cap
+    /// (`MAX_UNIT_BYTES`); such a chain could never ride a
+    /// certificate's attached region.
+    #[error("framed chain of {bytes} bytes exceeds the unit cap")]
+    OversizeChain {
+        /// The running total that crossed the cap.
+        bytes: usize,
+    },
+
     /// The CNAME chain exceeded the hop bound.
     #[error("more than {MAX_CNAME_HOPS} CNAME hops")]
     TooManyCnames,
@@ -414,7 +464,7 @@ pub enum AssembleError {
     /// The hostname does not fit in a DNS wire name with the
     /// `_onomancy` label prepended.
     #[error("hostname does not fit under the _onomancy label")]
-    UnrepresentableName,
+    UnrepresentableName(#[source] ProtoError),
 }
 
 #[cfg(test)]
@@ -433,8 +483,8 @@ mod tests {
     fn drive(
         answers: &HashMap<(Name, RecordType), Vec<Record>>,
         hostname: &DnsName,
-    ) -> Result<DnssecChain, AssembleError> {
-        let (mut assembly, mut question) = Assembly::start(hostname)?;
+    ) -> Result<DnssecChain, BuildError> {
+        let (mut builder, mut question) = ChainBuilder::start(hostname)?;
 
         loop {
             let records = answers
@@ -442,14 +492,38 @@ mod tests {
                 .cloned()
                 .unwrap_or_default();
 
-            match assembly.answer(records)? {
+            match builder.answer(records)? {
                 Step::Ask(next, asked) => {
-                    assembly = next;
+                    builder = next;
                     question = asked;
                 }
                 Step::Done(chain) => return Ok(chain),
             }
         }
+    }
+
+    /// The link types of a framed chain, parsed under the strict
+    /// validator grammar.
+    fn link_types(chain: &DnssecChain) -> TestResult<Vec<RrType>> {
+        Ok(chain
+            .links()
+            .iter()
+            .map(|link| Ok(Link::parse(link)?.rtype()))
+            .collect::<Result<_, onomancy_dnssec::link::ParseLinkError>>()?)
+    }
+
+    /// A signed DS + DNSKEY answer pair for `zone`.
+    fn signed_cut(zone: &Name) -> [((Name, RecordType), Vec<Record>); 2] {
+        [
+            (
+                (zone.clone(), RecordType::DS),
+                vec![ds_record(zone), rrsig_record(zone, RecordType::DS)],
+            ),
+            (
+                (zone.clone(), RecordType::DNSKEY),
+                vec![dnskey_record(zone), rrsig_record(zone, RecordType::DNSKEY)],
+            ),
+        ]
     }
 
     fn owner() -> Name {
@@ -566,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn assembled_leaves_follow_cnames_in_order() -> TestResult {
+    fn leaves_follow_cnames_in_order() -> TestResult {
         let at = owner();
         let target = Name::from_ascii("alias.example.net.").expect("valid name");
 
@@ -602,50 +676,19 @@ mod tests {
             txt_record(&target),
             rrsig_record(&target, RecordType::TXT),
         ];
-        let map = transport(vec![
-            (
-                (source_zone.clone(), RecordType::DS),
-                vec![
-                    ds_record(&source_zone),
-                    rrsig_record(&source_zone, RecordType::DS),
-                ],
-            ),
-            (
-                (source_zone.clone(), RecordType::DNSKEY),
-                vec![
-                    dnskey_record(&source_zone),
-                    rrsig_record(&source_zone, RecordType::DNSKEY),
-                ],
-            ),
-            (
-                (target_zone.clone(), RecordType::DS),
-                vec![
-                    ds_record(&target_zone),
-                    rrsig_record(&target_zone, RecordType::DS),
-                ],
-            ),
-            (
-                (target_zone.clone(), RecordType::DNSKEY),
-                vec![
-                    dnskey_record(&target_zone),
-                    rrsig_record(&target_zone, RecordType::DNSKEY),
-                ],
-            ),
-            ((at, RecordType::TXT), leaf_answers),
-        ]);
+        let mut extra: Vec<((Name, RecordType), Vec<Record>)> = Vec::new();
+        extra.extend(signed_cut(&source_zone));
+        extra.extend(signed_cut(&target_zone));
+        extra.push(((at, RecordType::TXT), leaf_answers));
+        let map = transport(extra);
 
         let chain = drive(&map, &hostname()?)?;
-        let types: Vec<RrType> = chain
-            .links()
-            .iter()
-            .map(|link| Ok(Link::parse(link)?.rtype()))
-            .collect::<Result<_, onomancy_dnssec::link::ParseLinkError>>()?;
 
         // Root keys, the source branch, the hop, then the TARGET
         // branch re-descended from the root — the validator's re-root
         // shape.
         assert_eq!(
-            types,
+            link_types(&chain)?,
             vec![
                 RrType::DNSKEY,
                 RrType::DS,
@@ -660,13 +703,91 @@ mod tests {
     }
 
     #[test]
+    fn in_zone_cnames_descend_intermediate_deeper_cuts() -> TestResult {
+        // CNAME target stays inside the current zone but lands under
+        // a DEEPER signed cut: the walk must frame that cut's DS +
+        // DNSKEY, or the (legitimate, validatable) chain can never
+        // validate.
+        let at = owner();
+        let source_zone = Name::from_ascii("example.com.").expect("valid name");
+        let child_zone = Name::from_ascii("certs.example.com.").expect("valid name");
+        let target = Name::from_ascii("binding.certs.example.com.").expect("valid name");
+
+        let leaf_answers = vec![
+            cname_record(&at, &target),
+            rrsig_record(&at, RecordType::CNAME),
+            txt_record(&target),
+            rrsig_record(&target, RecordType::TXT),
+        ];
+        let mut extra: Vec<((Name, RecordType), Vec<Record>)> = Vec::new();
+        extra.extend(signed_cut(&source_zone));
+        extra.extend(signed_cut(&child_zone));
+        extra.push(((at, RecordType::TXT), leaf_answers));
+        let map = transport(extra);
+
+        let chain = drive(&map, &hostname()?)?;
+
+        // Root keys, the source cut, the hop, then the child cut
+        // probed below the current zone (no re-root: example.com's
+        // links are not re-framed).
+        assert_eq!(
+            link_types(&chain)?,
+            vec![
+                RrType::DNSKEY,
+                RrType::DS,
+                RrType::DNSKEY,
+                RrType::CNAME,
+                RrType::DS,
+                RrType::DNSKEY,
+                RrType::TXT,
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn in_zone_cnames_without_deeper_cuts_stay_flat() -> TestResult {
+        // Same-zone target with no intervening signed cut: DS probes
+        // below the current zone come back empty and no extra links
+        // are framed.
+        let at = owner();
+        let source_zone = Name::from_ascii("example.com.").expect("valid name");
+        let target = Name::from_ascii("binding.pages.example.com.").expect("valid name");
+
+        let leaf_answers = vec![
+            cname_record(&at, &target),
+            rrsig_record(&at, RecordType::CNAME),
+            txt_record(&target),
+            rrsig_record(&target, RecordType::TXT),
+        ];
+        let mut extra: Vec<((Name, RecordType), Vec<Record>)> = Vec::new();
+        extra.extend(signed_cut(&source_zone));
+        extra.push(((at, RecordType::TXT), leaf_answers));
+        let map = transport(extra);
+
+        let chain = drive(&map, &hostname()?)?;
+
+        assert_eq!(
+            link_types(&chain)?,
+            vec![
+                RrType::DNSKEY,
+                RrType::DS,
+                RrType::DNSKEY,
+                RrType::CNAME,
+                RrType::TXT,
+            ],
+        );
+        Ok(())
+    }
+
+    #[test]
     fn missing_signatures_are_unframeable() {
         let at = owner();
         let unsigned = vec![txt_record(&at)];
 
         assert!(matches!(
             frame_rrset(&unsigned, &at, RecordType::TXT),
-            Err(AssembleError::MissingRrset { .. })
+            Err(BuildError::MissingRrset { .. })
         ));
     }
 
@@ -678,7 +799,7 @@ mod tests {
 
         assert!(matches!(
             drive(&map, &hostname()?),
-            Err(AssembleError::MissingRrset { .. })
+            Err(BuildError::MissingRrset { .. })
         ));
         Ok(())
     }
@@ -694,8 +815,37 @@ mod tests {
 
         assert!(matches!(
             drive(&map, &hostname()?),
-            Err(AssembleError::TooManyCnames)
+            Err(BuildError::TooManyCnames)
         ));
         Ok(())
+    }
+
+    #[test]
+    fn oversize_chains_are_unframeable() -> TestResult {
+        // A malicious resolver stuffing giant RRsets hits the unit
+        // cap instead of growing the machine without bound.
+        let at = owner();
+        let mut answers: Vec<Record> = (0..1100)
+            .map(|_| {
+                Record::from_rdata(
+                    at.clone(),
+                    300,
+                    RData::TXT(TXT::new(vec!["x".repeat(255); 4])),
+                )
+            })
+            .collect();
+        answers.push(rrsig_record(&at, RecordType::TXT));
+        let map = transport(vec![((at, RecordType::TXT), answers)]);
+
+        assert!(matches!(
+            drive(&map, &hostname()?),
+            Err(BuildError::OversizeChain { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn hop_bound_matches_the_validator() {
+        assert_eq!(MAX_CNAME_HOPS, onomancy_dnssec::validator::MAX_CNAME_HOPS);
     }
 }

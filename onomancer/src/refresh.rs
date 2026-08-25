@@ -37,7 +37,7 @@ impl Refresh {
         let certificate = Certificate::decode(&std::fs::read(&self.cert)?)?;
 
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(certificate.hostname()))??;
+        let chain = crate::block_on(provider.fetch_chain(certificate.hostname()))??;
         let proof = Validator::iana().validate_detailed(certificate.hostname(), &chain)?;
 
         let plan = RefreshCeremony {
@@ -63,7 +63,7 @@ pub(crate) enum RefreshError {
     #[error("certificate: {0}")]
     Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
 
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 

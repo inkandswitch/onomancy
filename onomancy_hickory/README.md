@@ -1,6 +1,6 @@
 # onomancy_hickory
 
-The host DNSSEC chain courier: `ChainProvider` over real DNS — a deliberately minimal stub transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`, built on [hickory-proto]'s message types) driving the sans-IO assembly machine (`onomancy_chain`).
+The host DNSSEC chain courier: `ChainProvider` over real DNS — a deliberately minimal stub transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`, built on [hickory-proto]'s message types) driving the sans-IO chain builder (`onomancy_chain`).
 
 ```text
 HickoryProvider::chain(hostname)
@@ -22,7 +22,7 @@ A CNAME hop out of the descended subtree triggers a fresh root-down cut descent 
 
 ## Upstreams
 
-`HickoryProvider::system()` discovers resolvers from `/etc/resolv.conf` (falling back to a public resolver when none parse); explicit constructors take one server, `.or(addr)` appends fallbacks. Assembly tries upstreams in order and returns the last failure only when all fail.
+`HickoryProvider::system()` discovers resolvers from `/etc/resolv.conf` (falling back to a public resolver when none parse); explicit constructors take one server, `.or(addr)` appends fallbacks. Fetching tries upstreams in order and returns the last failure only when all fail.
 
 ## Known limitations
 

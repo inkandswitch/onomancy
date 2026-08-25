@@ -1,4 +1,4 @@
-//! The Plan: a ceremony's output — neutral, inspectable, applyable.
+//! The Plan: a ceremony's output — neutral, inspectable, ready to apply.
 //!
 //! A Plan is NOT an API call: DNS-hosting interfaces are wildly
 //! heterogeneous (dashboards, RFC 2136, provider APIs, zone files),

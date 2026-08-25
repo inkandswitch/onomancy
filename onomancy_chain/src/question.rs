@@ -1,4 +1,4 @@
-//! One DNS question — what the assembler asks and a driver answers.
+//! One DNS question — what the chain builder asks and a driver answers.
 
 use hickory_proto::{
     op::{Edns, Message, MessageType, OpCode, Query as DnsQuery},

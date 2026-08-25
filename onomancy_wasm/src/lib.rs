@@ -5,6 +5,8 @@
 
 #[cfg(feature = "doh")]
 pub mod doh;
+#[cfg(feature = "doh")]
+pub mod resolve;
 
 use onomancy_core::name::{Name, anchor::Anchor};
 use wasm_bindgen::prelude::*;

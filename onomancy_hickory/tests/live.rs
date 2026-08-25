@@ -6,7 +6,7 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use onomancy_chain::assembly::AssembleError;
+use onomancy_chain::builder::BuildError;
 use onomancy_core::name::dns::DnsName;
 use onomancy_hickory::provider::{FetchChainError, HickoryProvider};
 use onomancy_protocol::chain_provider::ChainProvider;
@@ -22,7 +22,7 @@ async fn walks_a_real_signed_zone_to_a_missing_leaf() {
     let hostname = DnsName::parse("cloudflare.com").expect("valid hostname");
 
     match provider.chain(&hostname).await {
-        Err(FetchChainError::Assemble(AssembleError::MissingRrset { owner, .. })) => {
+        Err(FetchChainError::Build(BuildError::MissingRrset { owner, .. })) => {
             assert!(
                 owner.starts_with("_onomancy."),
                 "failed at the leaf: {owner}"

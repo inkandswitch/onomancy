@@ -22,7 +22,7 @@ use alloc::boxed::Box;
 
 /// Bind `hostname` to `document`, attesting `generation`.
 ///
-/// Assemble the intent keylessly; the signer surfaces only in
+/// Build the intent keylessly; the signer surfaces only in
 /// [`Bind::plan`].
 #[derive(Debug, Clone)]
 pub struct Bind {

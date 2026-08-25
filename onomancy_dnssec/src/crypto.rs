@@ -1,4 +1,4 @@
-//! The signature glue: canonical signed-data assembly, per-algorithm
+//! The signature glue: canonical signed-data construction, per-algorithm
 //! verification, and the DS digest check.
 //!
 //! # The Signed Data (RFC 4035 §5.3.2)
@@ -73,7 +73,7 @@ pub fn verify_rrsig(link: &Link, rrsig: &Rrsig, key: &Dnskey) -> Result<(), Veri
     )
 }
 
-/// Assemble the RFC 4035 §5.3.2 signed data for one (link, RRSIG)
+/// Construct the RFC 4035 §5.3.2 signed data for one (link, RRSIG)
 /// pair.
 ///
 /// # Errors
@@ -367,7 +367,7 @@ mod tests {
         preamble.extend_from_slice(&dnskey.key_tag().to_be_bytes());
         preamble.extend_from_slice(b"\x06expede\x03wtf\x00");
 
-        // Assemble the signed data by the same rules and sign it.
+        // Construct the signed data by the same rules and sign it.
         let mut sorted: Vec<&[u8]> = rdatas.to_vec();
         sorted.sort_unstable();
         sorted.dedup();

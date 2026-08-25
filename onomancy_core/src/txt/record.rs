@@ -62,7 +62,7 @@ pub struct TxtRecord {
 }
 
 impl TxtRecord {
-    /// Assemble a record from parts (the publisher path).
+    /// Build a record from parts (the publisher path).
     #[must_use]
     pub const fn new(serial: Serial, generation: GenerationKey, document: DocAnchor) -> Self {
         Self {

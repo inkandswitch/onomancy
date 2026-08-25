@@ -140,13 +140,13 @@ fn fetch_chain(
     hostname: &DnsName,
 ) -> Result<DnssecChain, RecordError> {
     let provider = crate::provider(resolver);
-    Ok(crate::block_on(provider.assemble(hostname))??)
+    Ok(crate::block_on(provider.fetch_chain(hostname))??)
 }
 
 /// Record generation failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RecordError {
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 

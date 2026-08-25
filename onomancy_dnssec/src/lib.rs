@@ -25,7 +25,7 @@
 //!   types, record framing, RDATA views (strict,
 //!   reject-never-normalize)
 //! - [`link`] — one chain link as (`RRset`, covering RRSIGs)
-//! - [`crypto`] — canonical signed-data assembly, per-algorithm
+//! - [`crypto`] — canonical signed-data construction, per-algorithm
 //!   signature verification (8/13/15), the DS digest check
 //! - [`anchor`] — DS-form trust anchors + the baked-in IANA root KSKs
 //! - [`validator`] — the walk: [`Validator`](validator::Validator)

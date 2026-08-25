@@ -46,7 +46,10 @@ use crate::{
 };
 
 /// Maximum CNAME indirections followed on the `_onomancy` owner name.
-const MAX_CNAME_HOPS: usize = 8;
+///
+/// Public so the chain builder (`onomancy_chain`) can pin parity in a
+/// test — the two limits must never drift apart silently.
+pub const MAX_CNAME_HOPS: usize = 8;
 
 /// The chain-validation walk, rooted at a trust-anchor set.
 #[derive(Debug, Clone)]

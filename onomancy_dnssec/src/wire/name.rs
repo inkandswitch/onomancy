@@ -100,7 +100,7 @@ impl Name {
         Self { labels }
     }
 
-    /// Assemble a name from raw labels — crate-internal, for callers
+    /// Build a name from raw labels — crate-internal, for callers
     /// whose labels are already valid (existing names, the wildcard
     /// `*`).
     pub(crate) const fn from_labels(labels: Vec<Vec<u8>>) -> Self {

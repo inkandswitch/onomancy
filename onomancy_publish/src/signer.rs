@@ -2,7 +2,7 @@
 //! nothing else.
 //!
 //! Ceremonies take a `Signer` as their last ingredient so intent can
-//! be assembled keylessly and the key surfaces only at the edge —
+//! be built keylessly and the key surfaces only at the edge —
 //! matching the operational shape (cold admin keys come out for
 //! genuine ceremonies only; refresh never needs one).
 

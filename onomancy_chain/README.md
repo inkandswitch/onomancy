@@ -1,11 +1,11 @@
 # onomancy_chain
 
-Sans-IO DNSSEC chain assembly: a state machine that turns recursive-resolver answers into the framed links the validator walks — without performing any IO itself.
+Sans-IO DNSSEC chain building: a state machine that turns recursive-resolver answers into the framed links the validator walks — without performing any IO itself.
 
 ```text
-Assembly::start(hostname) ──► Question ──► driver (any IO)
-       ▲                                       │
-       └───────── answer(records) ◄────────────┘
+ChainBuilder::start(hostname) ──► Question ──► driver (any IO)
+       ▲                                          │
+       └────────── answer(records) ◄──────────────┘
                        │
                        ├─► Step::Ask(machine, question)   (loop)
                        └─► Step::Done(DnssecChain)
@@ -23,11 +23,14 @@ The machine never queries anything: each step yields the next `Question`, the dr
 A driver is a loop:
 
 ```rust,ignore
-let (mut assembly, mut question) = Assembly::start(&hostname)?;
+let (mut builder, mut question) = ChainBuilder::start(&hostname)?;
 loop {
     let records = transport.query(&question).await?; // driver's IO, driver's error
-    match assembly.answer(records)? {
-        Step::Ask(next, asked) => (assembly, question) = (next, asked),
+    match builder.answer(records)? {
+        Step::Ask(next, asked) => {
+            builder = next;
+            question = asked;
+        }
         Step::Done(chain) => break chain,
     }
 }

@@ -1,10 +1,13 @@
-//! The host chain courier: the sans-IO assembly machine
+//! The host chain courier: the sans-IO chain builder
 //! (`onomancy_chain`) driven over the stub resolver, with upstream
 //! failover.
 
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    fs,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+};
 
-use onomancy_chain::assembly::{AssembleError, Assembly, Step};
+use onomancy_chain::builder::{BuildError, ChainBuilder, Step};
 use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
 use onomancy_protocol::chain_provider::ChainProvider;
 
@@ -13,25 +16,27 @@ use crate::stub::{QueryError, StubResolver};
 /// The fallback of last resort when no upstream is configured or
 /// discoverable.
 pub const FALLBACK_UPSTREAM: SocketAddr =
-    SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(1, 1, 1, 1)), 53);
+    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 53);
 
-/// The host chain courier: assembles a hostname's full DNSSEC chain
+/// The host chain courier: fetches a hostname's full DNSSEC chain
 /// by querying recursive resolvers over UDP/TCP, trying each upstream
 /// in order until one yields a framable chain.
 ///
-/// Nonempty by construction: every constructor guarantees at least
-/// one upstream.
+/// Nonempty by construction: the first upstream is a dedicated field,
+/// so no runtime emptiness check exists to fail.
 #[derive(Debug, Clone)]
 pub struct HickoryProvider {
-    upstreams: Vec<StubResolver>,
+    first: StubResolver,
+    rest: Vec<StubResolver>,
 }
 
 impl HickoryProvider {
     /// A provider querying the single recursive resolver at `server`.
     #[must_use]
-    pub fn new(server: SocketAddr) -> Self {
+    pub const fn new(server: SocketAddr) -> Self {
         Self {
-            upstreams: vec![StubResolver::new(server)],
+            first: StubResolver::new(server),
+            rest: Vec::new(),
         }
     }
 
@@ -41,58 +46,70 @@ impl HickoryProvider {
     /// exists or none of its entries parse.
     #[must_use]
     pub fn system() -> Self {
-        let mut servers = resolv_conf_upstreams();
-        servers.push(FALLBACK_UPSTREAM);
+        let mut discovered = resolv_conf_upstreams().into_iter().map(StubResolver::new);
+        let fallback = StubResolver::new(FALLBACK_UPSTREAM);
 
-        Self {
-            upstreams: servers.into_iter().map(StubResolver::new).collect(),
+        match discovered.next() {
+            Some(first) => Self {
+                first,
+                rest: discovered.chain([fallback]).collect(),
+            },
+            None => Self {
+                first: fallback,
+                rest: Vec::new(),
+            },
         }
     }
 
     /// Add a fallback upstream, tried after the existing ones.
     #[must_use]
     pub fn or(mut self, server: SocketAddr) -> Self {
-        self.upstreams.push(StubResolver::new(server));
+        self.rest.push(StubResolver::new(server));
         self
     }
 
     /// A provider over one pre-configured stub.
     #[must_use]
-    pub fn from_stub(stub: StubResolver) -> Self {
+    pub const fn from_stub(stub: StubResolver) -> Self {
         Self {
-            upstreams: vec![stub],
+            first: stub,
+            rest: Vec::new(),
         }
     }
 
     /// Fetch and frame the full chain for `hostname`'s `_onomancy`
     /// owner name, failing over across upstreams.
     ///
+    /// Failover advances only on transport or framing failure: an
+    /// upstream that returns framable-but-bogus records "succeeds"
+    /// here and is only unmasked by the validator — framability is
+    /// not validity. Callers that validate can retry with a different
+    /// provider if the verdict warrants it.
+    ///
     /// # Errors
     ///
     /// Returns the LAST upstream's [`FetchChainError`] when every
-    /// upstream fails. Framability is not validity: a framed chain
-    /// may still fail the validator.
-    ///
-    /// # Panics
-    ///
-    /// Never: constructors guarantee at least one upstream.
-    pub async fn assemble(&self, hostname: &DnsName) -> Result<DnssecChain, FetchChainError> {
-        let mut last_failure: Option<FetchChainError> = None;
+    /// upstream fails.
+    pub async fn fetch_chain(&self, hostname: &DnsName) -> Result<DnssecChain, FetchChainError> {
+        let mut last_failure = match drive(&self.first, hostname).await {
+            Ok(chain) => return Ok(chain),
+            Err(failure) => {
+                tracing::debug!(%hostname, %failure, "upstream failed, trying next");
+                failure
+            }
+        };
 
-        for upstream in &self.upstreams {
+        for upstream in &self.rest {
             match drive(upstream, hostname).await {
                 Ok(chain) => return Ok(chain),
                 Err(failure) => {
                     tracing::debug!(%hostname, %failure, "upstream failed, trying next");
-                    last_failure = Some(failure);
+                    last_failure = failure;
                 }
             }
         }
 
-        match last_failure {
-            Some(failure) => Err(failure),
-            None => unreachable!("constructors guarantee at least one upstream"),
-        }
+        Err(last_failure)
     }
 }
 
@@ -100,28 +117,7 @@ impl ChainProvider for HickoryProvider {
     type Error = FetchChainError;
 
     async fn chain(&self, hostname: &DnsName) -> Result<DnssecChain, FetchChainError> {
-        self.assemble(hostname).await
-    }
-}
-
-/// Drive the sans-IO assembly machine against one upstream: answer
-/// each question over the socket until the chain is framed.
-async fn drive(
-    upstream: &StubResolver,
-    hostname: &DnsName,
-) -> Result<DnssecChain, FetchChainError> {
-    let (mut assembly, mut question) = Assembly::start(hostname)?;
-
-    loop {
-        let records = upstream.query(&question).await?;
-
-        match assembly.answer(records)? {
-            Step::Ask(next, asked) => {
-                assembly = next;
-                question = asked;
-            }
-            Step::Done(chain) => return Ok(chain),
-        }
+        self.fetch_chain(hostname).await
     }
 }
 
@@ -131,23 +127,45 @@ async fn drive(
 pub enum FetchChainError {
     /// The answers could not be framed into a chain.
     #[error(transparent)]
-    Assemble(#[from] AssembleError),
+    Build(#[from] BuildError),
 
     /// A query failed at the transport level.
     #[error(transparent)]
-    Query(#[from] QueryError),
+    Transport(#[from] QueryError),
+}
+
+/// Drive the sans-IO chain builder against one upstream: answer
+/// each question over the socket until the chain is framed.
+async fn drive(
+    upstream: &StubResolver,
+    hostname: &DnsName,
+) -> Result<DnssecChain, FetchChainError> {
+    let (mut builder, mut question) = ChainBuilder::start(hostname)?;
+
+    loop {
+        let records = upstream.query(&question).await?;
+
+        match builder.answer(records)? {
+            Step::Ask(next, asked) => {
+                builder = next;
+                question = asked;
+            }
+            Step::Done(chain) => return Ok(chain),
+        }
+    }
 }
 
 /// The `nameserver` entries of `/etc/resolv.conf`, in file order.
-/// Unreadable files and unparseable entries (e.g. scoped IPv6) yield
+/// Unreadable files and unparsable entries (e.g. scoped IPv6) yield
 /// nothing — discovery degrades, never errors.
 fn resolv_conf_upstreams() -> Vec<SocketAddr> {
-    let Ok(text) = std::fs::read_to_string("/etc/resolv.conf") else {
+    let Ok(text) = fs::read_to_string("/etc/resolv.conf") else {
         return Vec::new();
     };
 
     text.lines()
         .filter_map(|line| line.strip_prefix("nameserver"))
+        .filter(|rest| rest.starts_with(char::is_whitespace))
         .filter_map(|rest| rest.split_whitespace().next())
         .filter_map(|address| address.parse::<IpAddr>().ok())
         .map(|address| SocketAddr::new(address, 53))

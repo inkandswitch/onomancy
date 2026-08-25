@@ -91,7 +91,7 @@ impl Resolve {
 
         // The live zone: fetch → walk from the baked-in IANA anchors.
         let provider = crate::provider(self.resolver);
-        let chain = crate::block_on(provider.assemble(&hostname))??;
+        let chain = crate::block_on(provider.fetch_chain(&hostname))??;
 
         say(&format!("chain: {} links fetched", chain.links().len()));
 
@@ -172,7 +172,7 @@ pub(crate) fn stateful_pass(
         .collect::<Result<_, _>>()?;
 
     let provider = crate::provider(resolver);
-    match crate::block_on(provider.assemble(hostname))? {
+    match crate::block_on(provider.fetch_chain(hostname))? {
         Ok(chain) => {
             say(&format!("chain: {} links fetched", chain.links().len()));
             new_items.push(Item::ChainRefresh {
@@ -298,7 +298,7 @@ fn now_seconds() -> u64 {
 /// Resolution failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ResolveError {
-    /// The chain could not be assembled from live DNS.
+    /// The chain could not be fetched from live DNS.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 

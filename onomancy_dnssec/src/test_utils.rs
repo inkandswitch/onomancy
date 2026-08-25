@@ -117,7 +117,7 @@ impl Zone {
         }
     }
 
-    /// Sign an `RRset` (RFC 4035 §5.3.2 assembly) into an RRSIG
+    /// Sign an `RRset` (RFC 4035 §5.3.2 construction) into an RRSIG
     /// record, with the owner's own label count.
     ///
     /// # Panics

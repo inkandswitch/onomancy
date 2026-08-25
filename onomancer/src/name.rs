@@ -46,7 +46,7 @@ impl NameWalk {
     ///
     /// # Errors
     ///
-    /// Returns [`NameError`] for unparseable inputs, anchor-resolution
+    /// Returns [`NameError`] for unparsable inputs, anchor-resolution
     /// failures, and IO failures. A partial WALK is a report, not an
     /// error (the designed norm under partition).
     pub(crate) fn run(&self) -> Result<(), NameError> {
@@ -100,7 +100,7 @@ impl NameWalk {
             Anchor::Dns(hostname) => {
                 // Live: the zone's word for this hostname's document.
                 let provider = crate::provider(self.resolver);
-                let chain = crate::block_on(provider.assemble(hostname))??;
+                let chain = crate::block_on(provider.fetch_chain(hostname))??;
                 let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 
                 proof
@@ -171,7 +171,7 @@ pub(crate) enum NameError {
         source: onomancy_core::name::doc::ParseDocAnchorError,
     },
 
-    /// The live chain could not be assembled.
+    /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),
 
