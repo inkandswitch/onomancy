@@ -12,7 +12,7 @@ use clap::Args;
 use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
 use onomancy_core::{
     delegation,
-    name::{anchor::Anchor, doc::DocAnchor, Name},
+    name::{Name, anchor::Anchor, doc::DocAnchor},
 };
 use onomancy_dnssec::validator::{Validator, WalkError};
 use onomancy_hickory::provider::FetchChainError;

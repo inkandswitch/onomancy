@@ -9,7 +9,7 @@
 
 extern crate alloc;
 
-pub mod cert;
+pub mod certificate;
 pub mod collections;
 pub mod content_hash;
 pub mod delegation;

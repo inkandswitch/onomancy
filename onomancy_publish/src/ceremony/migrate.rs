@@ -9,7 +9,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     time::UnixSeconds,

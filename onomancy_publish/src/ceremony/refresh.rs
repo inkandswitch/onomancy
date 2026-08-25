@@ -8,7 +8,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::{
-    cert::{Certificate, chain::DnssecChain},
+    certificate::{Certificate, chain::DnssecChain},
     time::UnixSeconds,
     txt::record::TxtRecord,
 };

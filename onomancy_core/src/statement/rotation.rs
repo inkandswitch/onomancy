@@ -2,13 +2,15 @@
 //!
 //! # Wire Format
 //!
-//! ```text
-//! ┌──────────┬──────────┬──────────┬───────────┬───────────┬──────────────┐
-//! │ ONR\x00  │ root_doc │ replaced │ successor │ signature │ carriage     │
-//! │   4B     │   32B    │   32B    │   32B     │   64B     │ count+entries│
-//! └──────────┴──────────┴──────────┴───────────┴───────────┴──────────────┘
-//!  └────────────── signed (fields 0–3) ───────┘
-//! ```
+//! | # | Field             | Type            | Width  | Notes                             | Signed |
+//! |---|-------------------|-----------------|--------|-----------------------------------|--------|
+//! | 0 | tag               | magic bytes     | 4B     | `ONR\x00`                         | yes    |
+//! | 1 | `root_doc`        | ed25519 vk      | 32B    | document whose generation rotates | yes    |
+//! | 2 | `replaced`        | ed25519 vk      | 32B    | Gₙ, the generation key retired    | yes    |
+//! | 3 | `successor`       | ed25519 vk      | 32B    | Gₙ₊₁; also the signer             | yes    |
+//! | 4 | `signature`       | ed25519         | 64B    | by `successor` over fields 0–3    | —      |
+//! | 5 | `authority_count` | bijou64         | varies |                                   | no     |
+//! | 6 | `authority`       | entry list      | varies | len-prefixed carriage entries     | no     |
 //!
 //! No hostname appears, deliberately: a revoked generation must die
 //! across every name bound to the document in one ceremony, and
@@ -27,45 +29,13 @@ use crate::{
     delegation::{self, DelegationBytes},
     digest::Digest,
     name::doc::DocAnchor,
-    signed::{Malformed, Payload, Signed},
+    signed::{
+        Signed,
+        payload::{Malformed, Payload},
+    },
     txt::generation_key::GenerationKey,
     wire::{self, OversizeUnit, Reader, WireError},
 };
-
-/// The signed fields: `root_doc`'s generation `replaced` (Gₙ) is
-/// retired in favor of `successor` (Gₙ₊₁), attested by the successor
-/// key itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rotation {
-    root_doc: DocAnchor,
-    replaced: GenerationKey,
-    successor: GenerationKey,
-}
-
-impl Payload for Rotation {
-    const TAG: [u8; 4] = *b"ONR\x00";
-
-    type Error = DecodeRotationError;
-
-    fn encode_fields(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(self.root_doc.verifying_key().as_bytes());
-        buf.extend_from_slice(self.replaced.verifying_key().as_bytes());
-        buf.extend_from_slice(self.successor.verifying_key().as_bytes());
-    }
-
-    fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, DecodeRotationError> {
-        Ok(Self {
-            root_doc: DocAnchor::from(read_key(reader, FieldName::RootDoc)?),
-            replaced: GenerationKey::from(read_key(reader, FieldName::Replaced)?),
-            successor: GenerationKey::from(read_key(reader, FieldName::Successor)?),
-        })
-    }
-
-    /// The signer IS the successor generation key.
-    fn signer(&self) -> &VerifyingKey {
-        self.successor.verifying_key()
-    }
-}
 
 /// A decoded, signature-checked rotation statement unit:
 /// [`Signed<Rotation>`] traveling with its authority carriage.
@@ -187,6 +157,41 @@ impl Hash for RotationStatement {
     /// By digest, which the canonical bytes determine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.digest.hash(state);
+    }
+}
+
+/// The signed fields: `root_doc`'s generation `replaced` (Gₙ) is
+/// retired in favor of `successor` (Gₙ₊₁), attested by the successor
+/// key itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rotation {
+    root_doc: DocAnchor,
+    replaced: GenerationKey,
+    successor: GenerationKey,
+}
+
+impl Payload for Rotation {
+    const TAG: [u8; 4] = *b"ONR\x00";
+
+    type Error = DecodeRotationError;
+
+    fn encode_fields(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(self.root_doc.verifying_key().as_bytes());
+        buf.extend_from_slice(self.replaced.verifying_key().as_bytes());
+        buf.extend_from_slice(self.successor.verifying_key().as_bytes());
+    }
+
+    fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, DecodeRotationError> {
+        Ok(Self {
+            root_doc: DocAnchor::from(read_key(reader, FieldName::RootDoc)?),
+            replaced: GenerationKey::from(read_key(reader, FieldName::Replaced)?),
+            successor: GenerationKey::from(read_key(reader, FieldName::Successor)?),
+        })
+    }
+
+    /// The signer IS the successor generation key.
+    fn signer(&self) -> &VerifyingKey {
+        self.successor.verifying_key()
     }
 }
 

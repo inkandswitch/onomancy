@@ -9,13 +9,15 @@
 //!
 //! # Wire Format
 //!
-//! ```text
-//! ┌───────┬───────────┬──────────────┬────────────────┬────────────────┐
-//! │v=ONO0 │ k=ed25519 │ n=<≤20 digit>│ g=<44 base64>  │ p=<44 base64>  │
-//! │  6B   │    9B     │    2–22B     │      46B       │      46B       │
-//! └───────┴───────────┴──────────────┴────────────────┴────────────────┘
-//!            joined by single `;` — at most 133 octets total
-//! ```
+//! | Field       | Type    | Width | Notes                           |
+//! |-------------|---------|-------|---------------------------------|
+//! | `v=ONO0`    | literal | 6B    | format tag                      |
+//! | `k=ed25519` | literal | 9B    | key algorithm                   |
+//! | `n=<…>`     | digits  | 2–22B | serial, ≤ 20 digits             |
+//! | `g=<…>`     | base64  | 46B   | generation key, 44 chars        |
+//! | `p=<…>`     | base64  | 46B   | document key, 44 chars          |
+//!
+//! Fields joined by single `;` — at most 133 octets total.
 //!
 //! # `RRset` Dispositions
 //!

@@ -14,7 +14,7 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},

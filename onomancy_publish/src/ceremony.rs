@@ -14,7 +14,7 @@ pub mod rotate;
 
 use alloc::boxed::Box;
 use onomancy_core::{
-    cert::Certificate,
+    certificate::Certificate,
     collections::Map,
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},
@@ -27,7 +27,7 @@ use onomancy_protocol::verifier_state::{
     decisions::Decisions,
     memory::{MemoryAuthority, MemoryValidator},
     seam::ChainProof,
-    store::{Item, Store},
+    store::{Store, item::Item},
 };
 
 /// The simulated chain window around `now`: comfortably fresh, zero

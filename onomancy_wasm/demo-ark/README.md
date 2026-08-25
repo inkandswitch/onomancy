@@ -14,7 +14,7 @@ A Node spike driving [`@automerge/automerge-repo-keyhive`][ARK] (ARK) as the doc
 ## Bridge notes (found the hard way)
 
 - ARK imports `@automerge/automerge-subduction/slim` (uninitialized); under Node, `import "@automerge/automerge-subduction"` first — its node entrypoint runs `initSync` on the shared wasm module.
-- Automerge JS strings are `Text` objects; the onomancy namestore reader (and `note` reader) demand SCALAR strings. JS writers must use `new ImmutableString(...)` for namestore values.
+- Namestore references are ATOMIC values (spec condition E5: composite values never resolve), and automerge JS strings are collaborative `Text` by default — so JS writers use `new ImmutableString(...)` for namestore values. This is writer-side by design: reading `Text` leniently would let concurrent character-level merges splice two anchors into garbage. The eventual npm package should export a `writeEdge(handle, path, target)` helper so this cannot be gotten wrong.
 - Pin `@automerge/automerge-repo` to ARK's exact lineage (`-subduction.*` builds); a second copy from the main line breaks `repo.subduction`.
 
 ## Run

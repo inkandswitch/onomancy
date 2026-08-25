@@ -7,7 +7,7 @@
 
 use std::{fs, path::PathBuf};
 
-use onomancy_core::{cert::chain::DnssecChain, txt::serial::Serial};
+use onomancy_core::{certificate::chain::DnssecChain, txt::serial::Serial};
 use onomancy_protocol::verifier_state::seam::ChainProof;
 use testresult::TestResult;
 

@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use clap::Args;
 use onomancy_core::{delegation, name::doc::DocAnchor};
-use onomancy_keyhive::mint::{document_carriage, MintError};
+use onomancy_keyhive::mint::{MintError, document_carriage};
 
 use crate::{say, seed::SeedError};
 

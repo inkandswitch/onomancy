@@ -7,18 +7,25 @@
 //! the signed region, so a parser reads the tag and keys at constant
 //! offsets without decoding a single varint:
 //!
-//! ```text
-//!  signed (fields 0–9) ──────────────────────────────────────────┐
-//! ┌─────────┬──────────┬────────┬───────────┬──────────┬─────────┤
-//! │ ONC\x00 │ root_doc │ signer │ issued_at │ hostname │ heads   │
-//! │   4B    │   32B    │  32B   │  varint   │ len+bytes│ cnt+32B×│
-//! ├─────────┴──────────┴────────┴───────────┴──────────┴─────────┤
-//! │ predecessor: len + one ONS\x00 unit (len 0 = none)           │
-//! ├───────────┬───────────────────────────────────────────────────┤
-//! │ signature │ attached: delegation_chain · lineage · chain     │
-//! │   64B     │ (count+entries ×3 — NOT signed, see below)       │
-//! └───────────┴───────────────────────────────────────────────────┘
-//! ```
+//! | #  | Field              | Type            | Width        | Notes                        | Signed |
+//! |----|--------------------|-----------------|--------------|------------------------------|--------|
+//! | 0  | tag                | magic bytes     | 4B           | `ONC\x00`                    | yes    |
+//! | 1  | `root_doc`         | ed25519 vk      | 32B          | the document ID              | yes    |
+//! | 2  | `signer`           | ed25519 vk      | 32B          |                              | yes    |
+//! | 3  | `issued_at`        | bijou64         | varies       | seconds since epoch (UTC)    | yes    |
+//! | 4  | `hostname_len`     | bijou64         | varies       |                              | yes    |
+//! | 5  | `hostname`         | ASCII           | `hostname_len` | A-labels, lowercase        | yes    |
+//! | 6  | `heads_count`      | bijou64         | varies       | 0 = live (unpinned)          | yes    |
+//! | 7  | `heads`            | change hashes   | count × 32B  | sorted ascending, deduped    | yes    |
+//! | 8  | `predecessor_len`  | bijou64         | varies       | 0 = none                     | yes    |
+//! | 9  | `predecessor`      | `ONS\x00` unit  | len          |                              | yes    |
+//! | 10 | `signature`        | ed25519         | 64B          | by `signer` over fields 0–9  | —      |
+//! | 11 | `delegation_count` | bijou64         | varies       |                              | no     |
+//! | 12 | `delegation_chain` | entry list      | varies       | len-prefixed Keyhive bytes   | no     |
+//! | 13 | `lineage_count`    | bijou64         | varies       | 0 = never rotated            | no     |
+//! | 14 | `lineage`          | entry list      | varies       | len-prefixed `ONR\x00` units | no     |
+//! | 15 | `chain_count`      | bijou64         | varies       |                              | no     |
+//! | 16 | `chain`            | entry list      | varies       | DNSSEC chain framing         | no     |
 //!
 //! The unit is [`Signed<Binding>`](crate::signed::Signed) plus the
 //! attached region. Decoded units rederive their canonical bytes
@@ -38,18 +45,15 @@
 //! are the *same certificate* ([`Certificate::same_certificate`])
 //! carrying different evidence — but different store items with
 //! different [digests](Certificate::digest).
-//!
-//! # Module Organization
-//!
-//! - [`chain`] — [`DnssecChain`](chain::DnssecChain) framing
 
+pub mod binding;
 pub mod chain;
 
 use alloc::{boxed::Box, vec::Vec};
 use core::hash::{Hash, Hasher};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
-use self::chain::DnssecChain;
+use self::{binding::Binding, chain::DnssecChain};
 use crate::{
     delegation::{self, DelegationBytes},
     digest::Digest,
@@ -57,7 +61,10 @@ use crate::{
         dns::{CanonicalDnsNameError, DnsName},
         doc::{DocAnchor, Head},
     },
-    signed::{Malformed, Payload, Signed},
+    signed::{
+        Signed,
+        payload::{Malformed, Payload},
+    },
     statement::{
         rotation::{DecodeRotationError, RotationStatement},
         successor::{DecodeSuccessorError, SuccessorStatement},
@@ -65,80 +72,6 @@ use crate::{
     time::UnixSeconds,
     wire::{self, OversizeUnit, Reader, WireError},
 };
-
-/// The signed fields: `hostname` is bound to `root_doc`, attested by
-/// `signer` (a delegated admin key) at `issued_at`, optionally with
-/// advisory `heads` and a succession proof from a `predecessor`
-/// document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Binding {
-    root_doc: DocAnchor,
-    signer: VerifyingKey,
-    issued_at: UnixSeconds,
-    hostname: DnsName,
-    heads: Vec<Head>,
-    predecessor: Option<Box<SuccessorStatement>>,
-}
-
-impl Payload for Binding {
-    const TAG: [u8; 4] = *b"ONC\x00";
-
-    type Error = DecodeCertificateError;
-
-    fn encode_fields(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(self.root_doc.verifying_key().as_bytes());
-        buf.extend_from_slice(self.signer.as_bytes());
-        wire::put_varint(buf, self.issued_at.value());
-        wire::put_varint(buf, self.hostname.as_str().len() as u64);
-        buf.extend_from_slice(self.hostname.as_str().as_bytes());
-
-        wire::put_varint(buf, self.heads.len() as u64);
-        for head in &self.heads {
-            buf.extend_from_slice(head.as_bytes());
-        }
-
-        match &self.predecessor {
-            None => wire::put_varint(buf, 0),
-            Some(statement) => {
-                let unit = statement.encode();
-                wire::put_varint(buf, unit.len() as u64);
-                buf.extend_from_slice(&unit);
-            }
-        }
-    }
-
-    fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, DecodeCertificateError> {
-        let root_doc = DocAnchor::from(read_key(reader, FieldName::RootDoc)?);
-        let signer = read_key(reader, FieldName::Signer)?;
-        let issued_at = UnixSeconds::from(reader.varint()?);
-
-        let hostname_len = reader.bounded_len(1)?;
-        let hostname = DnsName::from_canonical(reader.take(hostname_len)?)?;
-
-        let heads = read_heads(reader)?;
-
-        let predecessor_len = reader.bounded_len(1)?;
-        let predecessor = if predecessor_len == 0 {
-            None
-        } else {
-            let unit = reader.take(predecessor_len)?;
-            Some(Box::new(SuccessorStatement::decode(unit)?))
-        };
-
-        Ok(Self {
-            root_doc,
-            signer,
-            issued_at,
-            hostname,
-            heads,
-            predecessor,
-        })
-    }
-
-    fn signer(&self) -> &VerifyingKey {
-        &self.signer
-    }
-}
 
 /// A decoded, signature-checked certificate unit:
 /// [`Signed<Binding>`] plus the attached region.

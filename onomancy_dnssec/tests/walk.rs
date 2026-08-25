@@ -5,7 +5,7 @@
 #![allow(clippy::indexing_slicing, clippy::panic)]
 
 use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
+    certificate::chain::{ChainLink, DnssecChain},
     name::dns::DnsName,
     time::UnixSeconds,
     txt::serial::Serial,
@@ -18,7 +18,8 @@ use onomancy_dnssec::{
     validator::{Validator, WalkError},
     wire::{
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{CLASS_IN, Record},
+        rr_type::RrType,
     },
 };
 

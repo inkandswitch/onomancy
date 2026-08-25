@@ -46,7 +46,7 @@ pub mod store;
 use alloc::{vec, vec::Vec};
 
 use onomancy_core::{
-    cert::Certificate,
+    certificate::Certificate,
     collections::{Map, Set},
     content_hash::ContentHash,
     delegation::DelegationBytes,
@@ -66,7 +66,7 @@ use self::{
         HostState, SuccessionFork,
     },
     seam::{AuthorityVerifier, ChainProof, ChainValidator},
-    store::{Item, Store},
+    store::{Store, item::Item},
 };
 use crate::ladder::{self, Contender, Continuity, Verdict};
 

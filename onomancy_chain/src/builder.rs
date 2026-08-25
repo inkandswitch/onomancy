@@ -13,7 +13,7 @@ use hickory_proto::{
     serialize::binary::{BinEncodable, BinEncoder},
 };
 use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
+    certificate::chain::{ChainLink, DnssecChain},
     name::dns::DnsName,
     wire::MAX_UNIT_BYTES,
 };
@@ -477,7 +477,7 @@ mod tests {
     use onomancy_dnssec::{
         link::{Link, ParseLinkError},
         validator::MAX_CNAME_HOPS as VALIDATOR_MAX_CNAME_HOPS,
-        wire::record::RrType,
+        wire::rr_type::RrType,
     };
     use testresult::TestResult;
 

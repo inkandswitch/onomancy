@@ -22,7 +22,7 @@ use onomancy_protocol::{
         decisions::{Acceptance, Claim, Decisions},
         memory::{MemoryAuthority, MemoryValidator},
         output::{BindingGrade, ContinuityGrade, HostState},
-        store::{Item, Store},
+        store::{Store, item::Item},
     },
 };
 

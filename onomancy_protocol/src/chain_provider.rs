@@ -11,7 +11,7 @@
 
 use core::future::Future;
 
-use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
+use onomancy_core::{certificate::chain::DnssecChain, name::dns::DnsName};
 
 /// Fetches the DNSSEC chain for a hostname's `_onomancy` TXT record.
 ///

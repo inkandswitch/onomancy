@@ -8,7 +8,7 @@ use std::{
 
 use clap::Args;
 use onomancy_core::{
-    cert::Certificate,
+    certificate::Certificate,
     collections::Map,
     freshness::Freshness,
     name::dns::DnsName,
@@ -23,7 +23,7 @@ use onomancy_protocol::{
         VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
-        store::Item,
+        store::item::Item,
     },
     verify::{self, Rejection},
 };
@@ -316,7 +316,7 @@ pub(crate) enum ResolveError {
 
     /// An ingested `.onc` did not decode.
     #[error("certificate: {0}")]
-    Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
+    Certificate(#[from] onomancy_core::certificate::DecodeCertificateError),
 
     /// An ingested `.onr` did not decode.
     #[error("rotation statement: {0}")]

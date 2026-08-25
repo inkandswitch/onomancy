@@ -12,7 +12,7 @@
 
 use std::{fs, path::Path};
 
-use onomancy_core::cert::chain::DnssecChain;
+use onomancy_core::certificate::chain::DnssecChain;
 use onomancy_dnssec::test_utils::fixtures::all_fixtures;
 
 fn main() -> std::io::Result<()> {

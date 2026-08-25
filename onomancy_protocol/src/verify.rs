@@ -20,7 +20,7 @@
 use ed25519_dalek::VerifyingKey;
 
 use onomancy_core::{
-    cert::{Certificate, DecodeCertificateError},
+    certificate::{Certificate, DecodeCertificateError},
     freshness::{ChainWindow, Freshness},
     name::{dns::DnsName, doc::DocAnchor},
     time::UnixSeconds,

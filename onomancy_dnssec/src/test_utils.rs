@@ -13,7 +13,7 @@ pub mod fixtures;
 use ed25519_dalek::{Signer as _, SigningKey};
 
 use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
+    certificate::chain::{ChainLink, DnssecChain},
     name::dns::DnsName,
 };
 
@@ -22,10 +22,11 @@ use crate::{
     crypto,
     wire::{
         algorithm::Algorithm,
+        digest::DigestType,
         dnskey::Dnskey,
-        ds::DigestType,
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{CLASS_IN, Record},
+        rr_type::RrType,
     },
 };
 

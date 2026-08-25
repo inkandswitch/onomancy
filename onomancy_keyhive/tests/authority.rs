@@ -8,7 +8,7 @@ use future_form::Sendable;
 use futures::executor::block_on;
 use keyhive_core::{
     access::Access,
-    event::{static_event::StaticEvent, Event},
+    event::{Event, static_event::StaticEvent},
     keyhive::Keyhive,
     listener::no_listener::NoListener,
     principal::{identifier::Identifier, individual::op::KeyOp, membered::Membered},

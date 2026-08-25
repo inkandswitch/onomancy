@@ -8,7 +8,7 @@ use alloc::{format, string::String, vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    cert::chain::{ChainLink, DnssecChain},
+    certificate::chain::{ChainLink, DnssecChain},
     name::{dns::DnsName, doc::DocAnchor},
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
@@ -18,7 +18,8 @@ use crate::{
     anchor::TrustAnchor,
     wire::{
         name::Name,
-        record::{CLASS_IN, Record, RrType},
+        record::{CLASS_IN, Record},
+        rr_type::RrType,
     },
 };
 

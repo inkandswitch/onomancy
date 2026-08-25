@@ -36,7 +36,7 @@ fn main() {
         // that decodes (hashes are over verbatim bytes).
         let digest = match vector.expect {
             vectors_catalog::Expect::Certificate => Some(
-                onomancy_core::cert::Certificate::decode(&vector.bytes)
+                onomancy_core::certificate::Certificate::decode(&vector.bytes)
                     .expect("accept vector decodes")
                     .digest()
                     .to_string(),

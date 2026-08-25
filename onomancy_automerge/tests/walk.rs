@@ -9,11 +9,11 @@
 
 #![allow(clippy::panic)] // assertion failures in tests
 
-use automerge::{transaction::Transactable, Automerge, ObjType};
+use automerge::{Automerge, ObjType, transaction::Transactable};
 use ed25519_dalek::SigningKey;
 use onomancy_automerge::{
-    namestore::{DocumentNamestore, HeldDocuments},
     RESERVED_KEY,
+    namestore::{DocumentNamestore, HeldDocuments},
 };
 use onomancy_core::name::{doc::DocAnchor, segment::Segment};
 use onomancy_protocol::resolve::{

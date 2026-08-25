@@ -34,7 +34,7 @@ use super::{
     BindingEvidence,
     decisions::Decisions,
     seam::{AuthorityVerifier, ChainValidator},
-    store::{Item, Store},
+    store::{Store, item::Item},
     validate_and_extract,
 };
 

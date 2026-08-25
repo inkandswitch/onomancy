@@ -187,12 +187,12 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
     };
     let bound = bind.plan(NOW_MS, &signer(1))?;
 
-    let certificate = onomancy_core::cert::Certificate::decode(&bound.artifacts[0].bytes)?;
+    let certificate = onomancy_core::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
     let record = *bound.dns_ops[0].record();
 
     let refreshed = Refresh {
         certificate,
-        chain: onomancy_core::cert::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
+        chain: onomancy_core::certificate::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
         records: vec![record],
     }
     .plan(onomancy_core::time::UnixSeconds::from(NOW_MS / 1000))?;

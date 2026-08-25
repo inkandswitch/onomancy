@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::Args;
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
-    cert::Certificate,
+    certificate::Certificate,
     name::{dns::DnsName, doc::DocAnchor},
     txt::generation_key::GenerationKey,
 };
@@ -126,7 +126,7 @@ pub(crate) enum RotateError {
 
     /// The prior certificate did not decode.
     #[error("prior certificate: {0}")]
-    Certificate(#[from] onomancy_core::cert::DecodeCertificateError),
+    Certificate(#[from] onomancy_core::certificate::DecodeCertificateError),
 
     /// A generation-key argument was malformed.
     #[error(transparent)]

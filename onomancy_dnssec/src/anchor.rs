@@ -14,8 +14,8 @@ use crate::{
     crypto,
     wire::{
         algorithm::Algorithm,
+        digest::{DsDigest, Sha256Digest},
         dnskey::Dnskey,
-        ds::{DsDigest, Sha256Digest},
         name::Name,
     },
 };
@@ -108,7 +108,7 @@ const fn hex_to_bytes(hex: &[u8; 64]) -> [u8; 32] {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::wire::ds::DigestType;
+    use crate::wire::digest::DigestType;
 
     #[test]
     fn iana_anchors_are_well_formed() {

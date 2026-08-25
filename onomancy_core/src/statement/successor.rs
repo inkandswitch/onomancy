@@ -3,13 +3,17 @@
 //!
 //! # Wire Format
 //!
-//! ```text
-//! ┌─────────┬─────────────────┬───────────────┬────────┬──────────────┬───────────┬──────────────┐
-//! │ ONS\x00 │ predecessor_doc │ successor_doc │ signer │ hostname     │ signature │ carriage     │
-//! │   4B    │      32B        │     32B       │  32B   │ len + bytes  │   64B     │ count+entries│
-//! └─────────┴─────────────────┴───────────────┴────────┴──────────────┴───────────┴──────────────┘
-//!  └───────────────────── signed (fields 0–5) ─────────────────────────┘
-//! ```
+//! | # | Field             | Type            | Width        | Notes                              | Signed |
+//! |---|-------------------|-----------------|--------------|------------------------------------|--------|
+//! | 0 | tag               | magic bytes     | 4B           | `ONS\x00`                          | yes    |
+//! | 1 | `predecessor_doc` | ed25519 vk      | 32B          | the document ID                    | yes    |
+//! | 2 | `successor_doc`   | ed25519 vk      | 32B          | the document ID                    | yes    |
+//! | 3 | `signer`          | ed25519 vk      | 32B          | delegated admin of the predecessor | yes    |
+//! | 4 | `hostname_len`    | bijou64         | varies       |                                    | yes    |
+//! | 5 | `hostname`        | ASCII           | `hostname_len` | A-labels, lowercase                | yes    |
+//! | 6 | `signature`       | ed25519         | 64B          | by `signer` over fields 0–5        | —      |
+//! | 7 | `authority_count` | bijou64         | varies       |                                    | no     |
+//! | 8 | `authority`       | entry list      | varies       | len-prefixed carriage entries      | no     |
 //!
 //! The hostname is inside the signature, deliberately: migration is
 //! per-name, and an unscoped proof could be replayed under a different
@@ -30,54 +34,12 @@ use crate::{
         dns::{CanonicalDnsNameError, DnsName},
         doc::DocAnchor,
     },
-    signed::{Malformed, Payload, Signed},
+    signed::{
+        Signed,
+        payload::{Malformed, Payload},
+    },
     wire::{self, OversizeUnit, Reader, WireError},
 };
-
-/// The signed fields: `predecessor_doc` names `successor_doc` as its
-/// continuation under `hostname`, attested by a delegated admin key of
-/// the *predecessor* document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Succession {
-    predecessor_doc: DocAnchor,
-    successor_doc: DocAnchor,
-    signer: VerifyingKey,
-    hostname: DnsName,
-}
-
-impl Payload for Succession {
-    const TAG: [u8; 4] = *b"ONS\x00";
-
-    type Error = DecodeSuccessorError;
-
-    fn encode_fields(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(self.predecessor_doc.verifying_key().as_bytes());
-        buf.extend_from_slice(self.successor_doc.verifying_key().as_bytes());
-        buf.extend_from_slice(self.signer.as_bytes());
-        wire::put_varint(buf, self.hostname.as_str().len() as u64);
-        buf.extend_from_slice(self.hostname.as_str().as_bytes());
-    }
-
-    fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, DecodeSuccessorError> {
-        let predecessor_doc = DocAnchor::from(read_key(reader, FieldName::PredecessorDoc)?);
-        let successor_doc = DocAnchor::from(read_key(reader, FieldName::SuccessorDoc)?);
-        let signer = read_key(reader, FieldName::Signer)?;
-
-        let hostname_len = reader.bounded_len(1)?;
-        let hostname = DnsName::from_canonical(reader.take(hostname_len)?)?;
-
-        Ok(Self {
-            predecessor_doc,
-            successor_doc,
-            signer,
-            hostname,
-        })
-    }
-
-    fn signer(&self) -> &VerifyingKey {
-        &self.signer
-    }
-}
 
 /// A decoded, signature-checked successor statement unit:
 /// [`Signed<Succession>`] traveling with its authority carriage.
@@ -210,6 +172,51 @@ impl Hash for SuccessorStatement {
     /// By digest, which the canonical bytes determine.
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.digest.hash(state);
+    }
+}
+
+/// The signed fields: `predecessor_doc` names `successor_doc` as its
+/// continuation under `hostname`, attested by a delegated admin key of
+/// the *predecessor* document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Succession {
+    predecessor_doc: DocAnchor,
+    successor_doc: DocAnchor,
+    signer: VerifyingKey,
+    hostname: DnsName,
+}
+
+impl Payload for Succession {
+    const TAG: [u8; 4] = *b"ONS\x00";
+
+    type Error = DecodeSuccessorError;
+
+    fn encode_fields(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(self.predecessor_doc.verifying_key().as_bytes());
+        buf.extend_from_slice(self.successor_doc.verifying_key().as_bytes());
+        buf.extend_from_slice(self.signer.as_bytes());
+        wire::put_varint(buf, self.hostname.as_str().len() as u64);
+        buf.extend_from_slice(self.hostname.as_str().as_bytes());
+    }
+
+    fn decode_fields(reader: &mut Reader<'_>) -> Result<Self, DecodeSuccessorError> {
+        let predecessor_doc = DocAnchor::from(read_key(reader, FieldName::PredecessorDoc)?);
+        let successor_doc = DocAnchor::from(read_key(reader, FieldName::SuccessorDoc)?);
+        let signer = read_key(reader, FieldName::Signer)?;
+
+        let hostname_len = reader.bounded_len(1)?;
+        let hostname = DnsName::from_canonical(reader.take(hostname_len)?)?;
+
+        Ok(Self {
+            predecessor_doc,
+            successor_doc,
+            signer,
+            hostname,
+        })
+    }
+
+    fn signer(&self) -> &VerifyingKey {
+        &self.signer
     }
 }
 

@@ -1,14 +1,9 @@
 //! The RRSIG RDATA view: the signature record.
 //!
-//! ```text
-//! ┌──────────────┬─────┬────────┬──────────┬────────────┬───────────┬─────────┬─────────────┬───────────┐
-//! │ type covered │ alg │ labels │ orig TTL │ expiration │ inception │ key tag │ signer name │ signature │
-//! │     u16BE    │ u8  │  u8    │  u32BE   │   u32BE    │   u32BE   │  u16BE  │ (canonical) │  (rest)   │
-//! └──────────────┴─────┴────────┴──────────┴────────────┴───────────┴─────────┴─────────────┴───────────┘
-//! └────────────────────────────── the signed preamble ──────────────────────────────────────┘
-//! ```
+//! The layout is DNS's, not ours: RFC 4034 §3.1.
 //!
-//! The signature is computed over `preamble ‖ canonical RRset`, so the
+//! The preamble is every RDATA field before the signature. The
+//! signature is computed over `preamble ‖ canonical RRset`, so the
 //! view retains the preamble **verbatim** — re-encoding it for
 //! verification would reintroduce the re-encode-mismatch bug class.
 
@@ -23,7 +18,7 @@ use onomancy_core::{
 use super::{
     algorithm::Algorithm,
     name::{Name, ParseNameError},
-    record::RrType,
+    rr_type::RrType,
 };
 
 /// A parsed RRSIG RDATA.

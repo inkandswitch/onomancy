@@ -21,7 +21,7 @@
 use std::{fs, path::PathBuf};
 
 use onomancy_core::{
-    cert::chain::DnssecChain,
+    certificate::chain::DnssecChain,
     freshness::{Freshness, Grade},
     name::dns::DnsName,
     time::UnixSeconds,

@@ -11,10 +11,10 @@
 use std::path::{Path, PathBuf};
 
 use onomancy_core::{
-    cert::Certificate,
+    certificate::Certificate,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
-use onomancy_protocol::verifier_state::store::{Item, Store};
+use onomancy_protocol::verifier_state::store::{Store, item::Item};
 
 /// Load every unit file in `dir` into a store. Creates the directory
 /// if missing (an empty store). Files with foreign extensions are
@@ -84,7 +84,7 @@ pub(crate) enum StoreDirError {
         /// The offending file.
         path: PathBuf,
         /// Why it failed.
-        source: onomancy_core::cert::DecodeCertificateError,
+        source: onomancy_core::certificate::DecodeCertificateError,
     },
 
     /// The directory could not be read or written.

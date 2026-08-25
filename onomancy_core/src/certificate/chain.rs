@@ -22,26 +22,6 @@ use alloc::vec::Vec;
 
 use crate::wire::{self, Reader, WireError};
 
-/// One chain link: verbatim RFC 4034 canonical wire bytes of an `RRset`
-/// plus its RRSIG(s). Opaque at this layer.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ChainLink(Vec<u8>);
-
-impl ChainLink {
-    /// The verbatim DNS wire bytes.
-    #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl From<Vec<u8>> for ChainLink {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-}
-
 /// A framed DNSSEC chain, root zone → owner name.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -100,6 +80,26 @@ impl DnssecChain {
 impl From<Vec<ChainLink>> for DnssecChain {
     fn from(links: Vec<ChainLink>) -> Self {
         Self(links)
+    }
+}
+
+/// One chain link: verbatim RFC 4034 canonical wire bytes of an `RRset`
+/// plus its RRSIG(s). Opaque at this layer.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct ChainLink(Vec<u8>);
+
+impl ChainLink {
+    /// The verbatim DNS wire bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for ChainLink {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self(bytes)
     }
 }
 

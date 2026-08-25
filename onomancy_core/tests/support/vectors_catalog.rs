@@ -29,7 +29,7 @@
 use core::fmt::Write as _;
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     delegation::DelegationBytes,
     name::{
         dns::DnsName,

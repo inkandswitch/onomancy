@@ -31,8 +31,9 @@ use crate::{
     link::Link,
     wire::{
         algorithm::Algorithm,
+        digest::{DigestType, DsDigest, Sha256Digest},
         dnskey::Dnskey,
-        ds::{DigestType, Ds, DsDigest, Sha256Digest},
+        ds::Ds,
         name::Name,
         record::CLASS_IN,
         rrsig::Rrsig,
@@ -336,10 +337,10 @@ pub enum VerifyError {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::wire::record::{Record, RrType};
+    use crate::wire::{record::Record, rr_type::RrType};
     use alloc::format;
     use ed25519_dalek::Signer as _;
-    use onomancy_core::cert::chain::ChainLink;
+    use onomancy_core::certificate::chain::ChainLink;
 
     /// Build a TXT link signed for real with a test Ed25519 zone key.
     fn signed_link(rdatas: &[&[u8]], owner: &str, labels: u8) -> (Link, Dnskey) {

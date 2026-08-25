@@ -15,6 +15,22 @@ use onomancy_core::{
     name::{dns::DnsName, doc::DocAnchor},
 };
 
+/// The decision document's state, as read at derivation time.
+///
+/// `acceptances` may carry multiple concurrent values per hostname
+/// (the substrate's MV conflict); the derivation resolves them by the
+/// receipts rule, surfacing the loser.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Decisions {
+    /// Per-hostname acceptances (usually one; several = MV conflict).
+    pub acceptances: Map<DnsName, Vec<Acceptance>>,
+    /// Introduction claims, append-only.
+    pub claims: Vec<Claim>,
+    /// Per-hostname exclusion sets: content hashes of items that
+    /// contribute to no derivation output at their natural scope.
+    pub resets: Map<DnsName, Set<ContentHash>>,
+}
+
 /// A claim: an alleged name recorded at introduction. Feeds divergence
 /// badges only; MUST NOT affect acceptance. Immutable provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,20 +55,4 @@ pub struct Acceptance {
     /// `document`. An acceptance citing an excluded item is inert; one
     /// citing an absent item is not-yet-evaluable.
     pub cited: Set<ContentHash>,
-}
-
-/// The decision document's state, as read at derivation time.
-///
-/// `acceptances` may carry multiple concurrent values per hostname
-/// (the substrate's MV conflict); the derivation resolves them by the
-/// receipts rule, surfacing the loser.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Decisions {
-    /// Per-hostname acceptances (usually one; several = MV conflict).
-    pub acceptances: Map<DnsName, Vec<Acceptance>>,
-    /// Introduction claims, append-only.
-    pub claims: Vec<Claim>,
-    /// Per-hostname exclusion sets: content hashes of items that
-    /// contribute to no derivation output at their natural scope.
-    pub resets: Map<DnsName, Set<ContentHash>>,
 }

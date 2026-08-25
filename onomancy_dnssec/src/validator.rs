@@ -28,7 +28,7 @@
 use alloc::{string::String, vec::Vec};
 
 use onomancy_core::{
-    cert::chain::DnssecChain,
+    certificate::chain::DnssecChain,
     freshness::ChainWindow,
     name::dns::DnsName,
     time::UnixSeconds,
@@ -41,7 +41,7 @@ use crate::{
     crypto::{self, VerifyError},
     link::{Link, ParseLinkError},
     wire::{
-        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, record::RrType, rrsig::Rrsig, txt::Txt,
+        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, rr_type::RrType, rrsig::Rrsig, txt::Txt,
     },
 };
 

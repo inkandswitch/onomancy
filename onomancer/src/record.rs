@@ -1,11 +1,11 @@
-//! `onomancer record`: the DNS-publishable TXT record, and optionally
-//! a signed ONC certificate.
+//! `onomancer record`: the DNS-publishable TXT record,
+//! and optionally a signed ONC certificate.
 
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     name::{dns::DnsName, doc::DocAnchor},
     time::UnixSeconds,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},

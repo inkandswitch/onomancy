@@ -8,7 +8,7 @@ use std::{
 };
 
 use onomancy_chain::builder::{BuildError, ChainBuilder, Step};
-use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
+use onomancy_core::{certificate::chain::DnssecChain, name::dns::DnsName};
 use onomancy_protocol::chain_provider::ChainProvider;
 
 use crate::stub::{QueryError, StubResolver};

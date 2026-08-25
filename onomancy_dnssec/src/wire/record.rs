@@ -1,64 +1,18 @@
 //! Resource-record framing in canonical wire form.
 //!
-//! ```text
-//! ┌────────────┬───────┬───────┬───────┬──────────┬─────────┐
-//! │ owner name │ type  │ class │ TTL   │ RDLENGTH │ RDATA   │
-//! │ (variable) │ u16BE │ u16BE │ u32BE │  u16BE   │ (bytes) │
-//! └────────────┴───────┴───────┴───────┴──────────┴─────────┘
-//! ```
+//! The layout is DNS's, not ours: RFC 1035 §3.2.1, in the RFC 4034
+//! §6 canonical form (uncompressed, lowercase owner).
 //!
 //! RDATA is carried opaque here; typed views (DNSKEY, RRSIG, …) are
 //! the next layer up. This codec frames, it never re-encodes.
 
 use alloc::vec::Vec;
-use core::fmt;
 
 use onomancy_core::wire::{Reader, WireError};
 
+use super::rr_type::RrType;
+
 use super::name::{Name, ParseNameError};
-
-/// A resource-record type code.
-///
-/// Only the types validation touches get names; everything else stays
-/// a number (and, per the strictness doctrine, gets rejected where the
-/// walk requires a specific type — never silently repurposed).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RrType(pub u16);
-
-impl RrType {
-    /// CNAME (5): indirection on the `_onomancy` owner name.
-    pub const CNAME: Self = Self(5);
-    /// DNSKEY (48): zone keys.
-    pub const DNSKEY: Self = Self(48);
-    /// DS (43): delegation signer digests at zone cuts.
-    pub const DS: Self = Self(43);
-    /// NSEC (47): authenticated denial of existence.
-    pub const NSEC: Self = Self(47);
-    /// NSEC3 (50): hashed authenticated denial.
-    pub const NSEC3: Self = Self(50);
-    /// RRSIG (46): the signatures themselves.
-    pub const RRSIG: Self = Self(46);
-    /// TXT (16): the binding record.
-    pub const TXT: Self = Self(16);
-}
-
-impl fmt::Display for RrType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::CNAME => f.write_str("CNAME"),
-            Self::DNSKEY => f.write_str("DNSKEY"),
-            Self::DS => f.write_str("DS"),
-            Self::NSEC => f.write_str("NSEC"),
-            Self::NSEC3 => f.write_str("NSEC3"),
-            Self::RRSIG => f.write_str("RRSIG"),
-            Self::TXT => f.write_str("TXT"),
-            Self(code) => write!(f, "TYPE{code}"),
-        }
-    }
-}
-
-/// The IN class code — the only class Onomancy records exist in.
-pub const CLASS_IN: u16 = 1;
 
 /// One resource record, RDATA opaque.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +74,9 @@ impl Record {
         buf.extend_from_slice(&self.rdata);
     }
 }
+
+/// The IN class code — the only class Onomancy records exist in.
+pub const CLASS_IN: u16 = 1;
 
 /// Read one big-endian `u16`.
 fn read_u16(reader: &mut Reader<'_>) -> Result<u16, WireError> {

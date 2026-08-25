@@ -10,7 +10,7 @@
 use alloc::vec::Vec;
 use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
-    cert::chain::DnssecChain,
+    certificate::chain::DnssecChain,
     delegation::DelegationBytes,
     freshness::ChainWindow,
     name::{dns::DnsName, doc::DocAnchor},

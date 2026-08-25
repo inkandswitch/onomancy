@@ -15,11 +15,12 @@
 
 use alloc::vec::Vec;
 
-use onomancy_core::{cert::chain::ChainLink, wire::Reader};
+use onomancy_core::{certificate::chain::ChainLink, wire::Reader};
 
 use crate::wire::{
     name::Name,
-    record::{CLASS_IN, ParseRecordError, Record, RrType},
+    record::{CLASS_IN, ParseRecordError, Record},
+    rr_type::RrType,
     rrsig::{ParseRrsigError, Rrsig},
 };
 

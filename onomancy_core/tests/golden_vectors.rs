@@ -17,9 +17,9 @@ mod vectors_catalog;
 use std::{fs, path::PathBuf};
 
 use onomancy_core::{
-    cert::{Certificate, DecodeCertificateError},
+    certificate::{Certificate, DecodeCertificateError},
     content_hash::ContentHash,
-    signed::Malformed,
+    signed::payload::Malformed,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
 use testresult::TestResult;

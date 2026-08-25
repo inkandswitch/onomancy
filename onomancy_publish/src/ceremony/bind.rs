@@ -3,7 +3,7 @@
 use alloc::{format, vec};
 
 use onomancy_core::{
-    cert::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams, chain::DnssecChain},
     name::{
         dns::DnsName,
         doc::{DocAnchor, Head},
