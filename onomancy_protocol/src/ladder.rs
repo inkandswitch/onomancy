@@ -30,7 +30,7 @@
 use core::cmp::Ordering;
 
 use onomancy_core::anchor::doc::DocAnchor;
-use onomancy_dnssec::{freshness::Freshness, zone_state::ZoneStateKey};
+use onomancy_dnssec::{freshness::Freshness, zone_state_key::ZoneStateKey};
 
 /// One record's ladder-relevant facts, extracted by the derivation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

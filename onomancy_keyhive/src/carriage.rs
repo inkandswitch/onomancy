@@ -15,7 +15,7 @@
 //! proves nothing.
 
 use keyhive_core::event::static_event::StaticEvent;
-use onomancy_core::delegation::{DelegationChain, SignedDelegationBytes};
+use onomancy_core::delegation_chain::{DelegationChain, SignedDelegationBytes};
 
 /// The envelope version tag for Keyhive 0.5 bincode encoding.
 ///

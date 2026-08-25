@@ -50,7 +50,7 @@ Clients remember the highest serial seen per name; stale-chain records with lowe
 ```
 seen n=3  →  stale record n=2          →  reject (replay)
           →  stale record n=4          →  accept, ratchet to 4
-          →  fresh record n=1          →  accept, surface ratchet reset
+          →  fresh record n=1          →  accept, surface serial regression
           →  record n ≈ now + 20 min   →  defer, retry later
 ```
 

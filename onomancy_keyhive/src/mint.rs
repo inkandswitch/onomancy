@@ -22,7 +22,7 @@ use keyhive_core::{
     principal::{group::delegation::StaticDelegation, individual::op::add_key::AddKeyOp},
 };
 use keyhive_crypto::{share_key::ShareKey, signer::memory::MemorySigner};
-use onomancy_core::delegation::DelegationChain;
+use onomancy_core::delegation_chain::DelegationChain;
 use rand::rngs::OsRng;
 
 use crate::carriage::{Carriage, EncodeCarriageError};
@@ -115,7 +115,7 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use onomancy_core::anchor::doc::DocAnchor;
     use onomancy_dnssec::txt::generation_key::GenerationKey;
-    use onomancy_protocol::verifier_state::authority_verifier::AuthorityVerifier;
+    use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
     use testresult::TestResult;
 
     use super::*;

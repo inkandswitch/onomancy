@@ -23,28 +23,6 @@
 
 use core::{any, cmp::Ordering, fmt, hash::Hash, marker::PhantomData};
 
-/// A hash function a [`Digest`] can be indexed by.
-///
-/// Implementors are zero-sized markers ([`Blake3`] here; externally
-/// mandated algorithms live with the code that speaks them). Every algorithm
-/// in use emits 32 bytes; if a wider one ever arrives (SHA-384 DS
-/// digests would be the candidate), the width moves into the trait
-/// then — not speculatively now.
-pub trait HashAlgorithm {
-    /// Hash one contiguous input.
-    fn hash(input: &[u8]) -> [u8; 32];
-}
-
-/// BLAKE3-256: the hash for everything onomancy addresses itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Blake3;
-
-impl HashAlgorithm for Blake3 {
-    fn hash(input: &[u8]) -> [u8; 32] {
-        *blake3::hash(input).as_bytes()
-    }
-}
-
 /// An `A` digest of one `T` unit's canonical wire bytes.
 pub struct Digest<A: HashAlgorithm, T: ?Sized> {
     bytes: [u8; 32],
@@ -157,6 +135,28 @@ impl<A: HashAlgorithm, T: ?Sized> fmt::Display for Digest<A, T> {
 impl<'a, A: HashAlgorithm, T: ?Sized> arbitrary::Arbitrary<'a> for Digest<A, T> {
     fn arbitrary(unstructured: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self::from_bytes(unstructured.arbitrary()?))
+    }
+}
+
+/// A hash function a [`Digest`] can be indexed by.
+///
+/// Implementors are zero-sized markers ([`Blake3`] here; externally
+/// mandated algorithms live with the code that speaks them). Every algorithm
+/// in use emits 32 bytes; if a wider one ever arrives (SHA-384 DS
+/// digests would be the candidate), the width moves into the trait
+/// then — not speculatively now.
+pub trait HashAlgorithm {
+    /// Hash one contiguous input.
+    fn hash(input: &[u8]) -> [u8; 32];
+}
+
+/// BLAKE3-256: the hash for everything onomancy addresses itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Blake3;
+
+impl HashAlgorithm for Blake3 {
+    fn hash(input: &[u8]) -> [u8; 32] {
+        *blake3::hash(input).as_bytes()
     }
 }
 

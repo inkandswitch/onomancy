@@ -52,7 +52,7 @@ impl DnssecChain {
     }
 
     /// Decode one count-prefixed chain. No count-sized pre-allocation:
-    /// see `delegation::read_entries` for the rationale.
+    /// see `delegation_chain::read_entries` for the rationale.
     pub(crate) fn read(reader: &mut Reader<'_>) -> Result<Self, WireError> {
         let count = reader.bounded_len(1)?;
         let mut links = Vec::new();

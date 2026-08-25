@@ -8,7 +8,7 @@
 //! ```
 
 use automerge::{Automerge, ObjType, transaction::Transactable};
-use onomancy_automerge::RESERVED_KEY;
+use onomancy_automerge::namestore::RESERVED_KEY;
 use onomancy_core::anchor::doc::DocAnchor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

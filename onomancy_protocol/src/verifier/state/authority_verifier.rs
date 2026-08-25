@@ -6,7 +6,7 @@
 //! seam (`ChainValidator`) lives in `onomancy_dnssec`.
 
 use ed25519_dalek::VerifyingKey;
-use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
 use onomancy_dnssec::txt::generation_key::GenerationKey;
 
 /// Verifies Keyhive delegation proofs — `onomancy_keyhive`'s seam.

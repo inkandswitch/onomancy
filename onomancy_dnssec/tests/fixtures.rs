@@ -8,7 +8,7 @@
 use std::{fs, path::PathBuf};
 
 use onomancy_dnssec::{
-    certificate::chain::DnssecChain,
+    chain::DnssecChain,
     chain_proof::ChainProof,
     test_utils::fixtures::{
         Expectation, FIXTURE_SERIAL, all_fixtures, fixture_anchor, fixture_hostname,

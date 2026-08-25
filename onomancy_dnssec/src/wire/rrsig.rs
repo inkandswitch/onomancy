@@ -15,7 +15,7 @@ use onomancy_core::{
     wire::{Reader, WireError},
 };
 
-use crate::freshness::{ChainWindow, EmptyWindow};
+use crate::freshness::{EmptyWindow, ValidityWindow};
 
 use super::{
     algorithm::Algorithm,
@@ -118,8 +118,8 @@ impl Rrsig {
     ///
     /// Returns [`EmptyWindow`] when expiration precedes inception:
     /// such a signature never had joint validity (invalid ✗).
-    pub fn window(&self) -> Result<ChainWindow, EmptyWindow> {
-        ChainWindow::new(
+    pub fn window(&self) -> Result<ValidityWindow, EmptyWindow> {
+        ValidityWindow::new(
             UnixSeconds::from(u64::from(self.inception)),
             UnixSeconds::from(u64::from(self.expiration)),
         )
@@ -283,7 +283,7 @@ fn signed_owner(owner: &Name, rrsig: &Rrsig) -> Result<Name, VerifyError> {
 mod tests {
     use alloc::format;
 
-    use crate::certificate::chain::ChainLink;
+    use crate::chain::ChainLink;
     use ed25519_dalek::Signer as _;
 
     use super::*;

@@ -10,18 +10,19 @@
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
     collections::{Map, Set},
-    delegation::DelegationChain,
+    delegation_chain::DelegationChain,
     time::UnixSeconds,
 };
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     chain_proof::ChainProof,
-    freshness::ChainWindow,
+    freshness::ValidityWindow,
     txt::{record::TxtRecord, serial::Serial},
 };
 use onomancy_protocol::{
     test_utils as proto_utils,
-    verifier_state::{
+    verifier::state::{
         VerifierState,
         decisions::{Acceptance, Decisions},
         memory::{authority::MemoryAuthority, validator::MemoryValidator},
@@ -84,7 +85,7 @@ fn real_binding(
 
     let proof = ChainProof {
         records: vec![record],
-        window: ChainWindow::new(
+        window: ValidityWindow::new(
             UnixSeconds::from(u64::from(window.0)),
             UnixSeconds::from(u64::from(window.1)),
         )?,
@@ -153,7 +154,7 @@ fn fresh_binding_derives_identically() -> TestResult {
 
     let derivation = derive_both_ways(&[&binding], &Decisions::default(), vec![]);
     let state = derivation
-        .hosts
+        .bindings
         .get(&proto_utils::host())
         .cloned()
         .unwrap_or_default();
@@ -173,7 +174,7 @@ fn b1_pending_challenger_derives_identically() -> TestResult {
 
     let derivation = derive_both_ways(&[&incumbent, &challenger], &accept(&incumbent), vec![]);
     let state = derivation
-        .hosts
+        .bindings
         .get(&proto_utils::host())
         .cloned()
         .unwrap_or_default();
@@ -193,7 +194,7 @@ fn d4a_ratchet_reset_derives_identically() -> TestResult {
 
     let derivation = derive_both_ways(&[&stale_high, &fresh_low], &Decisions::default(), vec![]);
     let state = derivation
-        .hosts
+        .bindings
         .get(&proto_utils::host())
         .cloned()
         .unwrap_or_default();

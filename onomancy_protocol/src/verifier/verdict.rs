@@ -23,13 +23,13 @@ use onomancy_core::{anchor::doc::DocAnchor, time::UnixSeconds};
 use onomancy_dnssec::{
     certificate::{Certificate, DecodeCertificateError},
     dns_name::DnsName,
-    freshness::{ChainWindow, Freshness},
+    freshness::{Freshness, ValidityWindow},
     txt::{generation_key::GenerationKey, serial::Serial},
 };
 
 use onomancy_dnssec::chain_proof::ChainValidator;
 
-use crate::verifier_state::{self, authority_verifier::AuthorityVerifier};
+use crate::verifier::state::{self, authority_verifier::AuthorityVerifier};
 
 /// A verified certificate's graded standing at one clock reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ pub struct Verdict {
     pub serial: Serial,
 
     /// The chain's ∩-window: what "was zone-rooted during" means.
-    pub window: ChainWindow,
+    pub window: ValidityWindow,
 }
 
 impl Verdict {
@@ -108,7 +108,7 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
 
     // Chain validation + TXT cross-check + record selection: the
     // derivation's own stage-1 path, verbatim.
-    let evidence = verifier_state::validate_record(
+    let evidence = state::validate_record(
         &certificate,
         certificate.digest().erase(),
         validator,
@@ -117,11 +117,11 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
     .ok_or(Rejection::ChainRejected)?;
 
     // Deferral precedes everything, including freshness.
-    if verifier_state::is_deferred(&evidence, now) {
+    if state::is_deferred(&evidence, now) {
         return Err(Rejection::Deferred);
     }
 
-    let freshness = verifier_state::freshness(&evidence, now);
+    let freshness = state::freshness(&evidence, now);
 
     // D10: fresh + off_paths is a rejection; stale + off_paths is
     // provisional.
@@ -181,7 +181,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{binding, binding_carrying, doc, generation, host},
-        verifier_state::memory::{authority::MemoryAuthority, validator::MemoryValidator},
+        verifier::state::memory::{authority::MemoryAuthority, validator::MemoryValidator},
     };
     use alloc::vec;
     use testresult::TestResult;

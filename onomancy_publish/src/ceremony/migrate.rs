@@ -8,9 +8,10 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain, time::UnixSeconds};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds};
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     dns_name::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
@@ -49,7 +50,7 @@ pub struct Migrate {
     /// The successor document's authority carriage: D10 path proof
     /// for the new `g=`, attached to the successor certificate.
     /// Opaque here — minted by `onomancy_keyhive::mint`.
-    pub carriage: onomancy_core::delegation::DelegationChain,
+    pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 impl Migrate {

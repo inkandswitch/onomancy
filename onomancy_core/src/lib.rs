@@ -13,7 +13,7 @@ extern crate alloc;
 
 pub mod anchor;
 pub mod collections;
-pub mod delegation;
+pub mod delegation_chain;
 pub mod digest;
 pub mod name;
 pub mod signed;

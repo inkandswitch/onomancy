@@ -29,7 +29,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use onomancy_core::{
     anchor::doc::DocAnchor,
-    delegation::DelegationChain,
+    delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     signed::{
         Signed,
@@ -270,7 +270,7 @@ pub enum DecodeSuccessorError {
 mod tests {
     use super::*;
     use alloc::vec;
-    use onomancy_core::delegation::SignedDelegationBytes;
+    use onomancy_core::delegation_chain::SignedDelegationBytes;
 
     fn doc(seed: u8) -> DocAnchor {
         DocAnchor::from(SigningKey::from_bytes(&[seed; 32]).verifying_key())

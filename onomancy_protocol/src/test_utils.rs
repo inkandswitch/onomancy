@@ -14,12 +14,14 @@ use alloc::{vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use onomancy_core::{
-    anchor::doc::DocAnchor, delegation::DelegationChain, time::UnixSeconds, wire::OversizeUnit,
+    anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds,
+    wire::OversizeUnit,
 };
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     dns_name::DnsName,
-    freshness::ChainWindow,
+    freshness::ValidityWindow,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
@@ -69,8 +71,8 @@ pub fn chain(tag: u8) -> DnssecChain {
 /// Panics when `to < from` — test-vector construction error.
 #[must_use]
 #[allow(clippy::expect_used)]
-pub fn window(from: u64, to: u64) -> ChainWindow {
-    ChainWindow::new(UnixSeconds::from(from), UnixSeconds::from(to))
+pub fn window(from: u64, to: u64) -> ValidityWindow {
+    ValidityWindow::new(UnixSeconds::from(from), UnixSeconds::from(to))
         .expect("test windows are ordered")
 }
 

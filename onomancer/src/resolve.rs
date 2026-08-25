@@ -17,14 +17,14 @@ use onomancy_dnssec::{
 };
 use onomancy_hickory::provider::FetchChainError;
 use onomancy_keyhive::authority::KeyhiveAuthority;
-use onomancy_protocol::{
-    verifier_state::{
+use onomancy_protocol::verifier::{
+    state::{
         VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
         store::item::Item,
     },
-    verify::{self, Rejection},
+    verdict::{self, Rejection},
 };
 
 use crate::{
@@ -124,15 +124,15 @@ impl Resolve {
         // identity rule.
         let authority = KeyhiveAuthority;
 
-        let verdict = verify::verify(&bytes, &hostname, now, &validator, &authority)?;
+        let verdict = verdict::verify(&bytes, &hostname, now, &validator, &authority)?;
 
         let freshness = match verdict.freshness {
             Freshness::Fresh => "fresh \u{2713}",
             Freshness::Stale => "stale \u{26a0}",
         };
         let generation = match verdict.generation_check {
-            verify::GenerationCheck::OnPath => "on delegation path",
-            verify::GenerationCheck::Provisional => {
+            verdict::GenerationCheck::OnPath => "on delegation path",
+            verdict::GenerationCheck::Provisional => {
                 "provisional ⚠ (stale evidence; re-checked when fresher evidence arrives)"
             }
         };
@@ -252,7 +252,7 @@ fn describe(event: &Event) -> String {
         }
         EventKind::PendingCleared(document) => format!("pending cleared: {document}"),
         EventKind::PendingSurfaced(document) => format!("pending (stale challenger): {document}"),
-        EventKind::RatchetReset { from, to } => format!("RATCHET RESET: serial {from} → {to}"),
+        EventKind::SerialRegression { from, to } => format!("RATCHET RESET: serial {from} → {to}"),
         EventKind::SuccessionForkSurfaced(fork) => format!("SUCCESSION FORK: {fork:?}"),
     };
 
@@ -261,7 +261,7 @@ fn describe(event: &Event) -> String {
 
 /// The post-pass verdict line(s) for one hostname.
 fn summarize(hostname: &DnsName, state: &VerifierState) {
-    let Some(host) = state.hosts.get(hostname) else {
+    let Some(host) = state.bindings.get(hostname) else {
         say(&format!("{hostname}: no evidence held"));
         return;
     };

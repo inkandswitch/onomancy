@@ -36,10 +36,10 @@
 //! - [`memory`] — table-driven fakes for conformance tests
 
 pub mod authority_verifier;
+pub mod binding_state;
 pub mod decisions;
 pub mod diff;
 pub mod memory;
-pub mod output;
 pub mod prune;
 pub mod store;
 
@@ -48,7 +48,7 @@ use alloc::{vec, vec::Vec};
 use onomancy_core::{
     anchor::doc::DocAnchor,
     collections::{Map, Set},
-    delegation::DelegationChain,
+    delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     time::UnixSeconds,
 };
@@ -56,20 +56,20 @@ use onomancy_dnssec::{
     certificate::Certificate,
     chain_proof::{ChainProof, ChainValidator},
     dns_name::DnsName,
-    freshness::{ChainWindow, Freshness, Grade},
+    freshness::{Freshness, Grade, ValidityWindow},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::generation_key::GenerationKey,
-    zone_state::ZoneStateKey,
+    zone_state_key::ZoneStateKey,
 };
 
 use self::{
     authority_verifier::AuthorityVerifier,
+    binding_state::{
+        AcceptedBinding, BindingGrade, BindingState, ContinuityGrade, Divergence, DivergenceSource,
+        Fork, SuccessionFork,
+    },
     decisions::Decisions,
     diff::Event,
-    output::{
-        AcceptedBinding, BindingGrade, ContinuityGrade, Divergence, DivergenceSource, Fork,
-        HostState, SuccessionFork,
-    },
     store::{Store, item::Item},
 };
 use crate::ladder::{self, Contender, Continuity, Verdict};
@@ -84,7 +84,7 @@ const SKEW_MS: u64 = 5 * 60 * 1000;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerifierState {
     /// Per-hostname conclusions.
-    pub hosts: Map<DnsName, HostState>,
+    pub bindings: Map<DnsName, BindingState>,
 }
 
 impl VerifierState {
@@ -117,14 +117,14 @@ impl VerifierState {
         hostnames.extend(decisions.acceptances.keys().cloned());
         hostnames.extend(pins.keys().cloned());
 
-        let mut hosts: Map<DnsName, HostState> = Map::default();
+        let mut bindings: Map<DnsName, BindingState> = Map::default();
 
         for hostname in hostnames {
             let state = derive_host(&hostname, &evidence, now, decisions, pins, authority);
-            hosts.insert(hostname, state);
+            bindings.insert(hostname, state);
         }
 
-        Self { hosts }
+        Self { bindings }
     }
 
     /// The surfaced changes from `previous` to `self`, in a
@@ -132,16 +132,20 @@ impl VerifierState {
     /// sequence).
     #[must_use]
     pub fn diff(&self, previous: &Self) -> Vec<Event> {
-        let mut hostnames: Vec<&DnsName> = self.hosts.keys().chain(previous.hosts.keys()).collect();
+        let mut hostnames: Vec<&DnsName> = self
+            .bindings
+            .keys()
+            .chain(previous.bindings.keys())
+            .collect();
         hostnames.sort_unstable();
         hostnames.dedup();
 
-        let empty = HostState::default();
+        let empty = BindingState::default();
         let mut events = Vec::new();
 
         for hostname in hostnames {
-            let before = previous.hosts.get(hostname).unwrap_or(&empty);
-            let after = self.hosts.get(hostname).unwrap_or(&empty);
+            let before = previous.bindings.get(hostname).unwrap_or(&empty);
+            let after = self.bindings.get(hostname).unwrap_or(&empty);
 
             for kind in diff::host_diff(before, after) {
                 events.push(Event {
@@ -163,7 +167,7 @@ fn derive_host<A: AuthorityVerifier>(
     decisions: &Decisions,
     pins: &Map<DnsName, Vec<DocAnchor>>,
     authority: &A,
-) -> HostState {
+) -> BindingState {
     // Stage 2: exclude and defer.
     let empty = Set::default();
     let excluded = decisions.resets.get(hostname).unwrap_or(&empty);
@@ -272,7 +276,7 @@ fn derive_host<A: AuthorityVerifier>(
     let output_binding = if masked { None } else { accepted };
     let divergence = derive_divergence(hostname, output_binding.as_ref(), decisions, pins);
 
-    HostState {
+    BindingState {
         accepted: output_binding,
         contested: resolution.contested,
         divergence,
@@ -284,8 +288,6 @@ fn derive_host<A: AuthorityVerifier>(
         tenure,
     }
 }
-
-// ————————————————————————— stage 1 —————————————————————————
 
 /// Stage 1's output: validated, typed evidence with extraction
 /// provenance.
@@ -307,7 +309,7 @@ pub(crate) struct BindingEvidence {
     pub(crate) key: ZoneStateKey,
     /// Whether the delegation chain lies on the delegation path for the attested `g=` (D10).
     pub(crate) generation_on_path: bool,
-    pub(crate) window: ChainWindow,
+    pub(crate) window: ValidityWindow,
 }
 
 /// Extraction provenance for a carried statement: excluded only when
@@ -316,12 +318,12 @@ pub(crate) struct BindingEvidence {
 /// survive a reset).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Provenance {
-    carriers: Vec<Digest<Blake3, [u8]>>,
+    carriers: Vec<Digest<Blake3, Certificate>>,
     standalone: bool,
 }
 
 impl Provenance {
-    fn record(&mut self, carrier: Option<Digest<Blake3, [u8]>>) {
+    fn record(&mut self, carrier: Option<Digest<Blake3, Certificate>>) {
         match carrier {
             None => self.standalone = true,
             Some(hash) => {
@@ -345,14 +347,14 @@ impl Provenance {
         }
 
         // Extracted-only: excluded when every carrier is.
-        !self.carriers.is_empty() && self.carriers.iter().all(|c| excluded.contains(c))
+        !self.carriers.is_empty() && self.carriers.iter().all(|c| excluded.contains(&c.erase()))
     }
 }
 
 /// A valid rotation statement (document-scoped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RotationEvidence {
-    hash: Digest<Blake3, [u8]>,
+    hash: Digest<Blake3, RotationStatement>,
     provenance: Provenance,
     replaced: GenerationKey,
     root_doc: DocAnchor,
@@ -365,7 +367,7 @@ struct SuccessorEvidence {
     /// The statement's authority carriage, kept for stage 5's
     /// departing-hop path-membership check (bridging-hop grading).
     carriage: DelegationChain,
-    hash: Digest<Blake3, [u8]>,
+    hash: Digest<Blake3, SuccessorStatement>,
     hostname: DnsName,
     predecessor: DocAnchor,
     provenance: Provenance,
@@ -391,10 +393,20 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                 // statements (they are independently signed units, and
                 // gap-bridging needs exactly those bytes).
                 for statement in certificate.lineage() {
-                    extract_rotation(&mut evidence, authority, statement, Some(hash));
+                    extract_rotation(
+                        &mut evidence,
+                        authority,
+                        statement,
+                        Some(certificate.digest()),
+                    );
                 }
                 if let Some(statement) = certificate.predecessor() {
-                    extract_successor(&mut evidence, authority, statement, Some(hash));
+                    extract_successor(
+                        &mut evidence,
+                        authority,
+                        statement,
+                        Some(certificate.digest()),
+                    );
                 }
 
                 if let Some(binding) = validate_record(certificate, hash, validator, authority) {
@@ -499,7 +511,7 @@ fn extract_rotation<A: AuthorityVerifier>(
     evidence: &mut Evidence,
     authority: &A,
     statement: &RotationStatement,
-    carrier: Option<Digest<Blake3, [u8]>>,
+    carrier: Option<Digest<Blake3, Certificate>>,
 ) {
     // Signature validity was settled at decode; carriage authority is
     // the remaining validity condition (B9: invalid statements are
@@ -512,7 +524,7 @@ fn extract_rotation<A: AuthorityVerifier>(
         return;
     }
 
-    let hash = statement.digest().erase();
+    let hash = statement.digest();
 
     if let Some(existing) = evidence.rotations.iter_mut().find(|r| r.hash == hash) {
         existing.provenance.record(carrier);
@@ -535,7 +547,7 @@ fn extract_successor<A: AuthorityVerifier>(
     evidence: &mut Evidence,
     authority: &A,
     statement: &SuccessorStatement,
-    carrier: Option<Digest<Blake3, [u8]>>,
+    carrier: Option<Digest<Blake3, Certificate>>,
 ) {
     if !authority.authorizes(
         statement.predecessor_doc(),
@@ -545,7 +557,7 @@ fn extract_successor<A: AuthorityVerifier>(
         return;
     }
 
-    let hash = statement.digest().erase();
+    let hash = statement.digest();
 
     if let Some(existing) = evidence.successors.iter_mut().find(|s| s.hash == hash) {
         existing.provenance.record(carrier);
@@ -565,10 +577,9 @@ fn extract_successor<A: AuthorityVerifier>(
     });
 }
 
-// ————————————————————————— stage 2 —————————————————————————
-
-/// Rotation statements are document-scoped: an exclusion from ANY
-/// hostname's reset removes the statement for its document everywhere.
+/// Stage 2 (exclusion): rotation statements are document-scoped — an
+/// exclusion from ANY hostname's reset removes the statement for its
+/// document everywhere.
 fn global_rotation_exclusions(decisions: &Decisions) -> Set<Digest<Blake3, [u8]>> {
     let mut all: Set<Digest<Blake3, [u8]>> = Set::default();
     for excluded in decisions.resets.values() {
@@ -587,8 +598,6 @@ pub(crate) fn is_deferred(record: &BindingEvidence, now: UnixSeconds) -> bool {
 
     far_future || record.window.grade(now) == Grade::NotYetBegun
 }
-
-// ————————————————————————— stage 3 —————————————————————————
 
 /// Stage 3's output: per-document generation history, scoped by the
 /// heads rule (the Heads and the Protected Prefix rule).
@@ -639,7 +648,7 @@ fn build_lineage(evidence: &Evidence, excluded: &Set<Digest<Blake3, [u8]>>) -> L
     let mut rotations: Vec<&RotationEvidence> = evidence
         .rotations
         .iter()
-        .filter(|r| !r.provenance.excluded(r.hash, excluded))
+        .filter(|r| !r.provenance.excluded(r.hash.erase(), excluded))
         .collect();
     rotations.sort_unstable_by_key(|r| (r.root_doc, r.replaced, r.successor, r.hash));
     rotations.dedup_by_key(|r| (r.root_doc, r.replaced, r.successor));
@@ -775,8 +784,7 @@ fn find_cycle(rotations: &[&&RotationEvidence]) -> Option<GenerationKey> {
     None
 }
 
-// ————————————————————————— stage 4 —————————————————————————
-
+/// Stage 4: graded freshness at the caller's single clock reading.
 pub(crate) fn freshness(record: &BindingEvidence, now: UnixSeconds) -> Freshness {
     match record.window.grade(now) {
         Grade::Fresh => Freshness::Fresh,
@@ -831,8 +839,7 @@ fn generation_rule(
     Disposition::Keep
 }
 
-// ————————————————————————— stage 5 —————————————————————————
-
+/// Stage 5's working state: the receipts contest for one hostname.
 #[derive(Debug, Default)]
 struct DocumentResolution {
     accepted: Option<(DocAnchor, GenerationKey)>,
@@ -863,7 +870,7 @@ impl<'e> ProofGraph<'e> {
             .successors
             .iter()
             .filter(|s| s.hostname == *hostname)
-            .filter(|s| !s.provenance.excluded(s.hash, excluded))
+            .filter(|s| !s.provenance.excluded(s.hash.erase(), excluded))
             .collect();
         statements.sort_unstable_by_key(|s| s.hash);
 
@@ -1310,17 +1317,16 @@ fn winning_acceptance(
     }
 }
 
-// ————————————————————— stages 7 and 8 —————————————————————
-
-/// The tenure span: earliest chain-window inception to latest window
-/// end among the accepted document's surviving records.
-fn tenure_span(records: &[&&BindingEvidence]) -> Option<ChainWindow> {
+/// Stages 7 and 8 (output assembly): the tenure span — earliest
+/// chain-window inception to latest window end among the accepted
+/// document's surviving records.
+fn tenure_span(records: &[&&BindingEvidence]) -> Option<ValidityWindow> {
     let inception = records.iter().map(|r| r.window.inception()).min()?;
     let expiration = records.iter().map(|r| r.window.expiration()).max()?;
 
     // Spanning valid windows is valid: min ≤ every inception ≤ its
     // own expiration ≤ max.
-    ChainWindow::new(inception, expiration).ok()
+    ValidityWindow::new(inception, expiration).ok()
 }
 
 /// Stage 8's divergence badges: claims and pins that disagree with the

@@ -14,7 +14,7 @@ use alloc::vec::Vec;
 use onomancy_core::{anchor::doc::DocAnchor, collections::Set};
 use onomancy_dnssec::{dns_name::DnsName, txt::serial::Serial};
 
-use super::output::{BindingGrade, Divergence, Fork, HostState, SuccessionFork};
+use super::binding_state::{BindingGrade, BindingState, Divergence, Fork, SuccessionFork};
 
 /// One surfaced change at one hostname.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +28,6 @@ pub struct Event {
 /// What changed, tagged with its surfacing class.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventKind {
-    // ————— event-class: may prompt —————
     /// The accepted document changed (including appearing or being
     /// masked by contested). Graded by the displaced binding's tenure
     /// at the UI layer.
@@ -45,7 +44,7 @@ pub enum EventKind {
 
     /// The effective serial moved DOWN for the same document — legal
     /// only via fresh evidence (D4a), and always surfaced.
-    RatchetReset {
+    SerialRegression {
         /// The previous effective serial.
         from: Serial,
         /// The new, lower effective serial.
@@ -56,7 +55,6 @@ pub enum EventKind {
     /// successor statements from one predecessor.
     SuccessionForkSurfaced(SuccessionFork),
 
-    // ————— badge-class: MUST NOT prompt —————
     /// The hostname left the contested state.
     ContestedCleared,
 
@@ -102,7 +100,7 @@ impl EventKind {
         match self {
             Self::BindingChanged { .. }
             | Self::LineageForkSurfaced(_)
-            | Self::RatchetReset { .. }
+            | Self::SerialRegression { .. }
             | Self::SuccessionForkSurfaced(_) => true,
 
             Self::ContestedCleared
@@ -121,7 +119,7 @@ impl EventKind {
 /// The fixed-order change list for one hostname —
 /// [`VerifierState::diff`](super::VerifierState::diff)'s per-host
 /// worker.
-pub(super) fn host_diff(before: &HostState, after: &HostState) -> Vec<EventKind> {
+pub(super) fn host_diff(before: &BindingState, after: &BindingState) -> Vec<EventKind> {
     let mut kinds = Vec::new();
 
     // Binding movement (document identity, not grade).
@@ -137,7 +135,7 @@ pub(super) fn host_diff(before: &HostState, after: &HostState) -> Vec<EventKind>
         && let (Some(old), Some(new)) = (before.effective_serial, after.effective_serial)
         && new < old
     {
-        kinds.push(EventKind::RatchetReset { from: old, to: new });
+        kinds.push(EventKind::SerialRegression { from: old, to: new });
     }
 
     // Grade movement on an unchanged document.
@@ -213,9 +211,9 @@ fn new_items<T: Clone + PartialEq>(before: &[T], after: &[T]) -> Vec<T> {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::verifier_state::{
+    use crate::verifier::state::{
         VerifierState,
-        output::{AcceptedBinding, ContinuityGrade},
+        binding_state::{AcceptedBinding, ContinuityGrade},
     };
     use alloc::vec;
     use onomancy_core::collections::Map;
@@ -234,14 +232,14 @@ mod tests {
         )
     }
 
-    fn derivation(state: HostState) -> VerifierState {
-        let mut hosts = Map::default();
-        hosts.insert(host(), state);
-        VerifierState { hosts }
+    fn derivation(state: BindingState) -> VerifierState {
+        let mut bindings = Map::default();
+        bindings.insert(host(), state);
+        VerifierState { bindings }
     }
 
-    fn accepted(doc_seed: u8, serial: u64, grade: BindingGrade) -> HostState {
-        HostState {
+    fn accepted(doc_seed: u8, serial: u64, grade: BindingGrade) -> BindingState {
+        BindingState {
             accepted: Some(AcceptedBinding {
                 continuity: ContinuityGrade::default(),
                 document: doc(doc_seed),
@@ -249,7 +247,7 @@ mod tests {
                 grade,
             }),
             effective_serial: Some(Serial::from(serial)),
-            ..HostState::default()
+            ..BindingState::default()
         }
     }
 
@@ -269,19 +267,19 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0].kind,
-            EventKind::RatchetReset { from, to }
+            EventKind::SerialRegression { from, to }
                 if from == Serial::from(100) && to == Serial::from(7)
         ));
     }
 
     #[test]
     fn badges_never_prompt() {
-        let before = derivation(HostState::default());
-        let after = derivation(HostState {
+        let before = derivation(BindingState::default());
+        let after = derivation(BindingState {
             contested: true,
             losing_acceptances: vec![doc(4)],
             pending: vec![doc(3)],
-            ..HostState::default()
+            ..BindingState::default()
         });
 
         let events = after.diff(&before);
@@ -312,12 +310,15 @@ mod tests {
             document: doc(1),
             at: generation(11),
         };
-        let with_fork = derivation(HostState {
+        let with_fork = derivation(BindingState {
             forks: vec![fork],
-            ..HostState::default()
+            ..BindingState::default()
         });
 
-        assert_eq!(with_fork.diff(&derivation(HostState::default())).len(), 1);
+        assert_eq!(
+            with_fork.diff(&derivation(BindingState::default())).len(),
+            1
+        );
         assert!(with_fork.diff(&with_fork).is_empty(), "old news");
     }
 }

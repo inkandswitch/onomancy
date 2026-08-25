@@ -8,8 +8,7 @@
 use alloc::vec::Vec;
 
 use crate::{
-    certificate::chain::DnssecChain, dns_name::DnsName, freshness::ChainWindow,
-    txt::record::TxtRecord,
+    chain::DnssecChain, dns_name::DnsName, freshness::ValidityWindow, txt::record::TxtRecord,
 };
 
 /// What a DNSSEC chain, once validated from the verifier's own trust
@@ -32,7 +31,7 @@ pub struct ChainProof {
     pub records: Vec<TxtRecord>,
 
     /// The chain's ∩-window.
-    pub window: ChainWindow,
+    pub window: ValidityWindow,
 }
 
 /// Validates DNSSEC chains against the baked-in trust anchor.

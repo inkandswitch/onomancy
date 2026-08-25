@@ -8,7 +8,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use onomancy_wasm::JsName;
+use onomancy_wasm::name::JsName;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 

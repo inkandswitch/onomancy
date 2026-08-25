@@ -14,7 +14,7 @@ use hickory_proto::{
 };
 use onomancy_core::wire::MAX_UNIT_BYTES;
 use onomancy_dnssec::{
-    certificate::chain::{ChainLink, DnssecChain},
+    chain::{ChainLink, DnssecChain},
     dns_name::DnsName,
 };
 

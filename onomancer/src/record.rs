@@ -5,10 +5,12 @@ use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
 use onomancy_core::{
-    anchor::doc::DocAnchor, delegation::DelegationChain, time::UnixSeconds, wire::OversizeUnit,
+    anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds,
+    wire::OversizeUnit,
 };
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };

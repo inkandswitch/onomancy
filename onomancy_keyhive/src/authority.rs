@@ -29,9 +29,9 @@ use keyhive_core::{
     principal::identifier::Identifier, store::ciphertext::memory::MemoryCiphertextStore,
 };
 use keyhive_crypto::signer::memory::MemorySigner;
-use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
 use onomancy_dnssec::txt::generation_key::GenerationKey;
-use onomancy_protocol::verifier_state::authority_verifier::AuthorityVerifier;
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 use rand::rngs::OsRng;
 
 use crate::carriage::Carriage;

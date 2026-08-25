@@ -8,10 +8,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::time::UnixSeconds;
-use onomancy_dnssec::{
-    certificate::{Certificate, chain::DnssecChain},
-    txt::record::TxtRecord,
-};
+use onomancy_dnssec::{certificate::Certificate, chain::DnssecChain, txt::record::TxtRecord};
 
 use crate::{
     ceremony::{CeremonyError, Intent, simulate},

@@ -30,10 +30,10 @@ use alloc::{string::String, vec::Vec};
 use onomancy_core::time::UnixSeconds;
 
 use crate::{
-    certificate::chain::DnssecChain,
+    chain::DnssecChain,
     chain_proof::{ChainProof, ChainValidator, InvalidChain},
     dns_name::DnsName,
-    freshness::ChainWindow,
+    freshness::ValidityWindow,
     txt::record::{Classified, TxtRecord},
 };
 
@@ -361,8 +361,8 @@ impl WalkState {
     }
 
     /// The final ∩-window.
-    fn window(&self) -> Result<ChainWindow, WalkError> {
-        ChainWindow::new(self.window_inception, self.window_expiration)
+    fn window(&self) -> Result<ValidityWindow, WalkError> {
+        ValidityWindow::new(self.window_inception, self.window_expiration)
             .map_err(|_| WalkError::EmptyWindow)
     }
 }

@@ -11,7 +11,7 @@
 
 use core::future::Future;
 
-use crate::{certificate::chain::DnssecChain, dns_name::DnsName};
+use crate::{chain::DnssecChain, dns_name::DnsName};
 
 /// Fetches the DNSSEC chain for a hostname's `_onomancy` TXT record.
 ///

@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 
 use onomancy_core::wire::Reader;
 
-use crate::certificate::chain::ChainLink;
+use crate::chain::ChainLink;
 
 use crate::wire::{
     name::Name,

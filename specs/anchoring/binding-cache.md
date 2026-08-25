@@ -63,7 +63,7 @@ The stages below are a **normative evaluation order**: each stage reads only the
 # Surfacing
 [Surfacing]: #surfacing
 
-State is what `derive` returns; **events are diffs**. When a store update or the passage of time changes the derivation output, implementations MUST surface the difference, following the events-vs-states doctrine ([DNS Anchoring], Staleness in Practice): binding changes, ratchet resets, and forks are events (shown, possibly prompting); badge appearances and clearances (pending, contested, provisional, staleness) are visible state changes that MUST NOT prompt — "silently" anywhere in this document means "without a prompt," never "invisibly." The only prompt the pending or contested condition may generate is at use time — proceed on the accepted/pinned binding, or wait — a risk decision about the user's own action, never an invitation to adjudicate evidence (B4).
+State is what `derive` returns; **events are diffs**. When a store update or the passage of time changes the derivation output, implementations MUST surface the difference, following the events-vs-states doctrine ([DNS Anchoring], Staleness in Practice): binding changes, serial regressions, and forks are events (shown, possibly prompting); badge appearances and clearances (pending, contested, provisional, staleness) are visible state changes that MUST NOT prompt — "silently" anywhere in this document means "without a prompt," never "invisibly." The only prompt the pending or contested condition may generate is at use time — proceed on the accepted/pinned binding, or wait — a risk decision about the user's own action, never an invitation to adjudicate evidence (B4).
 
 # The Decision Document
 [the Decision Document]: #the-decision-document

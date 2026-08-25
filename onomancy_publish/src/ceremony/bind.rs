@@ -7,7 +7,8 @@ use onomancy_core::{
     time::UnixSeconds,
 };
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     dns_name::DnsName,
     statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
@@ -46,7 +47,7 @@ pub struct Bind {
     /// `generation` lies on `document`'s path (D10). Opaque here —
     /// minted by `onomancy_keyhive::mint`, verified by the agent's
     /// authority.
-    pub carriage: onomancy_core::delegation::DelegationChain,
+    pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 impl Bind {

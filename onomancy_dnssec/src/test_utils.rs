@@ -13,7 +13,7 @@ pub mod fixtures;
 use ed25519_dalek::{Signer as _, SigningKey};
 
 use crate::{
-    certificate::chain::{ChainLink, DnssecChain},
+    chain::{ChainLink, DnssecChain},
     dns_name::DnsName,
 };
 

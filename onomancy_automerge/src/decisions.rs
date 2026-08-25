@@ -20,9 +20,9 @@ use onomancy_core::{
     digest::{Blake3, Digest},
 };
 use onomancy_dnssec::dns_name::DnsName;
-use onomancy_protocol::verifier_state::decisions::{Acceptance, Claim, Decisions};
+use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions};
 
-use crate::RESERVED_KEY;
+use crate::namestore::RESERVED_KEY;
 
 /// The decisions schema version this reader understands.
 pub const SCHEMA_VERSION: u64 = 0;
@@ -162,8 +162,9 @@ impl<'a> DecisionsView<'a> {
         resets
     }
 
-    // ————— shape readers: `None` is "contributes nothing" —————
-
+    /// Shape reader: `None` means "contributes nothing" — the
+    /// derivation never guesses. Every reader below shares this
+    /// contract.
     fn object<O: AsRef<ObjId>, P: Into<Prop>>(
         self,
         obj: O,

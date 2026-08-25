@@ -38,7 +38,6 @@
 //!   outcome type
 //! - [`memory`] — in-memory implementations (test doubles, small tools)
 
-pub mod memory;
 pub mod namestore;
 pub mod resolution;
 
@@ -116,8 +115,10 @@ pub fn resolve<N: Namestore, R: Replicas<Namestore = N>>(
 #[allow(clippy::expect_used)]
 mod tests {
     use super::{
-        memory::{MemoryNamestore, MemoryReplicas},
-        namestore::Authority,
+        namestore::{
+            Authority,
+            memory::{MemoryNamestore, MemoryReplicas},
+        },
         *,
     };
     use alloc::vec::Vec;

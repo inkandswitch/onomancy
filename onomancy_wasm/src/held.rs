@@ -18,10 +18,7 @@ use std::cell::Cell;
 use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value, transaction::Transactable};
 use ed25519_dalek::SigningKey;
 use js_sys::{Array, Reflect};
-use onomancy_automerge::{
-    RESERVED_KEY,
-    namestore::{DocumentNamestore, HeldDocuments},
-};
+use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     collections::Map,

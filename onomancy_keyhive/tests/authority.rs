@@ -15,10 +15,10 @@ use keyhive_core::{
     store::ciphertext::memory::MemoryCiphertextStore,
 };
 use keyhive_crypto::signer::memory::MemorySigner;
-use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
 use onomancy_dnssec::txt::generation_key::GenerationKey;
 use onomancy_keyhive::{authority::KeyhiveAuthority, carriage::Carriage};
-use onomancy_protocol::verifier_state::authority_verifier::AuthorityVerifier;
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 use rand::rngs::OsRng;
 use testresult::TestResult;
 
@@ -48,7 +48,7 @@ struct Fixture {
     anchor: DocAnchor,
     admin_key: VerifyingKey,
     reader_key: VerifyingKey,
-    carriage: onomancy_core::delegation::DelegationChain,
+    carriage: onomancy_core::delegation_chain::DelegationChain,
 }
 
 fn prekey_event(op: &KeyOp) -> StaticEvent<[u8; 32]> {

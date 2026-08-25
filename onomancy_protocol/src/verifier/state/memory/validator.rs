@@ -11,7 +11,7 @@ use onomancy_core::{
     digest::{Blake3, Digest},
 };
 use onomancy_dnssec::{
-    certificate::chain::DnssecChain,
+    chain::DnssecChain,
     chain_proof::{ChainProof, ChainValidator, InvalidChain},
     dns_name::DnsName,
 };

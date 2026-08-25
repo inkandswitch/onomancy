@@ -6,7 +6,7 @@
 
 use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
-    certificate::chain::{ChainLink, DnssecChain},
+    chain::{ChainLink, DnssecChain},
     chain_proof::{ChainProof, ChainValidator as _},
     dns_name::DnsName,
     txt::serial::Serial,

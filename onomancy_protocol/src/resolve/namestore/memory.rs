@@ -9,7 +9,7 @@ use core::cell::Cell;
 
 use onomancy_core::{anchor::doc::DocAnchor, collections::Map, name::segment::Segment};
 
-use super::namestore::{Authority, Namestore, Replicas, Vouched};
+use super::{Authority, Namestore, Replicas, Vouched};
 
 /// A flat in-memory namestore.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -13,7 +13,15 @@ use onomancy_core::{
 };
 use onomancy_protocol::resolve::namestore::{Authority, Namestore, Replicas, Vouched};
 
-use crate::RESERVED_KEY;
+/// The reserved top-level key Onomancy data lives under, in every
+/// document role: the flat namestore map in namestore documents
+/// (path-resolution spec, Namestore Layout), the decisions schema in
+/// decision documents (binding-cache spec, Schema).
+///
+/// The namestore location is a coordination point with upstream
+/// automerge-repo (design/names.md, open tension) — treat it as
+/// provisional until that lands.
+pub const RESERVED_KEY: &str = "onomancy";
 
 /// A namestore read from one held Automerge document.
 ///

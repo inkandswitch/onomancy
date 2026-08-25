@@ -8,7 +8,7 @@ use alloc::{format, string::String, vec, vec::Vec};
 use ed25519_dalek::SigningKey;
 
 use crate::{
-    certificate::chain::{ChainLink, DnssecChain},
+    chain::{ChainLink, DnssecChain},
     dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };

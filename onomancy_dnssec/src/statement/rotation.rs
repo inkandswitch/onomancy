@@ -27,7 +27,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use onomancy_core::{
     anchor::doc::DocAnchor,
-    delegation::DelegationChain,
+    delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     signed::{
         Signed,
@@ -242,7 +242,7 @@ pub enum DecodeRotationError {
 mod tests {
     use super::*;
     use alloc::vec;
-    use onomancy_core::delegation::SignedDelegationBytes;
+    use onomancy_core::delegation_chain::SignedDelegationBytes;
 
     /// Signed-region length: tag + three keys.
     const SIGNED_LEN: usize = 4 + 32 + 32 + 32;

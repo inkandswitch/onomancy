@@ -12,7 +12,7 @@
 //!            ───────────────────────          ─────────────────────
 //!            resolve::Namestore          ←    DocumentNamestore
 //!            resolve::Replicas           ←    HeldDocuments
-//!            verifier_state::Decisions    ←    decisions::read
+//!            verifier::state::Decisions    ←    decisions::read
 //!            stage-8 pins                ←    petname::pins
 //! ```
 //!
@@ -33,13 +33,3 @@ pub mod change_hash;
 pub mod decisions;
 pub mod namestore;
 pub mod petname;
-
-/// The reserved top-level key Onomancy data lives under, in every
-/// document role: the flat namestore map in namestore documents
-/// (path-resolution spec, Namestore Layout), the decisions schema in
-/// decision documents (binding-cache spec, Schema).
-///
-/// The namestore location is a coordination point with upstream
-/// automerge-repo (design/names.md, open tension) — treat it as
-/// provisional until that lands.
-pub const RESERVED_KEY: &str = "onomancy";

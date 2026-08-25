@@ -5,7 +5,7 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
 use ed25519_dalek::SigningKey;
-use onomancy_core::{anchor::doc::DocAnchor, delegation::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
 use onomancy_dnssec::{
     dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
@@ -193,7 +193,7 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
 
     let refreshed = Refresh {
         certificate,
-        chain: onomancy_dnssec::certificate::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
+        chain: onomancy_dnssec::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
         records: vec![record],
     }
     .plan(onomancy_core::time::UnixSeconds::from(NOW_MS / 1000))?;

@@ -1556,9 +1556,7 @@ version = "0.1.0"
 dependencies = [
  "hickory-proto",
  "onomancy_chain",
- "onomancy_core",
  "onomancy_dnssec",
- "onomancy_protocol",
  "testresult",
  "thiserror 2.0.20",
  "tokio",

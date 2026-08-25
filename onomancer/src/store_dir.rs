@@ -14,7 +14,7 @@ use onomancy_dnssec::{
     certificate::Certificate,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
 };
-use onomancy_protocol::verifier_state::store::{Store, item::Item};
+use onomancy_protocol::verifier::state::store::{Store, item::Item};
 
 /// Load every unit file in `dir` into a store. Creates the directory
 /// if missing (an empty store). Files with foreign extensions are

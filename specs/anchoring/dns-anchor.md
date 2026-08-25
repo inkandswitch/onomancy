@@ -98,7 +98,7 @@ Ratchet rules:
 seen n=3  →  stale record n=2 arrives          →  reject (replay)
           →  stale record n=4 arrives          →  accept, ratchet to 4
           →  fresh record n=1 arrives          →  accept, ratchet to 1,
-                                                  surface ratchet reset
+                                                  surface serial regression
           →  record n ≈ now + 20 min arrives   →  defer, retry later
 ```
 

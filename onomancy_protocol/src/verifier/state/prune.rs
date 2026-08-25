@@ -143,7 +143,7 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{Binding, binding, doc, host, rotation},
-        verifier_state::{
+        verifier::state::{
             VerifierState,
             decisions::Acceptance,
             memory::{authority::MemoryAuthority, validator::MemoryValidator},

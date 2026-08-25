@@ -39,6 +39,7 @@ extern crate alloc;
 pub mod trust_anchor;
 
 pub mod certificate;
+pub mod chain;
 pub mod chain_proof;
 pub mod chain_provider;
 pub mod crypto;
@@ -53,4 +54,4 @@ pub mod validator;
 pub mod test_utils;
 pub mod txt;
 pub mod wire;
-pub mod zone_state;
+pub mod zone_state_key;

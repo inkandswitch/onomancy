@@ -9,6 +9,8 @@
 //! > gap is typed, surfaced in every verdict, and closable by an
 //! > impl swap — never silently assumed away.
 
+pub mod memory;
+
 use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 
 /// A flat map from paths to namestore references — the substrate

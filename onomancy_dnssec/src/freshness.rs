@@ -14,14 +14,14 @@ use onomancy_core::time::UnixSeconds;
 ///
 /// Empty intersections are unrepresentable: a chain whose windows never
 /// jointly held is invalid ✗ (it never had joint validity), which
-/// [`ChainWindow::new`] rejects at construction.
+/// [`ValidityWindow::new`] rejects at construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ChainWindow {
+pub struct ValidityWindow {
     inception: UnixSeconds,
     expiration: UnixSeconds,
 }
 
-impl ChainWindow {
+impl ValidityWindow {
     /// Construct a window, rejecting empty intersections.
     ///
     /// # Errors
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn grading_covers_all_three_standings() {
-        let window = ChainWindow::new(UnixSeconds::from(100), UnixSeconds::from(200))
+        let window = ValidityWindow::new(UnixSeconds::from(100), UnixSeconds::from(200))
             .expect("non-empty window");
 
         assert_eq!(window.grade(UnixSeconds::from(50)), Grade::NotYetBegun);
@@ -122,9 +122,9 @@ mod tests {
 
     #[test]
     fn empty_windows_are_unrepresentable() {
-        assert!(ChainWindow::new(UnixSeconds::from(2), UnixSeconds::from(1)).is_err());
+        assert!(ValidityWindow::new(UnixSeconds::from(2), UnixSeconds::from(1)).is_err());
         // Instantaneous joint validity is still a window.
-        assert!(ChainWindow::new(UnixSeconds::from(2), UnixSeconds::from(2)).is_ok());
+        assert!(ValidityWindow::new(UnixSeconds::from(2), UnixSeconds::from(2)).is_ok());
     }
 
     mod props {
@@ -138,7 +138,7 @@ mod tests {
                 .with_type::<(u64, u64, u64, u64)>()
                 .for_each(|(a, b, t1, t2)| {
                     let (inception, expiration) = if a <= b { (*a, *b) } else { (*b, *a) };
-                    let window = ChainWindow::new(
+                    let window = ValidityWindow::new(
                         UnixSeconds::from(inception),
                         UnixSeconds::from(expiration),
                     )

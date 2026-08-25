@@ -17,18 +17,18 @@ use onomancy_protocol::{
     test_utils::{
         Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
     },
-    verifier_state::{
+    verifier::state::{
         VerifierState,
+        binding_state::{BindingGrade, BindingState, ContinuityGrade},
         decisions::{Acceptance, Claim, Decisions},
         memory::{authority::MemoryAuthority, validator::MemoryValidator},
-        output::{BindingGrade, ContinuityGrade, HostState},
         store::{Store, item::Item},
     },
 };
 
 const NOW: u64 = 1_755_000_000;
 
-fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostState {
+fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> BindingState {
     let mut validator = MemoryValidator::default();
     let mut store = Store::default();
 
@@ -49,7 +49,11 @@ fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> HostSt
         &MemoryAuthority::default(),
     );
 
-    derivation.hosts.get(&host()).cloned().unwrap_or_default()
+    derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn accept(document: DocAnchor, cited: &Binding) -> Decisions {
@@ -296,7 +300,11 @@ fn d10_fresh_record_g_not_on_path_is_rejected() -> TestResult {
         &MemoryAuthority::default().off_path(&generation(11)),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     assert!(state.accepted.is_none(), "D10 rejects the record");
     Ok(())
 }
@@ -543,7 +551,11 @@ fn b9_unauthorized_statements_have_no_lineage_effect() -> TestResult {
         &MemoryAuthority::default().deny(doc(1), generation(12).verifying_key()),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     let accepted = state.accepted.expect("old generation still accepted");
     assert_eq!(accepted.generation, generation(11), "no D12 from garbage");
     assert!(state.forks.is_empty(), "never fork evidence either");
@@ -803,7 +815,11 @@ fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
         &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
     );
 
-    let state = derivation.hosts.get(&host()).cloned().unwrap_or_default();
+    let state = derivation
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
     assert!(
         state.accepted.is_none(),
         "an unauthorized signer's certificate must be inert"

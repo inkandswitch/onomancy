@@ -1,4 +1,4 @@
-//! The derivation's per-hostname output vocabulary.
+//! The derived binding state for one hostname, and its vocabulary.
 //!
 //! The container — [`VerifierState`](super::VerifierState) — lives
 //! with its impls in the parent module; this module holds what it is
@@ -11,13 +11,13 @@ use alloc::vec::Vec;
 
 use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_dnssec::{
-    freshness::ChainWindow,
+    freshness::ValidityWindow,
     txt::{generation_key::GenerationKey, serial::Serial},
 };
 
 /// The derived state for one hostname.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HostState {
+pub struct BindingState {
     /// The accepted binding, if any. Empty while contested.
     pub accepted: Option<AcceptedBinding>,
 
@@ -52,7 +52,7 @@ pub struct HostState {
     /// Tenure of the accepted document: the span of its records'
     /// chain-window evidence in this store. Grades the severity of a
     /// later unproven displacement.
-    pub tenure: Option<ChainWindow>,
+    pub tenure: Option<ValidityWindow>,
 }
 
 /// An accepted (document, generation) binding with its grade.

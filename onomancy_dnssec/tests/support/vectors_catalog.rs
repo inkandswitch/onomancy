@@ -30,11 +30,12 @@ use core::fmt::Write as _;
 use ed25519_dalek::SigningKey;
 use onomancy_core::{
     anchor::doc::{DocAnchor, Head},
-    delegation::{DelegationChain, SignedDelegationBytes},
+    delegation_chain::{DelegationChain, SignedDelegationBytes},
     time::UnixSeconds,
 };
 use onomancy_dnssec::{
-    certificate::{Certificate, CertificateParams, chain::DnssecChain},
+    certificate::{Certificate, CertificateParams},
+    chain::DnssecChain,
     dns_name::DnsName,
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::generation_key::GenerationKey,
@@ -102,7 +103,7 @@ pub fn vectors() -> Vec<Vector> {
     });
 
     vec![
-        // ————— accept: certificates —————
+        // Accept: certificates.
         Vector {
             name: "cert_minimal",
             bytes: minimal.encode(),
@@ -158,7 +159,7 @@ pub fn vectors() -> Vec<Vector> {
             bytes: reattach_b.encode(),
             expect: Expect::Certificate,
         },
-        // ————— accept: statements —————
+        // Accept: statements.
         Vector {
             name: "rotation_valid",
             bytes: RotationStatement::sign(
@@ -184,7 +185,7 @@ pub fn vectors() -> Vec<Vector> {
             .encode(),
             expect: Expect::Successor,
         },
-        // ————— reject: canonical-form mutations —————
+        // Reject: canonical-form mutations.
         // Sorted heads [A, B] swapped to [B, A]: unsorted heads are
         // not the canonical encoding.
         Vector {

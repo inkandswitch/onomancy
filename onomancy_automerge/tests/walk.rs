@@ -11,10 +11,7 @@
 
 use automerge::{Automerge, ObjType, transaction::Transactable};
 use ed25519_dalek::SigningKey;
-use onomancy_automerge::{
-    RESERVED_KEY,
-    namestore::{DocumentNamestore, HeldDocuments},
-};
+use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY};
 use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 use onomancy_protocol::resolve::{
     namestore::{Authority, Vouched},

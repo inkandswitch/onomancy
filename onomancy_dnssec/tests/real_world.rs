@@ -22,13 +22,13 @@ use std::{fs, path::PathBuf};
 
 use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
-    certificate::chain::DnssecChain,
+    chain::DnssecChain,
     dns_name::DnsName,
     freshness::{Freshness, Grade},
     txt::serial::Serial,
     validator::Validator,
 };
-use onomancy_protocol::{verifier_state::memory::authority::MemoryAuthority, verify};
+use onomancy_protocol::verifier::{state::memory::authority::MemoryAuthority, verdict};
 use testresult::TestResult;
 
 /// The capture instant (seconds), inside every RRSIG window.
@@ -88,7 +88,7 @@ fn the_production_chain_validates_from_the_iana_anchors() -> TestResult {
 fn the_production_certificate_verifies_end_to_end() -> TestResult {
     // KEYHIVE PENDING: MemoryAuthority is permissive, so the D10
     // path-membership half is vacuous here; the DNSSEC half is real.
-    let verdict = verify::verify(
+    let verdict = verdict::verify(
         &fixture("real_brooklynzelenka.onc"),
         &hostname(),
         UnixSeconds::from(CAPTURED_AT),
@@ -104,7 +104,7 @@ fn the_production_certificate_verifies_end_to_end() -> TestResult {
     );
 
     // Stale-graded later, still verifiable: offline semantics.
-    let later = verify::verify(
+    let later = verdict::verify(
         &fixture("real_brooklynzelenka.onc"),
         &hostname(),
         UnixSeconds::from(YEARS_LATER),

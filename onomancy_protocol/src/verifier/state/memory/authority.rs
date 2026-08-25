@@ -6,10 +6,10 @@
 
 use ed25519_dalek::VerifyingKey;
 
-use onomancy_core::{anchor::doc::DocAnchor, collections::Set, delegation::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, collections::Set, delegation_chain::DelegationChain};
 use onomancy_dnssec::txt::generation_key::GenerationKey;
 
-use crate::verifier_state::authority_verifier::AuthorityVerifier;
+use crate::verifier::state::authority_verifier::AuthorityVerifier;
 
 /// An [`AuthorityVerifier`] with configurable deny-lists, permissive
 /// by default.
