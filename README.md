@@ -1,5 +1,9 @@
 # Onomancy
 
+> [!WARNING]
+>
+> Early development. Nothing here is stable, audited, or ready for real world use.
+
 A local-first _edgename_ protocol: human-meaningful names over self-certifying keys, with optional DNSSEC-rooted global names layered on top.
 
 This repository contains:
@@ -16,10 +20,6 @@ This repository contains:
 All three name forms resolve to an [Automerge](https://automerge.org) document whose ID is an ed25519 verifying key (via [Keyhive](https://github.com/inkandswitch/keyhive)) — a self-certifying identity, and the root that resolution starts from. Petnames and DNS names are naming layers over those documents, so an account created offline already has a globally shareable name, and binding a domain later adds a memorable spelling for the _same_ identity. No migration, ever.
 
 DNS-rooted names verify locally, from a baked-in [IANA] [root KSK] through a [DNSSEC]-protected [TXT record] to a signed certificate fetched from a designated endpoint (or received by gossip). Verified bindings are self-authenticating records: they can be gossiped peer-to-peer (Bluetooth at a field campout, QR codes) and re-verified by the receiver with no trust in the sender.
-
-> [!WARNING]
->
-> Early development. Nothing here is stable, audited, or ready for real world use.
 
 ## Design
 
