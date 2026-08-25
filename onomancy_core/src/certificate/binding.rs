@@ -22,12 +22,71 @@ use super::{DecodeCertificateError, FieldName, read_heads, read_key};
 /// document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Binding {
-    pub(super) root_doc: DocAnchor,
-    pub(super) signer: VerifyingKey,
-    pub(super) issued_at: UnixSeconds,
-    pub(super) hostname: DnsName,
-    pub(super) heads: Vec<Head>,
-    pub(super) predecessor: Option<Box<SuccessorStatement>>,
+    root_doc: DocAnchor,
+    signer: VerifyingKey,
+    issued_at: UnixSeconds,
+    hostname: DnsName,
+    heads: Vec<Head>,
+    predecessor: Option<Box<SuccessorStatement>>,
+}
+
+impl Binding {
+    /// Assembles the payload verbatim; canonicalization (head
+    /// sorting, dedup) is the caller's job before construction.
+    #[must_use]
+    pub fn new(
+        root_doc: DocAnchor,
+        signer: VerifyingKey,
+        issued_at: UnixSeconds,
+        hostname: DnsName,
+        heads: Vec<Head>,
+        predecessor: Option<SuccessorStatement>,
+    ) -> Self {
+        Self {
+            root_doc,
+            signer,
+            issued_at,
+            hostname,
+            heads,
+            predecessor: predecessor.map(Box::new),
+        }
+    }
+
+    /// The signing key.
+    #[must_use]
+    pub const fn signer(&self) -> &VerifyingKey {
+        &self.signer
+    }
+
+    /// The bound root document.
+    #[must_use]
+    pub const fn root_doc(&self) -> &DocAnchor {
+        &self.root_doc
+    }
+
+    /// Signer-claimed issuance time.
+    #[must_use]
+    pub const fn issued_at(&self) -> UnixSeconds {
+        self.issued_at
+    }
+
+    /// The bound hostname.
+    #[must_use]
+    pub const fn hostname(&self) -> &DnsName {
+        &self.hostname
+    }
+
+    /// Advisory heads, canonical order.
+    #[must_use]
+    pub fn heads(&self) -> &[Head] {
+        &self.heads
+    }
+
+    /// The succession proof, if any.
+    #[must_use]
+    pub fn predecessor(&self) -> Option<&SuccessorStatement> {
+        self.predecessor.as_deref()
+    }
 }
 
 impl Payload for Binding {
@@ -86,6 +145,6 @@ impl Payload for Binding {
     }
 
     fn signer(&self) -> &VerifyingKey {
-        &self.signer
+        self.signer()
     }
 }

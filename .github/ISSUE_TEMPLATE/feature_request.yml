@@ -10,7 +10,7 @@ body:
         the normative rules live in `specs/` and the rationale in
         `design/` — substantial proposals should engage with both.
         Consider opening a
-        [Discussion](https://github.com/expede/onomancy/discussions)
+        [Discussion](https://github.com/inkandswitch/onomancy/discussions)
         first so the shape can be hashed out before filing.
 
   - type: checkboxes

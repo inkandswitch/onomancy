@@ -10,7 +10,7 @@ body:
         information you can give us, the faster we can investigate.
 
         Before filing, please [search existing
-        issues](https://github.com/expede/onomancy/issues?q=is%3Aissue)
+        issues](https://github.com/inkandswitch/onomancy/issues?q=is%3Aissue)
         to avoid duplicates.
 
   - type: checkboxes
@@ -20,7 +20,7 @@ body:
       options:
         - label: I have searched existing issues and this is not a duplicate.
           required: true
-        - label: This is not a security vulnerability (those go to [Security Advisories](https://github.com/expede/onomancy/security/advisories/new)).
+        - label: This is not a security vulnerability (those go to [Security Advisories](https://github.com/inkandswitch/onomancy/security/advisories/new)).
           required: true
 
   - type: checkboxes

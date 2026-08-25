@@ -60,7 +60,7 @@ impl JsHeldDocuments {
     #[wasm_bindgen(js_name = createDocument)]
     pub fn create_document(&mut self) -> Result<String, JsError> {
         let mut seed = [0u8; 32];
-        getrandom::getrandom(&mut seed).map_err(|error| JsError::new(&error.to_string()))?;
+        getrandom::fill(&mut seed).map_err(|error| JsError::new(&error.to_string()))?;
 
         let anchor = DocAnchor::from(SigningKey::from_bytes(&seed).verifying_key());
         self.docs.insert(anchor, Automerge::new());

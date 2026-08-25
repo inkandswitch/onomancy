@@ -29,7 +29,7 @@ impl Keygen {
     /// the key file cannot be written.
     pub(crate) fn run(&self) -> Result<(), KeygenError> {
         let mut bytes = [0u8; 32];
-        getrandom::getrandom(&mut bytes).map_err(|_| KeygenError::NoEntropy)?;
+        getrandom::fill(&mut bytes).map_err(|_| KeygenError::NoEntropy)?;
 
         let key = SigningKey::from_bytes(&bytes);
         let anchor = DocAnchor::from(key.verifying_key());

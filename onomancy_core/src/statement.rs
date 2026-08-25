@@ -13,15 +13,8 @@
 //! proof that its signer speaks for the document it makes claims about.
 //! Unlike the certificate's attached region, the carriage rides
 //! *inside* the unit: it is frozen ceremony-time history and never
-//! needs the keyless-refresh lifecycle.
-//!
-//! | Region           | Type            | Width       | Notes                            | Signed |
-//! |------------------|-----------------|-------------|----------------------------------|--------|
-//! | tag              | magic bytes     | 4B          | 3-ASCII schema + version byte    | yes    |
-//! | key fields       | ed25519 vks     | 32B each    | the statement's document/key set | yes    |
-//! | hostname         | len + ASCII     | varies      | successor statements only        | yes    |
-//! | signature        | ed25519         | 64B         |                                  | —      |
-//! | carriage         | entry list      | varies      | count + len-prefixed entries     | no     |
+//! needs the keyless-refresh lifecycle. Each unit's exact wire layout
+//! is tabled in its own module.
 //!
 //! # Module Organization
 //!

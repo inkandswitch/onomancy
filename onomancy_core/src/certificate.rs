@@ -49,7 +49,7 @@
 pub mod binding;
 pub mod chain;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
@@ -61,10 +61,7 @@ use crate::{
         dns::{CanonicalDnsNameError, DnsName},
         doc::{DocAnchor, Head},
     },
-    signed::{
-        Signed,
-        payload::{Malformed, Payload},
-    },
+    signed::{Signed, payload::Malformed},
     statement::{
         rotation::{DecodeRotationError, RotationStatement},
         successor::{DecodeSuccessorError, SuccessorStatement},
@@ -144,14 +141,14 @@ impl Certificate {
         heads.dedup();
 
         let signed_unit = Signed::sign(
-            Binding {
+            Binding::new(
                 root_doc,
-                signer: signer.verifying_key(),
+                signer.verifying_key(),
                 issued_at,
                 hostname,
                 heads,
-                predecessor: predecessor.map(Box::new),
-            },
+                predecessor,
+            ),
             signer,
         );
 
@@ -240,40 +237,40 @@ impl Certificate {
     /// The signing key.
     #[must_use]
     pub const fn signer(&self) -> &VerifyingKey {
-        &self.signed.payload().signer
+        self.signed.payload().signer()
     }
 
     /// The bound root document.
     #[must_use]
     pub const fn root_doc(&self) -> &DocAnchor {
-        &self.signed.payload().root_doc
+        self.signed.payload().root_doc()
     }
 
     /// Signer-claimed issuance time — the weakest comparison-ladder
     /// rung, never load-bearing.
     #[must_use]
     pub const fn issued_at(&self) -> UnixSeconds {
-        self.signed.payload().issued_at
+        self.signed.payload().issued_at()
     }
 
     /// The bound hostname (full DNS name from the `@` anchor).
     #[must_use]
     pub const fn hostname(&self) -> &DnsName {
-        &self.signed.payload().hostname
+        self.signed.payload().hostname()
     }
 
     /// Advisory heads: known-good state at issuance. MUST NOT pin
     /// resolution. Empty = live (unpinned) name.
     #[must_use]
     pub fn heads(&self) -> &[Head] {
-        &self.signed.payload().heads
+        self.signed.payload().heads()
     }
 
     /// The succession proof, if any: an independently signed unit,
     /// already signature-checked by its own decode.
     #[must_use]
     pub fn predecessor(&self) -> Option<&SuccessorStatement> {
-        self.signed.payload().predecessor.as_deref()
+        self.signed.payload().predecessor()
     }
 
     /// Attached: verbatim `Signed<Delegation>` entries, doc root →

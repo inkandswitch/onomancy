@@ -1,0 +1,12 @@
+{
+  "name": "@onomancy/wasm-e2e",
+  "private": true,
+  "description": "Playwright browser tests for the @onomancy/wasm package",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1"
+  }
+}

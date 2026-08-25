@@ -17,7 +17,7 @@ members = [
 edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/expede/onomancy"
+repository = "https://github.com/inkandswitch/onomancy"
 authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 
 [workspace.dependencies]
@@ -49,7 +49,7 @@ console_error_panic_hook = "0.1.7"
 ed25519-dalek = { version = "2.2", default-features = false }
 future_form = { version = "0.3", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["executor"] }
-getrandom = "0.2"
+getrandom = { version = "0.4", default-features = false }
 hickory-proto = { version = "0.26", default-features = false }
 idna = { version = "1.1", default-features = false, features = [
   "alloc",

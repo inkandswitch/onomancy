@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [ci-fmt, ci-clippy, ci-test, ci-wasm, ci-no-std, ci-deny]
+        check: [ci-fmt, ci-clippy, ci-test, ci-wasm, ci-no-std, ci-deny, ci-e2e]
     steps:
       - uses: actions/checkout@v4
 
