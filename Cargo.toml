@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "onomancer",
   "onomancy_automerge",
+  "onomancy_chain",
   "onomancy_core",
   "onomancy_dnssec",
   "onomancy_hickory",
@@ -22,6 +23,7 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 [workspace.dependencies]
 # Internal crates
 onomancy_automerge = { version = "0.1.0", path = "onomancy_automerge", default-features = false }
+onomancy_chain = { version = "0.1.0", path = "onomancy_chain", default-features = false }
 onomancy_core = { version = "0.1.0", path = "onomancy_core", default-features = false }
 onomancy_dnssec = { version = "0.1.0", path = "onomancy_dnssec", default-features = false }
 onomancy_hickory = { version = "0.1.0", path = "onomancy_hickory", default-features = false }

@@ -1506,6 +1506,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "onomancy_chain"
+version = "0.1.0"
+dependencies = [
+ "hickory-proto",
+ "onomancy_core",
+ "onomancy_dnssec",
+ "testresult",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "onomancy_core"
 version = "0.1.0"
 dependencies = [
@@ -1546,6 +1557,7 @@ name = "onomancy_hickory"
 version = "0.1.0"
 dependencies = [
  "hickory-proto",
+ "onomancy_chain",
  "onomancy_core",
  "onomancy_dnssec",
  "onomancy_protocol",
@@ -1606,9 +1618,9 @@ dependencies = [
  "getrandom 0.2.17",
  "hickory-proto",
  "js-sys",
+ "onomancy_chain",
  "onomancy_core",
  "onomancy_dnssec",
- "onomancy_hickory",
  "onomancy_protocol",
  "thiserror 2.0.18",
  "tracing",

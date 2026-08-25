@@ -33,7 +33,8 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 | [`onomancy_protocol`](./onomancy_protocol) | Sans-IO machines: resolution walk, comparison ladder, binding-cache derivation       |
 | [`onomancy_dnssec`](./onomancy_dnssec) | Sans-IO RFC 4034/4035 chain validation, IANA trust anchors baked in                  |
 | [`onomancy_automerge`](./onomancy_automerge) | Automerge substrate adapter: namestores, decision documents, petnames                |
-| [`onomancy_hickory`](./onomancy_hickory) | Host chain courier: stub DNS transport + chain assembly                              |
+| [`onomancy_chain`](./onomancy_chain) | Sans-IO DNSSEC chain assembly: questions out, records in, framed links               |
+| [`onomancy_hickory`](./onomancy_hickory) | Host chain courier: stub DNS transport driving the assembly machine                  |
 | [`onomancy_wasm`](./onomancy_wasm)   | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
 | [`onomancer`](./onomancer)           | The agent (binary): keygen · record · resolve                                        |
 
@@ -45,6 +46,7 @@ graph TD
         core["onomancy_core<br/><i>vocabulary: types & codecs</i>"]
         proto["onomancy_protocol<br/><i>machines: resolve · ladder · derive</i>"]
         dnssec["onomancy_dnssec<br/><i>RFC 4034/4035 validation<br/>over supplied bytes</i>"]
+        assembly["onomancy_chain<br/><i>chain assembly state machine<br/>(questions out, records in)</i>"]
         publish["onomancy_publish†<br/><i>ceremonies → Plans</i>"]
 
         subgraph adapters ["substrate adapters (pure over held documents)"]
@@ -62,6 +64,9 @@ graph TD
 
     proto --> core
     dnssec -- "implements ChainValidator" --> proto
+    assembly --> core
+    hickory -- "drives" --> assembly
+    wasm -- "drives" --> assembly
     publish --> proto
     automerge -- "implements Namestore,<br/>DecisionsView" --> proto
     keyhive -- "implements AuthorityVerifier" --> proto

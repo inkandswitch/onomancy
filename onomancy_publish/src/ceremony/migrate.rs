@@ -9,7 +9,7 @@
 use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     name::{dns::DnsName, doc::DocAnchor},
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     time::UnixSeconds,
@@ -17,7 +17,7 @@ use onomancy_core::{
 };
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };

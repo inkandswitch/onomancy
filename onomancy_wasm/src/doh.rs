@@ -1,20 +1,21 @@
 //! DNS-over-HTTPS chain courier (RFC 8484) for browsers and workers.
 //!
-//! The same [`chain_assembly`](onomancy_hickory::chain_assembly)
-//! logic as the host courier, over `fetch()` instead of sockets: POST
+//! The same sans-IO assembly machine (`onomancy_chain`) as the
+//! host courier, driven over `fetch()` instead of sockets: POST
 //! `application/dns-message` bodies to one `DoH` endpoint, message ID 0
 //! (RFC 8484 cache friendliness). The transport is exactly as
 //! untrusted as the socket one — the verifier's own DNSSEC
 //! validation is the only trust boundary, and `DoH` merely narrows who
 //! sees the queries (the on-path observer becomes the `DoH` resolver).
 
-use hickory_proto::{
-    op::Message,
-    rr::{Name, Record, RecordType},
-};
+use hickory_proto::{op::Message, rr::Record};
 use js_sys::{Reflect, Uint8Array};
+use onomancy_chain::{
+    answer::{self, Refused},
+    assembly::{AssembleError, Assembly, Step},
+    question::Question,
+};
 use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
-use onomancy_hickory::chain_assembly::{self, AssembleError, Query, Refused};
 use onomancy_protocol::chain_provider::ChainProvider;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -96,15 +97,12 @@ impl DohProvider {
         .map_err(|failure| js_failure(&failure))?;
         Ok(Uint8Array::new(&buffer).to_vec())
     }
-}
 
-impl Query for DohProvider {
-    type Error = DohError;
-
-    async fn answers(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, DohError> {
+    /// Answer one of the assembly machine's questions over `DoH`.
+    async fn query(&self, question: &Question) -> Result<Vec<Record>, DohError> {
         // ID 0 per RFC 8484: DoH responses are matched by the HTTP
         // exchange, and a fixed ID keeps them cacheable.
-        let request = chain_assembly::build_query(name, rtype, 0);
+        let request = question.message(0);
         let wire = request.to_vec().map_err(|_| DohError::Encode)?;
 
         let message =
@@ -114,16 +112,41 @@ impl Query for DohProvider {
             return Err(DohError::IdMismatch);
         }
 
-        Ok(chain_assembly::accepted_answers(message)?)
+        Ok(answer::accepted(message)?)
     }
 }
 
 impl ChainProvider for DohProvider {
-    type Error = AssembleError<DohError>;
+    type Error = FetchChainError;
 
     async fn chain(&self, hostname: &DnsName) -> Result<DnssecChain, Self::Error> {
-        chain_assembly::assemble(self, hostname).await
+        let (mut assembly, mut question) = Assembly::start(hostname)?;
+
+        loop {
+            let records = self.query(&question).await?;
+
+            match assembly.answer(records)? {
+                Step::Ask(next, asked) => {
+                    assembly = next;
+                    question = asked;
+                }
+                Step::Done(chain) => return Ok(chain),
+            }
+        }
     }
+}
+
+/// The `DoH` courier failed to fetch a chain — in the machine or on
+/// the wire, never a validity verdict (that is the validator's).
+#[derive(Debug, thiserror::Error)]
+pub enum FetchChainError {
+    /// The answers could not be framed into a chain.
+    #[error(transparent)]
+    Assemble(#[from] AssembleError),
+
+    /// A `DoH` exchange failed at the transport level.
+    #[error(transparent)]
+    Transport(#[from] DohError),
 }
 
 /// A JS-side failure, stringified: `JsValue` is neither `Send` nor

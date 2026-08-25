@@ -1,18 +1,14 @@
-//! The host chain courier: [`chain_assembly`](crate::chain_assembly) over the
-//! stub resolver, with upstream failover.
+//! The host chain courier: the sans-IO assembly machine
+//! (`onomancy_chain`) driven over the stub resolver, with upstream
+//! failover.
 
 use std::net::{IpAddr, SocketAddr};
 
+use onomancy_chain::assembly::{AssembleError, Assembly, Step};
 use onomancy_core::{cert::chain::DnssecChain, name::dns::DnsName};
 use onomancy_protocol::chain_provider::ChainProvider;
 
-use crate::{
-    chain_assembly::{self, AssembleError},
-    stub::{QueryError, StubResolver},
-};
-
-/// The concrete error of the host courier's chain assembly.
-pub type FetchChainError = AssembleError<QueryError>;
+use crate::stub::{QueryError, StubResolver};
 
 /// The fallback of last resort when no upstream is configured or
 /// discoverable.
@@ -84,7 +80,7 @@ impl HickoryProvider {
         let mut last_failure: Option<FetchChainError> = None;
 
         for upstream in &self.upstreams {
-            match chain_assembly::assemble(upstream, hostname).await {
+            match drive(upstream, hostname).await {
                 Ok(chain) => return Ok(chain),
                 Err(failure) => {
                     tracing::debug!(%hostname, %failure, "upstream failed, trying next");
@@ -106,6 +102,40 @@ impl ChainProvider for HickoryProvider {
     async fn chain(&self, hostname: &DnsName) -> Result<DnssecChain, FetchChainError> {
         self.assemble(hostname).await
     }
+}
+
+/// Drive the sans-IO assembly machine against one upstream: answer
+/// each question over the socket until the chain is framed.
+async fn drive(
+    upstream: &StubResolver,
+    hostname: &DnsName,
+) -> Result<DnssecChain, FetchChainError> {
+    let (mut assembly, mut question) = Assembly::start(hostname)?;
+
+    loop {
+        let records = upstream.query(&question).await?;
+
+        match assembly.answer(records)? {
+            Step::Ask(next, asked) => {
+                assembly = next;
+                question = asked;
+            }
+            Step::Done(chain) => return Ok(chain),
+        }
+    }
+}
+
+/// The host courier failed to fetch a chain — in the machine or on
+/// the wire, never a validity verdict (that is the validator's).
+#[derive(Debug, thiserror::Error)]
+pub enum FetchChainError {
+    /// The answers could not be framed into a chain.
+    #[error(transparent)]
+    Assemble(#[from] AssembleError),
+
+    /// A query failed at the transport level.
+    #[error(transparent)]
+    Query(#[from] QueryError),
 }
 
 /// The `nameserver` entries of `/etc/resolv.conf`, in file order.

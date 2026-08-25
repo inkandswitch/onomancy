@@ -15,23 +15,13 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# default-features = false deliberately: proto's `std` exists only to
-# feed `Message::query()`'s random IDs (rand/thread_rng → getrandom),
-# and our IDs are explicit — keeps getrandom out of the wasm graph.
 hickory-proto = { workspace = true }
+onomancy_chain = { workspace = true }
 onomancy_core = { workspace = true, features = ["std"] }
 onomancy_protocol = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, optional = true, features = [
-  "io-util",
-  "net",
-  "time",
-] }
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tracing = { workspace = true }
-
-[features]
-default = ["sockets"]
-sockets = ["dep:tokio"] # the OS-socket stub; off = assembly only (wasm)
 
 [dev-dependencies]
 onomancy_dnssec = { workspace = true, features = ["std"] }

@@ -3,7 +3,7 @@
 use alloc::{format, vec};
 
 use onomancy_core::{
-    cert::{chain::DnssecChain, Certificate, CertificateParams},
+    cert::{Certificate, CertificateParams, chain::DnssecChain},
     name::{
         dns::DnsName,
         doc::{DocAnchor, Head},
@@ -14,7 +14,7 @@ use onomancy_core::{
 };
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };

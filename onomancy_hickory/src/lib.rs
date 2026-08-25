@@ -1,10 +1,11 @@
 //! The host DNSSEC chain courier: `ChainProvider` over real DNS.
 //!
 //! This crate is a byte courier and nothing more (ADR-006/ADR-040):
-//! it asks a recursive resolver for the records a chain needs — root
-//! DNSKEY, then DS + DNSKEY per signed zone cut, then the TXT leaf at
-//! `_onomancy.<hostname>` — and frames them into the link format the
-//! sans-IO validator (`onomancy_dnssec`) walks. Nothing here is
+//! it drives the sans-IO assembly machine (`onomancy_chain`) over
+//! OS sockets, answering its questions — root DNSKEY, then DS +
+//! DNSKEY per signed zone cut, then the TXT leaf at
+//! `_onomancy.<hostname>` — so the machine can frame the link format
+//! the sans-IO validator (`onomancy_dnssec`) walks. Nothing here is
 //! trusted: transport spoofing, a lying resolver, or a broken cache
 //! can only produce a chain that fails validation — never a false
 //! bind. That is why the stub keeps no DNSSEC state, sets `CD`
@@ -24,8 +25,5 @@
 
 #![forbid(unsafe_code)]
 
-pub mod chain_assembly;
-#[cfg(feature = "sockets")]
 pub mod provider;
-#[cfg(feature = "sockets")]
 pub mod stub;

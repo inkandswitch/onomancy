@@ -1,0 +1,30 @@
+[package]
+name = "onomancy_chain"
+version = "0.1.0"
+description = "Sans-IO DNSSEC chain assembly for Onomancy: questions out, records in, framed links"
+readme = "./README.md"
+
+repository.workspace = true
+license.workspace = true
+authors.workspace = true
+
+categories = ["network-programming", "parser-implementations"]
+keywords = ["dns", "dnssec", "onomancy", "sans-io"]
+
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# default-features = false deliberately: proto's `std` exists only to
+# feed `Message::query()`'s random IDs (rand/thread_rng → getrandom),
+# and our IDs are explicit — keeps getrandom out of the wasm graph.
+hickory-proto = { workspace = true }
+onomancy_core = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+onomancy_dnssec = { workspace = true, features = ["std"] }
+testresult = { workspace = true }
+
+[lints]
+workspace = true

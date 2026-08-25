@@ -11,16 +11,15 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use hickory_proto::{
-    op::Message,
-    rr::{Name, Record, RecordType},
+use hickory_proto::{op::Message, rr::Record};
+use onomancy_chain::{
+    answer::{self, Refused},
+    question::Question,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
 };
-
-use crate::chain_assembly::{self, Query, Refused};
 
 /// UDP receive buffer: generous for signed `RRsets` under the payload cap.
 const UDP_BUFFER: usize = 4096;
@@ -49,7 +48,8 @@ impl StubResolver {
         Self { timeout, ..self }
     }
 
-    /// Query `name`/`rtype`, returning the answer-section records.
+    /// Answer one of the assembly machine's questions, returning the
+    /// answer-section records.
     ///
     /// `NXDOMAIN` and empty answers return `Ok(vec![])` — what they
     /// mean is the assembler's business (a suffix that is not a zone
@@ -59,8 +59,8 @@ impl StubResolver {
     ///
     /// Returns [`QueryError`] for transport failures, timeouts,
     /// malformed responses, and non-`NoError`/`NXDomain` rcodes.
-    pub async fn query(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
-        let request = chain_assembly::build_query(name, rtype, weak_id());
+    pub async fn query(&self, question: &Question) -> Result<Vec<Record>, QueryError> {
+        let request = question.message(weak_id());
         let id = request.metadata.id;
         let wire = request.to_vec().map_err(|_| QueryError::Encode)?;
 
@@ -69,7 +69,7 @@ impl StubResolver {
             UdpOutcome::Truncated => self.exchange_tcp(&wire, id).await?,
         };
 
-        Ok(chain_assembly::accepted_answers(response)?)
+        Ok(answer::accepted(response)?)
     }
 
     async fn exchange_udp(&self, wire: &[u8], id: u16) -> Result<UdpOutcome, QueryError> {
@@ -121,14 +121,6 @@ impl StubResolver {
         }
 
         Ok(message)
-    }
-}
-
-impl Query for StubResolver {
-    type Error = QueryError;
-
-    async fn answers(&self, name: &Name, rtype: RecordType) -> Result<Vec<Record>, QueryError> {
-        self.query(name, rtype).await
     }
 }
 

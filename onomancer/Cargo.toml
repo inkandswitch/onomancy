@@ -23,7 +23,7 @@ automerge = { workspace = true }
 onomancy_automerge = { workspace = true }
 onomancy_core = { workspace = true, features = ["idna", "std"] }
 onomancy_dnssec = { workspace = true, features = ["std"] }
-onomancy_hickory = { workspace = true, features = ["sockets"] }
+onomancy_hickory = { workspace = true }
 onomancy_keyhive = { workspace = true }
 onomancy_protocol = { workspace = true, features = ["std"] }
 onomancy_publish = { workspace = true, features = ["std"] }

@@ -234,7 +234,7 @@ fn cname_record(owner: Name, target: &Name) -> Record {
 
 /// A CNAME into a *sibling* zone: the walk re-enters at the anchored
 /// root and descends the target's own branch. This is the chain shape
-/// `chain_assembly` emits for cross-zone indirection.
+/// `onomancy_chain` emits for cross-zone indirection.
 #[test]
 fn a_cross_zone_cname_reroots_and_walks_to_the_target_branch() -> TestResult {
     let root = zone(".", 1);
