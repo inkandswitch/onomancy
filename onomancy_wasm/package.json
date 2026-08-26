@@ -1,6 +1,9 @@
 {
   "name": "@inkandswitch/onomancy",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Wasm/JavaScript bindings for Onomancer (browser and Node.js)",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
