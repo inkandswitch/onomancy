@@ -28,8 +28,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
-onomancy_dnssec = { version = "0.1.0", path = ".", features = ["test_utils"] }
-onomancy_protocol = { workspace = true, features = ["std", "test_utils"] }
+onomancy_dnssec = { path = ".", features = ["test_utils"] }
+onomancy_protocol = { path = "../onomancy_protocol", default-features = false, features = ["std", "test_utils"] }
 testresult = { workspace = true }
 
 [features]

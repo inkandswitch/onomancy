@@ -29,7 +29,7 @@ tracing = { workspace = true }
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
 ed25519-dalek = { workspace = true }
-onomancy_core = { version = "0.1.0", path = ".", features = ["arbitrary"] }
+onomancy_core = { path = ".", features = ["arbitrary"] }
 testresult = { workspace = true }
 
 [features]

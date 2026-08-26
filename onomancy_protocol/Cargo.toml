@@ -21,7 +21,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 bolero = { workspace = true, features = ["arbitrary"] }
-onomancy_protocol = { version = "0.1.0", path = ".", features = ["test_utils"] }
+onomancy_protocol = { path = ".", features = ["test_utils"] }
 testresult = { workspace = true }
 
 [features]
