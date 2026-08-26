@@ -1,5 +1,5 @@
 {
-  "name": "@onomancy/wasm",
+  "name": "@inkandswitch/onomancy",
   "version": "0.1.0",
   "description": "Wasm/JavaScript bindings for Onomancer (browser and Node.js)",
   "license": "(MIT OR Apache-2.0)",
@@ -51,7 +51,7 @@
       "import": "./dist/esm/slim.js",
       "require": "./dist/cjs/slim.cjs"
     },
-    "./wasm": "./dist/wasm.wasm",
+    "./wasm": "./dist/onomancy.wasm",
     "./wasm-base64": {
       "import": "./dist/esm/wasm-base64.js",
       "require": "./dist/cjs/wasm-base64.cjs"
