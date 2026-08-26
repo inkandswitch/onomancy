@@ -1,5 +1,9 @@
 # onomancer
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 The Onomancy agent: publisher and verifier glue over the pure crates. Argument parsing, byte moving, and printing live here; everything cryptographic lives in the libraries.
 
 ## Publish a binding

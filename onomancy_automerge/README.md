@@ -1,5 +1,9 @@
 # onomancy_automerge
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 The [Automerge] substrate adapter: the sans-IO bridge between Onomancy's pure machines and the CRDT documents that carry user data.
 
 | Seam (defined in `onomancy_protocol`) | Implementation here  |

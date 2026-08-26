@@ -1,5 +1,9 @@
 # onomancy_hickory
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 The host DNSSEC chain courier: `ChainProvider` over real DNS — a deliberately minimal stub transport (UDP, TCP fallback on truncation, `RD` + `CD` + EDNS `DO`, built on [hickory-proto]'s message types) driving the sans-IO chain builder (`onomancy_chain`).
 
 ```text

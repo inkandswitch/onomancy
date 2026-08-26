@@ -1,5 +1,9 @@
 # onomancy_chain
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 Sans-IO DNSSEC chain building: a state machine that turns recursive-resolver answers into the framed links the validator walks — without performing any IO itself.
 
 ```text

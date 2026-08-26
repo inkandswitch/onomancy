@@ -1,5 +1,9 @@
 # onomancy_wasm
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 Wasm/JavaScript bindings for Onomancer (browser and Node.js). Built as an npm package with [wasm-bodge](https://github.com/alexjg/wasm-bodge).
 
 ## What's inside

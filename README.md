@@ -1,8 +1,7 @@
 # Onomancy
 
 > [!WARNING]
->
-> Early development. Nothing here is stable, audited, or ready for real world use.
+> Alpha software. Interfaces, wire formats, and specifications change without notice — use at your own risk.
 
 A local-first _edgename_ protocol: human-meaningful names over self-certifying keys, with optional DNSSEC-rooted global names layered on top.
 

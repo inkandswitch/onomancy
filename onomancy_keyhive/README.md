@@ -1,5 +1,9 @@
 # onomancy_keyhive
 
+> [!WARNING]
+> Alpha software. Interfaces, wire formats, and specifications change
+> without notice — use at your own risk.
+
 Keyhive-backed authority verification for the Onomancy protocol: the real implementation of the `AuthorityVerifier` seam.
 
 ## What it answers
