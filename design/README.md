@@ -59,23 +59,25 @@ The middle layer is _anchoring_: three families, each with its own trust machine
 
 ## Fetch Flow
 
-First resolution of a DNS-anchored name: the owner publishes, the client fetches and verifies locally.
+First resolution of a DNS-anchored name: the owner publishes in two places — the zone says which document, the document says which hostnames it accepts — and the client checks both directions locally. Neither half suffices alone: anyone controlling any signed zone can name any document, so it is the certificate coming back the other way that makes the pair a binding.
 
 ```mermaid
 sequenceDiagram
     participant O as Owner (expede.wtf)
     participant D as DNS Zone
-    participant S as Onomancer Server
+    participant S as Sync Peer
     participant C as Client
 
     Note over O,S: 1. Publish
     O->>D: TXT "v=ONO0#59;k=ed25519#59;n=1#59;g=‹gen key›#59;p=‹doc ID›" (DNSSEC-signed)
-    O->>S: install signed Onomancy certificate
+    O->>O: write certificate to .well-known/onomancy/certificates
 
     Note over C,S: 2. Resolve @expede.wtf/foo
-    C->>S: GET /onomancy/v0/expede.wtf
-    S->>C: certificate { signer, hostname, doc ID, ts, sig, DNSSEC chain }
-    Note over C: validate chain from baked-in IANA KSK<br/>TXT pubkey must equal cert doc ID
+    C->>D: DNSSEC chain for _onomancy.expede.wtf
+    D->>C: TXT record — the zone names a document
+    C->>S: replicate that document
+    S->>C: document, carrying its certificates
+    Note over C: validate chain from baked-in IANA KSK<br/>certificate must name expede.wtf back<br/>and its carriage must root at the document
     Note over C: cache self-authenticating binding<br/>walk /foo edges from root doc
 ```
 

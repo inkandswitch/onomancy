@@ -18,7 +18,7 @@ _onomancy.expede.wtf.  IN SVCB 1 certs.example.
 ; travels by gossip and mirrors, it just isn't self-bootstrapping cold.
 ```
 
-Only the TXT record anchors trust. The SVCB record is a **transport hint, not a canonical location**: it says where a verifier can fetch the certificate (`GET https://<target>/onomancy/v0/<name>`), and nothing more. The certificate has no home: any onomancy server can serve it (aggregators, mirrors, a friend's node), gossip works with no server at all, and verifiers attach no meaning to where the bytes came from. The analogy is a magnet link: the TXT `p=` is the infohash (all of the authority), the hints are trackers (none of it), and gossip is PEX. A lying hint can waste your time; it cannot change what verifies.
+Only the TXT record anchors trust. The SVCB record is a **transport hint, not a canonical location**: it names a peer from which the bound document can be replicated — and with it the certificate the document carries — and nothing more. The binding has no home: any peer holding the document can supply it (mirrors, relays, a friend's node), gossip works with no peer at all, and verifiers attach no meaning to where the bytes came from. The analogy is a magnet link: the TXT `p=` is the infohash (all of the authority), the hints are trackers (none of it), and gossip is PEX. A lying hint can waste your time; it cannot change what verifies.
 
 All onomancy DNS lives under the one `_onomancy.<name>` owner name — one DNSSEC coverage story, one denial-of-existence story, and no records on the name itself (the protocol never asks anyone to create or modify A records; a website on the same name is unrelated infrastructure).
 
