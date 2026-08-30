@@ -20,6 +20,11 @@ use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 /// segments; `#`; leading or trailing `/`) as absent during matching
 /// (spec condition E6): `reference` simply never returns them.
 ///
+/// A key whose value is not a reference is likewise not an edge
+/// (E8) — which is what lets a substrate keep protocol data in the
+/// same map without it participating in resolution. Such an entry is
+/// invisible to the walk by construction, never by convention.
+///
 /// Conflict handling (E7) is the substrate's: concurrent writes to one
 /// key MUST already be resolved to the deterministic winner by the time
 /// `reference` answers. Surfacing the losers is a reporting concern

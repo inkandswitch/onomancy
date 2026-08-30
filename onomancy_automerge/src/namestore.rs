@@ -29,8 +29,11 @@ pub const RESERVED_KEY: &str = "onomancy";
 /// leading or trailing `/`) are absent by construction (spec E6):
 /// lookups are exact joins of already-valid [`Segment`]s, which no
 /// malformed key can equal. Values that are not bare `automerge:`
-/// references are treated as absent (E5/References — a symlink or
-/// composite value never resolves).
+/// references are absent too — a name where a reference belongs is
+/// the symlink ban (E5), and anything else is simply not an edge
+/// (E8). E8 is what lets non-name data share the reserved map: see
+/// [`certificates`](crate::certificates), whose entries sit under
+/// `.well-known/` and hold lists rather than references.
 #[derive(Debug, Clone)]
 pub struct DocumentNamestore {
     doc: Automerge,
@@ -54,7 +57,7 @@ impl DocumentNamestore {
 
 impl DocumentNamestore {
     /// The reserved flat map's object ID, when present and map-shaped.
-    fn reserved_map(&self) -> Option<automerge::ObjId> {
+    pub(crate) fn reserved_map(&self) -> Option<automerge::ObjId> {
         let (value, id) = self.doc.get(automerge::ROOT, RESERVED_KEY).ok()??;
         matches!(value, Value::Object(ObjType::Map)).then_some(id)
     }
@@ -103,7 +106,7 @@ pub(crate) fn path_key(path: &[Segment]) -> String {
 /// bs58check document ID. `DocAnchor::parse` rejects anything
 /// carrying segments or heads (`/`, `#` are outside the bs58
 /// alphabet), non-key IDs, and checksum failures.
-fn parse_bare_reference(value: &Value<'_>) -> Option<DocAnchor> {
+pub(crate) fn parse_bare_reference(value: &Value<'_>) -> Option<DocAnchor> {
     let Value::Scalar(scalar) = value else {
         return None;
     };
@@ -142,6 +145,17 @@ impl HeldDocuments {
     pub fn with_vouched(mut self, anchor: DocAnchor, doc: Automerge, authority: Authority) -> Self {
         self.docs.insert(anchor, (doc, authority));
         self
+    }
+
+    /// The held document for `anchor`, if replicated here.
+    ///
+    /// Reads that are not the namestore walk — certificates at the
+    /// reserved well-known path, say — go through this rather than
+    /// [`Replicas::replica`], which wraps the document as a namestore
+    /// and grades it.
+    #[must_use]
+    pub fn document(&self, anchor: &DocAnchor) -> Option<&Automerge> {
+        self.docs.get(anchor).map(|(doc, _)| doc)
     }
 }
 

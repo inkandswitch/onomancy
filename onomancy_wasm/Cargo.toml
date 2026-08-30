@@ -35,8 +35,9 @@ js-sys = { workspace = true }
 onomancy_automerge = { workspace = true, optional = true }
 onomancy_chain = { workspace = true, optional = true }
 onomancy_core = { workspace = true }
-onomancy_dnssec = { workspace = true, features = ["std"] }
-onomancy_protocol = { workspace = true, optional = true, features = ["std"] }
+onomancy_dnssec = { workspace = true, features = ["idna", "std"] }
+onomancy_keyhive = { workspace = true }
+onomancy_protocol = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 wasm-bindgen = { workspace = true }
@@ -59,15 +60,12 @@ names = [
   "dep:ed25519-dalek",
   "dep:getrandom",
   "dep:onomancy_automerge",
-  "dep:onomancy_protocol",
   "std",
 ]
 doh = [
   "dep:hickory-proto",
   "dep:onomancy_chain",
-  "dep:onomancy_protocol",
   "dep:web-sys",
-  "onomancy_dnssec/idna",
   "std",
 ]
 live = []

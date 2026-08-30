@@ -10,6 +10,7 @@ pub mod held;
 pub mod name;
 #[cfg(feature = "doh")]
 pub mod resolve;
+pub mod verify;
 
 use wasm_bindgen::prelude::*;
 

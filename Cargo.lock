@@ -1624,6 +1624,7 @@ dependencies = [
  "onomancy_chain",
  "onomancy_core",
  "onomancy_dnssec",
+ "onomancy_keyhive",
  "onomancy_protocol",
  "thiserror 2.0.20",
  "tracing",

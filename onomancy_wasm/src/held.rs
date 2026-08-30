@@ -294,6 +294,13 @@ impl JsHeldDocuments {
 }
 
 impl JsHeldDocuments {
+    /// Every held document, for readers outside this module that need
+    /// the whole set rather than one lookup — certificate
+    /// verification walks it to follow one hop of indirection.
+    pub(crate) fn documents(&self) -> impl Iterator<Item = (&DocAnchor, &Automerge)> {
+        self.docs.iter()
+    }
+
     /// The held document at `anchor`.
     fn held(&self, anchor: &str) -> Result<&Automerge, JsError> {
         let anchor = parse_anchor(anchor)?;

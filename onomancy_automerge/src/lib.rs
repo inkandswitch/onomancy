@@ -29,6 +29,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod certificates;
 pub mod change_hash;
 pub mod decisions;
 pub mod namestore;
