@@ -171,12 +171,23 @@ pub enum FetchChainError {
     Transport(#[from] DohError),
 }
 
-/// A JS-side failure, stringified: `JsValue` is neither `Send` nor
-/// `Error`, so the message is all that can cross this boundary.
+/// A JS-side failure, reduced to its message: `JsValue` is neither
+/// `Send` nor `Error`, so the message is all that can cross this
+/// boundary.
+///
+/// Deliberately not `{value:?}`. `JsValue`'s `Debug` renders
+/// `JsValue(TypeError: …)` complete with the thrower's stack trace,
+/// which then rides inside an error message all the way to whatever
+/// a caller shows a user. Take the `Error.message`, or the value
+/// itself when a bare string was thrown.
 fn js_failure(value: &JsValue) -> DohError {
-    DohError::Js {
-        message: format!("{value:?}"),
-    }
+    let message = value
+        .dyn_ref::<js_sys::Error>()
+        .map(|error| String::from(error.message()))
+        .or_else(|| value.as_string())
+        .unwrap_or_else(|| String::from("unknown JavaScript error"));
+
+    DohError::Js { message }
 }
 
 /// A `DoH` exchange failed at the transport level — never a validity

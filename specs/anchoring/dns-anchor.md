@@ -199,45 +199,36 @@ Two verifiers holding the same evidence MUST reach the same verdict — the ladd
 # Onomancy Certificate
 [Onomancy Certificate]: #onomancy-certificate
 
-The certificate is a self-authenticating record: integrity does not depend on the transport, the server, or the peer that relayed it. Consequently, **any** onomancy server MAY serve any name's certificate — the server is an untrusted byte courier, and a malicious one can at worst withhold or serve stale records (denial of service), never forge a binding.
+The certificate is a self-authenticating record: integrity does not depend on the transport, the server, or the peer that relayed it. Consequently, **any** source MAY carry any name's certificate — a source is an untrusted byte courier, and a malicious one can at worst withhold or serve stale records (denial of service), never forge a binding.
 
-Retrieval paths:
+Retrieval paths, ordered by the work a verifier performs before it can judge what it received:
 
-| Path                                                          | Requirement                | Notes                                                                                              |
-|---------------------------------------------------------------|----------------------------|----------------------------------------------------------------------------------------------------|
-| Designated endpoint via SVCB/SRV (see [Designated Endpoints]) | RECOMMENDED for publishers | The DNS-computable bootstrap: one record at the same owner name as the TXT                         |
-| Any onomancy server's [Lookup Endpoint]                       | OPTIONAL                   | Third-party servers, aggregators, and mirrors MAY serve certificates for names they do not control |
-| Gossip / cache                                                | OPTIONAL                   | Certificates travel peer-to-peer and verify identically (see [Binding Cache])                      |
+| Path                                                          | Requirement                | Work before verification                                | Notes                                                                                              |
+|---------------------------------------------------------------|----------------------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------------------|
+| Gossip / cache                                                | OPTIONAL                   | none — the bytes are already held                        | Certificates travel peer-to-peer and verify identically (see [Binding Cache])                      |
+| A linked certificate document (see [In the Bound Document])  | RECOMMENDED for publishers | one small document                                        | Small, admin-written, and independently replicable — a mirror of everyone's certificates and a publisher's own host are the same kind of thing |
+| The bound document itself (see [In the Bound Document])       | OPTIONAL                   | unbounded — materializes a document named by the claim under test | No new infrastructure: the document is already replicated by any verifier that walks a path under it |
 
 Publishers MUST make the certificate retrievable through at least one path; verifiers MUST accept certificate bytes from any source, subject only to [Verification]. A name with no designated endpoint is still fully conformant — it just is not self-bootstrapping for cold verifiers with no peers.
 
-## Lookup Endpoint
-[Lookup Endpoint]: #lookup-endpoint
+Verifiers SHOULD attempt sources in increasing order of work performed before verification. Retrieving from the bound document requires materializing a document named by the very claim under test, so a bounded source — where one is available — is preferred.
 
-Every fetch path uses one endpoint shape:
-
-```
-GET https://<host>[:port]/onomancy/v0/<name>
-```
-
-where `<name>` is the A-label DNS name, exactly as it appears in the anchor. The path version (`v0`) is the endpoint-protocol version — it changes when the HTTP contract changes (shape, response semantics, content type), independently of the certificate format tag (`ONC\x00`) and the TXT format tag (`ONO0`), each of which versions its own artifact. The response body is the canonical certificate bytes, nothing else. Because the certificate is an immutable blob, servers MAY implement the endpoint as static files and SHOULD serve long-lived caching headers (e.g. `Cache-Control: immutable` with an `ETag`); refreshing a binding means publishing a new file. `Content-Type` SHOULD be `application/octet-stream` until a dedicated media type is registered. Retrieval is HTTPS-specific at v0; non-HTTPS distribution (gossip, document sync) carries the same bytes but is out of scope for this section.
-
-Servers MAY redirect; verifiers SHOULD follow a bounded number of redirects. Redirects are harmless by construction: every endpoint is a transport hint serving a self-authenticating record, so a hijacked redirect can cause only denial of service or staleness, never a forged binding. The same shape serves one name or a million — a publisher's own host and a mirror of everyone's certificates are the same kind of thing, which is the point.
+The certificate is document content, so whoever can write the document holding it can remove or replace it — a naming-layer capability that [Who Signs] otherwise reserves to admin-delegated keys. The ceiling is denial of service and a freshness downgrade, never a forged or redirected binding, but publishers SHOULD close it: either place the certificate in a document whose write authority matches its issuing authority (see [In the Bound Document]), or maintain a second retrieval path.
 
 ## Designated Endpoints
 [Designated Endpoints]: #designated-endpoints
 
-Publishers designate where their certificate is served with an SVCB record ([RFC 9460]) at the same owner name as the TXT — keeping all onomancy records under one owner name, with one DNSSEC coverage story and one denial-of-existence story:
+Publishers designate where a verifier can obtain the bound document with an SVCB record ([RFC 9460]) at the same owner name as the TXT — keeping all onomancy records under one owner name, with one DNSSEC coverage story and one denial-of-existence story. A publisher MAY designate several hosts at ascending priorities:
 
 ``` zone
 _onomancy.expede.wtf.  IN TXT   "v=ONO0;k=ed25519;n=1;g=…;p=…"
-_onomancy.expede.wtf.  IN SVCB  1 certs.example.
+_onomancy.expede.wtf.  IN SVCB  1 sync.example.
 ```
 
 This section is the SVCB _protocol mapping_ for onomancy:
 
 - The record is queried at `_onomancy.<name>` — the same owner name as the binding record, so it rides the same DNSSEC coverage and (for resolvers that ask for both types) the same lookup.
-- In ServiceMode (SvcPriority ≥ 1), TargetName designates a host serving the certificate for `<name>` at the standard [Lookup Endpoint] (`https://<TargetName>[:port]/onomancy/v0/<name>`). Lower priorities MUST be tried first; equal priorities MAY be tried in any order.
+- In ServiceMode (SvcPriority ≥ 1), TargetName designates a host from which the bound document can be replicated — and with it the certificate ([In the Bound Document]). Lower priorities MUST be tried first; equal priorities MAY be tried in any order; a verifier that cannot reach a designated host MUST fall through to the next rather than failing.
 - AliasMode (SvcPriority 0) follows standard [RFC 9460] semantics.
 - The `port` SvcParam applies; other SvcParams MAY be ignored at v0.
 - Publishers SHOULD use SVCB. Publishers whose DNS provider cannot create SVCB records MAY publish the equivalent SRV record at `_onomancy._tcp.<name>` (priority/weight/port/target map one-to-one — the gap set is real: several major registrars sign zones but cannot create ServiceMode SVCB, and all of them support SRV). Verifiers MUST try SVCB first and SHOULD fall back to SRV only when SVCB yields nothing — sequential, so when both exist SVCB wins by construction and no precedence ambiguity arises. SRV support is **transitional**: a future version of this specification MAY drop it as registrar SVCB support catches up.
@@ -245,7 +236,30 @@ This section is the SVCB _protocol mapping_ for onomancy:
 The SVCB record is a [transport hint][Transport Hints] like any other: DNSSEC coverage protects it from off-path spoofing, but it confers no authority, and verifiers MUST NOT require it. Bootstrap order for a cold verifier is therefore: gossip/cache, else the designated endpoint (SVCB, then SRV) — and if neither exists, the name is resolvable only through peers or mirrors learned out of band.
 
 > [!NOTE]
-> Endpoint designation for _document sync_ (e.g. `wss://` sync servers, needed after resolution to actually replicate the target documents) is deliberately out of scope here: cert retrieval and sync discovery are different services, and sync hints travel better alongside the record or inside the identity document than in DNS.
+> A designated endpoint is a hint about **where the bytes can be obtained**, in the sense a magnet link's tracker and web-seed fields are hints. What is being pointed at is identified self-certifyingly elsewhere — the document by its `p=` key, the certificate by the signature that binds it — so a hint can only affect whether a verifier obtains bytes, never whether those bytes verify. Designating a host that serves the bound document therefore satisfies this section exactly as much as designating one that serves the certificate, and a verifier MAY ignore designation entirely in favour of peers it already has.
+
+## In the Bound Document
+[In the Bound Document]: #in-the-bound-document
+
+The certificate list lives at `.well-known/onomancy/certificates` in the bound document's reserved map ([Onomancy Path Resolution], Namestore Layout). The value is either:
+
+- **inline** — a list of certificate units; or
+- **a reference** — pointing at a document whose entry at the same path holds the list inline.
+
+Exactly one hop is permitted: a referenced document's entry MUST be inline, and a verifier MUST NOT follow a second reference. An inline list is not a reference and so takes no part in path resolution ([Onomancy Path Resolution], E8); a reference is an ordinary edge and resolves like one.
+
+Indirection is RECOMMENDED wherever the two documents can carry different write authority. The certificate is document content, so whoever can write the document holding it can remove or replace it; putting it in a document written only by the keys that issue certificates keeps naming authority above collaboration authority ([Who Signs]). It also isolates the identity document from chain-refresh churn — the frequent event by design, since any party MAY re-fetch and re-attach evidence — and lets a small, widely-replicated certificate document be mirrored without replicating the identity.
+
+More than one certificate is the normal case: a document is commonly named by more than one hostname, and each certificate binds exactly one.
+
+Entries follow the same dispositions as the binding `RRset` — the rules are already stated in [Grammar] and are not restated here:
+
+- An entry that does not decode is rejected on its own; it MUST NOT poison the processing of its siblings.
+- An entry naming a hostname other than the one being resolved is **not** an error — it is this document's certificate for another of its names — and is ignored for this resolution.
+- Several valid entries for one hostname are selected by [Comparing Records Offline].
+- No entry for a hostname means the certificate is unavailable **from this source**. It never means no binding exists: absence is not provable.
+
+A writer refreshing a certificate's attached evidence MUST replace the entry whose **signed region** is identical rather than appending one. A refreshed certificate is the same certificate carrying different evidence ([Serialization]), so appending would grow the list without bound while adding nothing. Entries differing in their signed region are distinct certificates and MUST be retained.
 
 ## Transport Hints
 [Transport Hints]: #transport-hints

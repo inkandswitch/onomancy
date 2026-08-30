@@ -56,6 +56,7 @@ A namestore MAY be embedded in a larger document (e.g. as one field among other 
 - Keys containing empty segments (`foo//bar`), `.` or `..` segments, or `#` MUST be rejected outright — there is no normalization for these.
 - Writers MUST NOT add leading or trailing `/` to keys (`/foo/bar/`); `foo/bar` is the only spelling of that path. Resolvers MUST ignore non-conforming keys during matching (treat them as absent) and SHOULD surface them as malformed.
 - A namestore MAY contain both a key and a longer key that extends it (e.g. `foo` and `foo/bar/baz`). This is not a conflict; the [Resolution] section defines which one a given lookup selects.
+- Keys under `.well-known/` are conventionally used for protocol and application data rather than names, namespaced by owner: `.well-known/<owner>/<artifact>`. This is a **writers' convention only** — resolvers apply no special rule to the prefix, because such entries carry values that are not references and are already absent from matching ([E8][Error Conditions]). An entry under the prefix whose value *is* a reference resolves like any other. This specification assigns `.well-known/onomancy/` to the Onomancy protocol and reserves no other owner.
 
 Namestore (flat):
 
@@ -82,7 +83,9 @@ NOT this (nested):
 
 This specification does not define an encoding for references; that belongs to the profile or substrate that writes them. Whatever the encoding, a reference MUST yield exactly one _target_: a namestore reference (self-certifying, per the [Namestore Model]) that carries no path segments of its own. A profile MAY define reference encodings that pin the target to a version — pinning is edge data, never name grammar.
 
-The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, nothing more (e.g. [Petname Anchoring] maps labels directly to Automerge URLs). Richer values are permitted but discouraged: field-wise CRDT merges can tear a composite value (one writer's target beside another's metadata), and unknown fields become parsing policy. Metadata (display names, timestamps, provenance) SHOULD live in a sidecar outside the walked map, keyed by label or target. Metadata, wherever it lives, MUST NOT affect resolution.
+The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, nothing more (e.g. [Petname Anchoring] maps labels directly to Automerge URLs). Richer values are permitted but discouraged: field-wise CRDT merges can tear a composite value (one writer's target beside another's metadata), and unknown fields become parsing policy. Metadata *about a reference* (display names, timestamps, provenance) SHOULD live in a sidecar outside the walked map, keyed by label or target. Metadata, wherever it lives, MUST NOT affect resolution.
+
+A value that is not a reference under any encoding the profile defines is not an edge: it is absent from matching ([E8][Error Conditions]) and carries no resolution meaning. Namestores MAY therefore hold non-reference data — see the `.well-known/` convention in [Namestore Layout] — without that data participating in the walk.
 
 > [!IMPORTANT]
 > **No symlinks.** A reference MUST NOT contain a name (of any anchor family) that would be re-parsed and re-resolved. Namestore values hold namestore references only. This invariant is what makes [Termination] structural rather than policed by a hop limit.
@@ -165,6 +168,7 @@ pub enum Resolution {
 | E5  | Value carrying a name (of any anchor family) in place of a namestore reference    | MUST be rejected as a symlink; MUST NOT be re-parsed or re-resolved (see [References])                                |
 | E6  | Non-conforming key (empty, `.`, or `..` segments; `#`; leading/trailing `/`)      | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [Namestore Layout])         |
 | E7  | Conflicting values for the matched key                                            | MUST resolve to the substrate's deterministic winner; SHOULD surface the loser(s) (see [Conflicting Updates])         |
+| E8  | Value that is not a reference under any encoding the profile defines              | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [References])               |
 
 # Security Considerations
 [Security Considerations]: #security-considerations

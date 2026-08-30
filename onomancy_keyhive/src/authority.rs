@@ -144,7 +144,12 @@ impl KeyhiveAuthority {
                 // Keyhive enforces issuer == subject for rootless
                 // delegations: this grant came from the root key.
                 None => true,
-                Some(proof) => proof.payload().can() == Access::Admin,
+                // At-least, never equality. `Access` is ordered and
+                // Admin is merely its current maximum; an equality
+                // test would refuse a hop holding something strictly
+                // stronger the day Keyhive grows one, and §Who Signs
+                // asks whether the hop HOLDS admin access.
+                Some(proof) => proof.payload().can() >= Access::Admin,
             }
         })
     }
@@ -207,5 +212,31 @@ impl AuthorityVerifier for KeyhiveAuthority {
 
             false
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Access;
+
+    /// The signing bar is `>= Access::Admin`, not `== Access::Admin`.
+    ///
+    /// Those agree on every input only because Admin is currently the
+    /// maximum of Keyhive's ladder. This test pins that assumption:
+    /// if Keyhive ever grows a level above Admin, it fails here rather
+    /// than silently changing what the bar admits.
+    #[test]
+    fn admin_is_the_top_of_the_ladder() {
+        assert!(Access::Relay < Access::Read);
+        assert!(Access::Read < Access::Edit);
+        assert!(Access::Edit < Access::Admin);
+
+        // The reason equality would have been wrong: a hop holding
+        // something stronger than Admin still holds admin access,
+        // which is what §Who Signs asks.
+        assert!(
+            Access::Admin >= Access::Admin,
+            "the bar must admit the level itself"
+        );
     }
 }

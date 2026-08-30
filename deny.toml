@@ -41,6 +41,12 @@ ignore = [
 # Mirrors the workspace lint allowance for clippy::multiple_crate_versions.
 multiple-versions = "allow"
 wildcards = "deny"
+# Workspace-internal dev-dependencies (a crate depending on itself to
+# switch on its own `test_utils`/`arbitrary` features) carry a path and
+# no version, which reads as a wildcard. Scoped to path dependencies
+# only — a registry dependency at `version = "*"` is still refused,
+# verified by probe.
+allow-wildcard-paths = true
 
 [sources]
 unknown-git = "deny"
