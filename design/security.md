@@ -66,7 +66,7 @@ Displaying a hash of the name was considered and rejected as a mechanism: a fing
 
 A transient zone attacker publishes an absurdly high TXT serial (e.g. `n=2^60`), trying to burn the monotonic ratchet past the legitimate owner's reach. Two mechanisms bound this:
 
-1. _Serial-as-timestamp with 5-minute skew_: serials reading more than 5 minutes in the future are deferred, so the attacker can advance the ratchet at most ~5 minutes past wall-clock — honest serials (`max(now_ms, last+1)`) outgrow the poison within the skew window.
+1. _Serial-as-timestamp with 5-minute skew_: serials reading more than 5 minutes in the future are deferred, so the attacker can advance the ratchet at most ~5 minutes past wall-clock — honest serials (`max(now_ms, last+1)`) outgrow the poison within the skew window. This bound rests on a **publisher-side** rule ([dns-anchor.md](../specs/anchoring/dns-anchor.md#serial-ratchet)): serials that do not track the clock cannot overtake a planted one on schedule, so a shortcut in the minter silently weakens this defence.
 2. _Fresh-beats-stale_: a record carried by a fresh DNSSEC chain may lower the ratchet (surfaced as a binding change, never silent). Minting a fresh chain requires current zone control — exactly what the transient attacker lost — so one fresh owner chain heals any verifier immediately.
 
 _Residual (accepted)_: a fully offline verifier that accepted poison before the owner recovered has no automatic path — the escape hatch remains a per-name manual "reset trust" action. Note the ratchet's direction also means domain re-registration works for legitimate new owners: a higher serial simply wins, and fresh chains carry the day.

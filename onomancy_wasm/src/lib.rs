@@ -3,6 +3,13 @@
 
 #![forbid(unsafe_code)]
 
+// Unconditional: both `verify` (always present) and `resolve`
+// (behind `doh`) grade against it.
+pub mod clock;
+pub mod refusal;
+pub mod shapes;
+pub mod text;
+
 #[cfg(feature = "doh")]
 pub mod doh;
 #[cfg(feature = "names")]

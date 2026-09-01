@@ -46,7 +46,7 @@ pub(crate) async fn execute(plan: &Plan, out_dir: &Path) -> Result<(), std::io::
         say("; (none — this ceremony never touches DNS)");
     }
 
-    say("; == artifacts (serve at the designated endpoint / gossip) ==");
+    say("; == artifacts (write to .well-known/onomancy/certificates, or gossip) ==");
     for artifact in &plan.artifacts {
         let path = out_dir.join(&artifact.name);
         std::fs::write(&path, &artifact.bytes)?;

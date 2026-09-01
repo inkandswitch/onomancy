@@ -87,6 +87,15 @@ This is the migration mechanism: a publisher moving to a future `v=ONO1` dual-pu
 
 `n` is the anti-replay ratchet. To any verifier it is an opaque `u64`; publishers are RECOMMENDED to choose it as milliseconds since the Unix epoch, computed as `max(now_ms, last_n + 1)` — monotone by construction, wall-clock-tracking, and collision-free across a publisher's devices when seeded from the highest serial seen.
 
+The `max` is load-bearing, not tidiness. A bare clock read fails two ways, and both are silent at **both** ends of the wire:
+
+- Two records minted in the same millisecond **tie**. A tie at the top serial naming different documents is `contested` (rule 2), so a publisher that races itself across two devices or two tabs reports _its own name as misconfigured_ to every visitor.
+- A clock that steps backwards mints a record that **loses to the one it supersedes**, leaving the old binding live. Nothing looks wrong from either side: the losing record is well-formed, the zone is correctly signed, and the verifier is behaving exactly as specified. Once a ratchet is in play a correct verifier refuses the new record as a replay — so the publisher sees a valid record rejected and the verifier sees an attack, and neither is mistaken.
+
+The bump is also half of a defence whose other half lives elsewhere. The poisoning bound holds because honest serials outgrow planted ones within the skew window, which is only true while they grow at roughly clock rate; a publisher whose serials do not track the clock cannot overtake a serial planted five minutes ahead on schedule. A publisher-side shortcut therefore weakens a verifier-side defence, in a different document, at a different layer — which is why the rule appears here rather than only in a publisher's own notes.
+
+Seed the floor from the **record body**, not from the hostname: a serial orders records, and the binding has not changed unless `g=` or `p=` has. Keying by name re-mints on every read, which also makes the printed record shift under anyone mid-copy into a DNS console.
+
 Ratchet rules:
 
 1. There is exactly **one** definition of the ratchet: the **effective serial** is the serial of the ladder-winning record for the hostname ([Binding Cache spec], derivation) — a derived quantity, which implementations MAY memoize as a counter. Records that derive as pending, contested, or deferred contribute nothing — otherwise gossiping unacceptable records would poison the ratchet without any zone control.

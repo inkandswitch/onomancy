@@ -70,6 +70,25 @@ impl Verdict {
     }
 }
 
+/// What a deferral was judged against.
+///
+/// Deferral precedes freshness, so no grade exists yet; these are the
+/// established facts a caller needs to tell a clock difference from a
+/// genuine wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeferredEvidence {
+    /// The bound document — chain-proven and TXT-cross-checked.
+    pub document: DocAnchor,
+
+    /// The proven serial. Compare against the clock in milliseconds:
+    /// a serial beyond `now + skew` is one of the two deferral causes.
+    pub serial: Serial,
+
+    /// The chain's ∩-window. A window whose inception is still ahead
+    /// of the clock is the other cause.
+    pub window: ValidityWindow,
+}
+
 /// The D10 standing of the delegation-chain/generation-key check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GenerationCheck {
@@ -118,7 +137,13 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
 
     // Deferral precedes everything, including freshness.
     if state::is_deferred(&evidence, now) {
-        return Err(Rejection::Deferred);
+        return Err(Rejection::Deferred(alloc::boxed::Box::new(
+            DeferredEvidence {
+                document: evidence.document,
+                serial: evidence.key.serial,
+                window: evidence.window,
+            },
+        )));
     }
 
     let freshness = state::freshness(&evidence, now);
@@ -159,8 +184,15 @@ pub enum Rejection {
     /// Deferred, not malformed: a far-future serial (beyond the skew
     /// bound) or a not-yet-begun window. Re-evaluate when the clock
     /// reaches it.
+    ///
+    /// Carries what deferral is judged against, because the refusal
+    /// asserts a clock disagreement and a caller cannot confirm that
+    /// from prose. Everything here is already proven when deferral is
+    /// decided — chain validated, TXT cross-checked, signer
+    /// authorized — so this is evidence not yet in force, rather than
+    /// evidence found wanting.
     #[error("deferred: not considered until the clock reaches it")]
-    Deferred,
+    Deferred(alloc::boxed::Box<DeferredEvidence>),
 
     /// D10: a fresh chain whose delegation path lacks the
     /// attested `g=`.
@@ -176,7 +208,7 @@ pub enum Rejection {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::{
@@ -273,15 +305,24 @@ mod tests {
         )?;
         let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
 
-        assert_eq!(
-            verify(
-                &b.cert.encode(),
-                &host(),
-                UnixSeconds::from(NOW),
-                &validator,
-                &MemoryAuthority::default(),
-            ),
-            Err(Rejection::Deferred)
+        let rejection = verify(
+            &b.cert.encode(),
+            &host(),
+            UnixSeconds::from(NOW),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .expect_err("a far-future serial defers");
+
+        let Rejection::Deferred(evidence) = rejection else {
+            panic!("expected deferral, got {rejection:?}");
+        };
+
+        // The deferral carries what it was judged against: this
+        // serial is the cause, and it outruns the clock.
+        assert!(
+            evidence.serial.value() > NOW * 1000,
+            "the serial that caused deferral must be readable from it"
         );
         Ok(())
     }

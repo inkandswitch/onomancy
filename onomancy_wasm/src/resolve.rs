@@ -1,14 +1,20 @@
 //! The live-resolution JS export: fetch, validate, and grade a
 //! hostname's Onomancy binding in one call.
 
-use js_sys::{Array, Date, Object, Reflect};
+use js_sys::{Array, Object, Reflect};
 use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
     chain_provider::ChainProvider, dns_name::DnsName, freshness::Grade, validator::Validator,
 };
-use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
 
-use crate::doh::DohProvider;
+use crate::{
+    clock,
+    doh::DohProvider,
+    refusal,
+    shapes::JsResolution,
+    text::{self, Text},
+};
 
 /// Resolve a hostname's Onomancy binding live over `DoH`: fetch the
 /// chain, validate it from the baked-in IANA anchors, and grade it at
@@ -43,33 +49,29 @@ use crate::doh::DohProvider;
 /// failures, and invalid chains.
 #[wasm_bindgen(js_name = resolveHostname)]
 pub async fn resolve_hostname(
-    hostname: &JsValue,
+    hostname: &Text,
     doh_url: Option<String>,
     now_seconds: Option<f64>,
-) -> Result<JsValue, JsError> {
-    // `&JsValue` rather than `&str`: see `JsName::new` — a `&str`
-    // parameter faults inside the module on non-string input.
-    let hostname = hostname
-        .as_string()
-        .ok_or_else(|| JsError::new("a hostname must be a string"))?;
+) -> Result<JsResolution, JsValue> {
+    // Typed `string` for TypeScript, checked at runtime anyway: a
+    // `&str` parameter faults inside the module on non-string input.
+    // No `reason`: an argument error is not a verdict about evidence.
+    let hostname = text::read(hostname, "a hostname").map_err(JsValue::from)?;
 
-    let hostname =
-        DnsName::parse_display(&hostname).map_err(|error| JsError::new(&error.to_string()))?;
+    let hostname = DnsName::parse_display(&hostname)
+        .map_err(|error| refusal::error(&error.to_string(), "invalid-hostname"))?;
     let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);
 
     let chain = provider
         .chain(&hostname)
         .await
-        .map_err(|error| JsError::new(&error.to_string()))?;
+        .map_err(|error| refusal::error(&error.to_string(), refusal::walk_reason(&error)))?;
 
     let proof = Validator::iana()
         .validate_detailed(&hostname, &chain)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+        .map_err(|error| refusal::error(&error.to_string(), refusal::validation_reason(&error)))?;
 
-    // The clock, as a value — grading is the only place it enters,
-    // and the caller may supply it.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // epoch seconds fit
-    let now = UnixSeconds::from((now_seconds.unwrap_or_else(Date::now).max(0.0) / 1000.0) as u64);
+    let now = clock::resolve(now_seconds);
     let freshness = match proof.window.grade(now) {
         Grade::Fresh => "fresh",
         Grade::Stale => "stale",
@@ -116,5 +118,5 @@ pub async fn resolve_hostname(
     set("window", &window.into());
     set("checkedAt", &seconds(now));
 
-    Ok(verdict.into())
+    Ok(verdict.unchecked_into())
 }

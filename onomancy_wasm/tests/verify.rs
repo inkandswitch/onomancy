@@ -11,8 +11,11 @@
 //! is nothing to deadlock on and no async seam to bridge.
 
 #![cfg(target_arch = "wasm32")]
+// House pattern for test code (see `certificates.rs`, `namestore.rs`):
+// a failed `expect` here is the test failing, which is its job.
+#![allow(clippy::expect_used, clippy::panic)]
 
-use onomancy_wasm::verify::verify_certificate;
+use onomancy_wasm::{text::Text, verify::verify_certificate};
 use wasm_bindgen::{JsCast as _, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -24,7 +27,40 @@ const CERT: &[u8] =
 
 /// Well after the chain's RRSIG windows lapsed — the certificate is
 /// stale, which is a risk signal and never a forgery signal.
-const YEARS_LATER: f64 = 1_788_100_000_000.0;
+///
+/// In **seconds**, as the parameter is named. Asserting the contract
+/// rather than the behaviour is the point: the first version of this
+/// constant was in milliseconds, matching an implementation that
+/// divided the caller's value by 1000, and so the test certified the
+/// bug instead of catching it.
+const YEARS_LATER: f64 = 1_788_100_000.0;
+
+/// One second before this certificate's chain window opens
+/// (inception `1787201748`) — the deferral case.
+const BEFORE_INCEPTION: f64 = 1_787_201_747.0;
+
+/// The `record`-made capture: a real certificate with an EMPTY
+/// delegation carriage, so its attested generation key is on no path.
+const OFF_PATH_CERT: &[u8] =
+    include_bytes!("../../onomancy_dnssec/tests/fixtures/real_brooklynzelenka.onc");
+
+/// Inside that certificate's window (`1787241600` → `1787355259`),
+/// where an off-path generation is refused outright.
+const MID_OFF_PATH_WINDOW: f64 = 1_787_300_000.0;
+
+/// Past it, where the same condition is only `provisional`.
+const AFTER_OFF_PATH_WINDOW: f64 = 1_787_400_000.0;
+
+/// A hostname argument. The published type is `string`, so the cast
+/// is what a TypeScript caller gets for free at compile time and a
+/// JavaScript one gets checked at runtime.
+///
+/// Returned owned so the caller's statement owns the temporary:
+/// borrowing one out of here would need a leak to outlive the call,
+/// which is a memory bug wearing a lifetime fix's clothing.
+fn host(raw: &str) -> Text {
+    JsValue::from_str(raw).unchecked_into()
+}
 
 fn field(verdict: &JsValue, key: &str) -> String {
     js_sys::Reflect::get(verdict, &JsValue::from_str(key))
@@ -35,12 +71,8 @@ fn field(verdict: &JsValue, key: &str) -> String {
 
 #[wasm_bindgen_test]
 fn a_real_certificate_verifies_inside_the_module() {
-    let verdict = verify_certificate(
-        CERT,
-        &JsValue::from_str("brooklynzelenka.com"),
-        Some(YEARS_LATER),
-    )
-    .expect("the production certificate verifies");
+    let verdict = verify_certificate(CERT, &host("brooklynzelenka.com"), Some(YEARS_LATER))
+        .expect("the production certificate verifies");
 
     assert_eq!(
         field(&verdict, "document"),
@@ -62,12 +94,8 @@ fn a_real_certificate_verifies_inside_the_module() {
 
 #[wasm_bindgen_test]
 fn the_grading_inputs_come_back_with_the_grade() {
-    let verdict = verify_certificate(
-        CERT,
-        &JsValue::from_str("brooklynzelenka.com"),
-        Some(YEARS_LATER),
-    )
-    .expect("verifies");
+    let verdict = verify_certificate(CERT, &host("brooklynzelenka.com"), Some(YEARS_LATER))
+        .expect("verifies");
 
     let window = js_sys::Reflect::get(&verdict, &JsValue::from_str("window")).expect("window");
     let expiration = js_sys::Reflect::get(&window, &JsValue::from_str("expiration"))
@@ -82,12 +110,23 @@ fn the_grading_inputs_come_back_with_the_grade() {
     // A caller can check the work rather than trust the label:
     // how far past expiry, and whose clock said so.
     assert!(checked_at > expiration, "stale means checked after expiry");
-    assert_eq!(checked_at, YEARS_LATER / 1000.0);
+
+    // `now_seconds` is seconds and `checkedAt` is seconds, so a
+    // supplied clock must round-trip identically. Any scaling in
+    // between is a bug, whichever direction it goes.
+    //
+    // Compared as integers: these are epoch seconds that merely
+    // travel as `f64` across the JS boundary, so float equality
+    // would be asserting the wrong thing about the right values.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // epoch seconds fit
+    let (checked, expected) = (checked_at as u64, YEARS_LATER as u64);
+
+    assert_eq!(checked, expected, "the supplied clock must round-trip");
 }
 
 #[wasm_bindgen_test]
 fn a_certificate_for_another_hostname_is_refused() {
-    let refused = verify_certificate(CERT, &JsValue::from_str("example.com"), Some(YEARS_LATER));
+    let refused = verify_certificate(CERT, &host("example.com"), Some(YEARS_LATER));
 
     assert!(
         refused.is_err(),
@@ -98,17 +137,12 @@ fn a_certificate_for_another_hostname_is_refused() {
 #[wasm_bindgen_test]
 fn garbage_is_refused_without_panicking() {
     assert!(
-        verify_certificate(
-            &[0xFF; 64],
-            &JsValue::from_str("brooklynzelenka.com"),
-            Some(YEARS_LATER)
-        )
-        .is_err(),
+        verify_certificate(&[0xFF; 64], &host("brooklynzelenka.com"), Some(YEARS_LATER)).is_err(),
         "unparseable bytes"
     );
 
     assert!(
-        verify_certificate(&[], &JsValue::from_str("brooklynzelenka.com"), None).is_err(),
+        verify_certificate(&[], &host("brooklynzelenka.com"), None).is_err(),
         "no bytes at all"
     );
 }
@@ -117,10 +151,10 @@ fn garbage_is_refused_without_panicking() {
 fn a_non_string_hostname_is_a_plain_error() {
     // Not `RuntimeError: memory access out of bounds`: the parameter
     // is a JsValue precisely so untyped callers get a real message.
-    let error =
-        verify_certificate(CERT, &JsValue::from_f64(42.0), None).expect_err("42 is not a hostname");
+    let Err(value) = verify_certificate(CERT, JsValue::from_f64(42.0).unchecked_ref(), None) else {
+        panic!("42 is not a hostname");
+    };
 
-    let value: JsValue = error.into();
     let message = value
         .unchecked_into::<js_sys::Error>()
         .message()
@@ -131,4 +165,102 @@ fn a_non_string_hostname_is_a_plain_error() {
         message.contains("must be a string"),
         "expected a type error, got: {message}"
     );
+}
+
+/// The third grade, as a value rather than a throw.
+///
+/// Before this, `deferred` was the one freshness state a caller could
+/// not read from the returned object — it arrived as an exception,
+/// so a three-state type wired to this function silently never saw
+/// it. Graded before the chain's window opens.
+#[wasm_bindgen_test]
+fn a_not_yet_valid_chain_grades_deferred_rather_than_throwing() {
+    let verdict = verify_certificate(CERT, &host("brooklynzelenka.com"), Some(BEFORE_INCEPTION))
+        .expect("deferral is a grade, not a refusal");
+
+    assert_eq!(field(&verdict, "freshness"), "deferred");
+
+    // Proven, just not in force: the binding is still reported.
+    assert_eq!(
+        field(&verdict, "document"),
+        "VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj"
+    );
+
+    // The D10 check was never reached, and `null` says so where a
+    // missing key could not.
+    assert!(
+        js_sys::Reflect::get(&verdict, &JsValue::from_str("generation"))
+            .expect("generation")
+            .is_null(),
+        "generation must be null when the check was not made"
+    );
+
+    // The claim is "usually a clock difference" — these are what let
+    // a caller check that rather than believe it.
+    let window = js_sys::Reflect::get(&verdict, &JsValue::from_str("window")).expect("window");
+    let inception = js_sys::Reflect::get(&window, &JsValue::from_str("inception"))
+        .ok()
+        .and_then(|value| value.as_f64())
+        .expect("inception");
+
+    assert!(
+        BEFORE_INCEPTION < inception,
+        "deferred means the clock has not reached the window"
+    );
+}
+
+/// Revocation must not be mistakable for a network fault.
+///
+/// An off-path generation on a FRESH chain is the zone saying the key
+/// was rotated away — revocation working as designed. Thrown, because
+/// there is no verdict; but a `catch` that reads every exception as a
+/// transport failure would tell the user to retry, which is precisely
+/// the wrong remedy. The `reason` property is what makes the two
+/// distinguishable without parsing prose.
+#[wasm_bindgen_test]
+fn a_revoked_generation_is_refused_with_a_machine_readable_reason() {
+    // The `record`-made fixture: no carriage, so the attested
+    // generation key lies on no path. Graded inside its own window,
+    // where strictness is highest.
+    let Err(value) = verify_certificate(
+        OFF_PATH_CERT,
+        &host("brooklynzelenka.com"),
+        Some(MID_OFF_PATH_WINDOW),
+    ) else {
+        panic!("a fresh chain with an off-path generation is refused");
+    };
+
+    let reason = js_sys::Reflect::get(&value, &JsValue::from_str("reason"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .expect("a substantive refusal carries a reason");
+
+    assert_eq!(reason, "generation-off-path");
+
+    // And the prose still explains it to a person.
+    let message = value
+        .unchecked_into::<js_sys::Error>()
+        .message()
+        .as_string()
+        .unwrap_or_default();
+
+    assert!(
+        message.contains("rotated away"),
+        "the message should name revocation: {message}"
+    );
+}
+
+/// The same bytes, past their window, are a grade rather than a
+/// refusal — the inversion, asserted so it cannot silently flip.
+#[wasm_bindgen_test]
+fn the_same_certificate_is_provisional_once_stale() {
+    let verdict = verify_certificate(
+        OFF_PATH_CERT,
+        &host("brooklynzelenka.com"),
+        Some(AFTER_OFF_PATH_WINDOW),
+    )
+    .expect("stale evidence is unrefreshed, not authoritative");
+
+    assert_eq!(field(&verdict, "freshness"), "stale");
+    assert_eq!(field(&verdict, "generation"), "provisional");
 }

@@ -1,5 +1,6 @@
 //! The `Name` binding: parsed edgenames for JavaScript.
 
+use crate::text::{self, Text};
 use onomancy_dnssec::supported_name::SupportedName;
 use wasm_bindgen::prelude::*;
 
@@ -24,10 +25,8 @@ impl JsName {
     /// Throws a plain error for non-string input, and when the sigil is
     /// missing, the anchor is malformed, or any path segment is invalid.
     #[wasm_bindgen(constructor)]
-    pub fn new(raw: &JsValue) -> Result<JsName, JsError> {
-        let raw = raw
-            .as_string()
-            .ok_or_else(|| JsError::new("a name must be a string"))?;
+    pub fn new(raw: &Text) -> Result<JsName, JsError> {
+        let raw = text::read(raw, "a name")?;
 
         Ok(Self(SupportedName::parse(&raw)?))
     }

@@ -8,8 +8,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use onomancy_wasm::name::JsName;
-use wasm_bindgen::JsValue;
+use onomancy_wasm::{name::JsName, text::Text};
+use wasm_bindgen::{JsCast as _, JsValue};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -20,7 +20,7 @@ type JsTestResult = Result<(), JsValue>;
 
 #[wasm_bindgen_test]
 fn dns_anchors_parse() -> JsTestResult {
-    let name = JsName::new("@expede.wtf/foo/bar")?;
+    let name = JsName::new(&text("@expede.wtf/foo/bar"))?;
 
     assert_eq!(name.anchor_kind(), "dns");
     assert_eq!(name.anchor(), "@expede.wtf");
@@ -30,7 +30,7 @@ fn dns_anchors_parse() -> JsTestResult {
 
 #[wasm_bindgen_test]
 fn local_anchors_parse() -> JsTestResult {
-    let name = JsName::new("~/bob/pics")?;
+    let name = JsName::new(&text("~/bob/pics"))?;
 
     assert_eq!(name.anchor_kind(), "local");
     Ok(())
@@ -38,7 +38,9 @@ fn local_anchors_parse() -> JsTestResult {
 
 #[wasm_bindgen_test]
 fn doc_anchors_parse_with_heads() -> JsTestResult {
-    let name = JsName::new("automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj/pics")?;
+    let name = JsName::new(&text(
+        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj/pics",
+    ))?;
 
     assert_eq!(name.anchor_kind(), "doc");
     assert_eq!(name.segments(), vec!["pics".to_string()]);
@@ -48,8 +50,8 @@ fn doc_anchors_parse_with_heads() -> JsTestResult {
 #[wasm_bindgen_test]
 fn garbage_is_rejected() {
     // A dotless `@` is a flat parse error, even in JS.
-    assert!(JsName::new("@nodots/path").is_err());
-    assert!(JsName::new("").is_err());
+    assert!(JsName::new(&text("@nodots/path")).is_err());
+    assert!(JsName::new(&text("")).is_err());
 }
 
 /// Documents naming documents, entirely in-tab: mint three docs,
@@ -140,4 +142,9 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     let note = js_sys::Reflect::get(&verdict, &JsValue::from_str("note"))?;
     assert_eq!(note.as_string().as_deref(), Some("carried across"));
     Ok(())
+}
+
+/// A name argument, owned so the call site's statement owns it.
+fn text(raw: &str) -> Text {
+    JsValue::from_str(raw).unchecked_into()
 }
