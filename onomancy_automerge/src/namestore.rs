@@ -6,7 +6,7 @@
 //! reads it; the resolution walk (`onomancy_protocol::resolve`) does
 //! the greedy longest-key matching above this seam.
 
-use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value};
+use automerge::{Automerge, ReadDoc, ScalarValue, Value};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     name::segment::Segment,
@@ -18,10 +18,18 @@ use onomancy_protocol::resolve::namestore::{Authority, Namestore, Replicas, Vouc
 /// (path-resolution spec, Namestore Layout), the decisions schema in
 /// decision documents (binding-cache spec, Schema).
 ///
-/// The namestore location is a coordination point with upstream
-/// automerge-repo (design/names.md, open tension) — treat it as
-/// provisional until that lands.
-pub const RESERVED_KEY: &str = "onomancy";
+/// Protocol entries are keys **at the document root**, alongside
+/// names and application data, namespaced by this prefix. There is no
+/// container map: the namestore IS the root map, flat, and a name
+/// `foo` is `root["foo"]`. Nesting the store under a container key
+/// would make this prefix namespace against nothing, and the whole
+/// point of it is that the map is shared.
+///
+/// Nothing needs a registry of these keys. A protocol entry holds a
+/// value that is not a namestore reference, so it is absent from
+/// matching by shape (spec E8) rather than by a resolver knowing the
+/// name — the same rule that keeps application data out of the way.
+pub const RESERVED_PREFIX: &str = ".well-known/onomancy/";
 
 /// A namestore read from one held Automerge document.
 ///
@@ -56,25 +64,18 @@ impl DocumentNamestore {
 }
 
 impl DocumentNamestore {
-    /// The reserved flat map's object ID, when present and map-shaped.
-    pub(crate) fn reserved_map(&self) -> Option<automerge::ObjId> {
-        let (value, id) = self.doc.get(automerge::ROOT, RESERVED_KEY).ok()??;
-        matches!(value, Value::Object(ObjType::Map)).then_some(id)
-    }
-
     /// Every well-formed edge: `(path key, target)` pairs, in the
-    /// map's deterministic key order. Malformed keys and non-bare
-    /// values are skipped, matching [`Namestore::reference`]'s view.
+    /// document's deterministic key order. Malformed keys and
+    /// non-reference values are skipped, matching
+    /// [`Namestore::reference`]'s view — which is how protocol
+    /// entries and ordinary application data coexist here without a
+    /// registry of reserved names (spec E8).
     #[must_use]
     pub fn edges(&self) -> Vec<(String, DocAnchor)> {
-        let Some(map) = self.reserved_map() else {
-            return Vec::new();
-        };
-
         self.doc
-            .keys(&map)
+            .keys(automerge::ROOT)
             .filter_map(|key| {
-                let (value, _) = self.doc.get(&map, key.as_str()).ok()??;
+                let (value, _) = self.doc.get(automerge::ROOT, key.as_str()).ok()??;
                 let target = parse_bare_reference(&value)?;
                 Some((key, target))
             })
@@ -84,7 +85,7 @@ impl DocumentNamestore {
 
 impl Namestore for DocumentNamestore {
     fn reference(&self, path: &[Segment]) -> Option<DocAnchor> {
-        let (value, _) = self.doc.get(&self.reserved_map()?, path_key(path)).ok()??;
+        let (value, _) = self.doc.get(automerge::ROOT, path_key(path)).ok()??;
         parse_bare_reference(&value)
     }
 }
@@ -191,9 +192,8 @@ mod tests {
     fn namestore_doc(entries: &[(&str, &str)]) -> TestResult<Automerge> {
         let mut doc = Automerge::new();
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            let map = tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
             for (key, value) in entries {
-                tx.put(&map, *key, *value)?;
+                tx.put(automerge::ROOT, *key, *value)?;
             }
             Ok(())
         })
@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn documents_without_the_reserved_map_are_empty() {
+    fn an_empty_document_has_no_names() {
         let store = DocumentNamestore::new(Automerge::new());
         assert_eq!(store.reference(&segments(&["anything"])), None);
     }

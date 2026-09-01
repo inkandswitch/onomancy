@@ -97,10 +97,12 @@ The entry kinds:
 ## Schema
 [Decision Schema]: #schema
 
-The entry schema is a **data-shape contract**, not a wire codec — the substrate carries the bytes — and it exists so a user's devices may run different implementations against one decision document. The document MUST contain a reserved top-level map keyed `onomancy`, shaped:
+The entry schema is a **data-shape contract**, not a wire codec — the substrate carries the bytes — and it exists so a user's devices may run different implementations against one decision document. The document MUST contain a map at the top-level key `.well-known/onomancy/decisions`, shaped:
+
+The key follows the `.well-known/<owner>/<artifact>` convention ([Onomancy Path Resolution], Namestore Layout) so that a decision document is an ordinary document: a top-level key like any other, holding a value that is not a reference and therefore absent from name matching. Nothing stops a writer from binding a name there instead — the prefix is a writers' convention, not an enforced reservation — and a writer who does so has broken their own decision document.
 
 ```
-"onomancy": {
+".well-known/onomancy/decisions": {
   "v": 0,                          // schema version; unknown versions: read nothing, write nothing
   "claims": [                      // append-only; entries are never deleted (B6)
     { "hostname": <string>, "document": <bytes 32>, "note": <string, optional> }
@@ -168,6 +170,7 @@ Consequences of the derivation, tagged for cross-reference:
 [Keyhive]: https://github.com/inkandswitch/keyhive
 [Serialization]: ../serialization.md
 [Divergence and Re-Pin]: ./petname-anchor.md#divergence-and-re-pin
+[Onomancy Path Resolution]: ../path-resolution.md
 [Petname Anchoring]: ./petname-anchor.md
 [Serial Ratchet]: ./dns-anchor.md#serial-ratchet
 

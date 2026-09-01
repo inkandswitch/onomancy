@@ -4,7 +4,7 @@ The certificate is the self-authenticating record that binds a DNS hostname to a
 
 ## Retrieval
 
-The certificate lives **in the document it binds**, at `.well-known/onomancy/certificates` in the reserved map. That location is a namestore key no name can address — the value is a list rather than a reference, so path resolution skips it — which is what lets protocol data and edges share one map.
+The certificate lives **in the document it binds**, at the top-level key `.well-known/onomancy/certificates` — beside the document's names, since a namestore is the document's own map rather than a container inside it. No name can address that key: the value is a list rather than a reference, so path resolution skips it, which is what lets protocol data and names share one map without a registry.
 
 So retrieval is not a mechanism of its own. A verifier that resolves `@expede.wtf/foo` must replicate the document to walk `/foo` anyway; the binding evidence rides along. There is no server to run, no endpoint to publish, and no second artifact to keep in sync with the first.
 

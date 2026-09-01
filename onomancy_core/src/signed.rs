@@ -77,10 +77,29 @@ impl<P: Payload> Signed<P> {
         Ok(Self { payload, signature })
     }
 
-    /// Sign a payload. Crate-internal: unit constructors build the
-    /// payload from the signing key's verifying key, so a
-    /// payload-vs-key mismatch is unrepresentable at the public API.
+    /// Sign a payload with the key the payload names.
+    ///
+    /// # Panics
+    ///
+    /// Debug builds assert that `key` is the payload's own signer.
+    /// Signing with any other key yields a `Signed` whose signature
+    /// does not verify — it would encode, and then fail at every
+    /// decoder, presenting as corruption rather than as the caller
+    /// error it is.
+    ///
+    /// Every unit constructor in the workspace derives the payload's
+    /// signer field from this key, so the two agree by construction
+    /// and the assertion is unreachable from them. It is here because
+    /// the function is `pub` — `onomancy_dnssec` needs it — and the
+    /// tie was previously stated in a doc comment that called this
+    /// "crate-internal", which it is not.
     pub fn sign(payload: P, key: &SigningKey) -> Self {
+        debug_assert_eq!(
+            *payload.signer(),
+            key.verifying_key(),
+            "a payload must be signed by the key it names as its signer"
+        );
+
         let region = Self::signable_region(&payload);
 
         Self {
@@ -117,11 +136,12 @@ impl<P: Payload> Signed<P> {
     /// already carries it, and accepting a second copy would allow a
     /// disagreement between them that has no correct resolution.
     ///
-    /// The signature is verified here rather than trusted. Every
-    /// `Signed` in this crate holds a signature that validated over
-    /// its own bytes — [`Self::decode_from`] maintains it on the way
-    /// in — and a constructor that skipped the check would make the
-    /// type's central invariant conditional on who built the value.
+    /// The signature is verified here rather than trusted, so this
+    /// constructor cannot be the one that breaks the type's central
+    /// property: a `Signed` holds a signature that validates over its
+    /// own bytes. [`Self::decode_from`] maintains it on the way in,
+    /// and [`Self::sign`] maintains it whenever the key matches the
+    /// payload's signer, which it asserts in debug builds.
     ///
     /// # Errors
     ///

@@ -31,7 +31,7 @@ use onomancy_dnssec::{
     chain::DnssecChain,
     dns_name::DnsName,
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsError};
+use wasm_bindgen::{JsError, prelude::wasm_bindgen};
 
 use crate::{
     clock,
@@ -41,7 +41,7 @@ use crate::{
 /// The bytes a signature must cover for this certificate.
 ///
 /// Hand the result to whatever holds the admin key, then pass the
-/// signature to [`encode_certificate`] with the *same* fields. The two
+/// signature to `encodeCertificate` with the *same* fields. The two
 /// calls must agree: a signature covers the bytes it was given, so
 /// changing a field in between produces a certificate that verifies
 /// nowhere.
@@ -54,7 +54,7 @@ use crate::{
 /// Rejects for a malformed hostname, anchor, or signer key.
 #[wasm_bindgen(js_name = signableBytes)]
 pub fn signable_bytes(
-    root_doc: &str,
+    root_doc: &Text,
     signer: &[u8],
     issued_at: f64,
     hostname: &Text,
@@ -70,7 +70,7 @@ pub fn signable_bytes(
 /// carriage, and a DNSSEC chain.
 ///
 /// The fields must be **byte-identical** to those passed to
-/// [`signable_bytes`], since the signature covers them.
+/// `signableBytes`, since the signature covers them.
 ///
 /// `carriage` is a list of `bincode(StaticEvent)` blobs. `chain` is a
 /// framed `DnssecChain` — `resolveHostname` returns one ready to pass
@@ -92,7 +92,7 @@ pub fn signable_bytes(
 // publishes as `Uint8Array[]` in the `.d.ts`.
 #[allow(clippy::needless_pass_by_value)]
 pub fn encode_certificate(
-    root_doc: &str,
+    root_doc: &Text,
     signer: &[u8],
     issued_at: f64,
     hostname: &Text,
@@ -125,13 +125,18 @@ pub fn encode_certificate(
 /// The shared field parsing, so the two calls cannot disagree about
 /// what they were given.
 fn parts(
-    root_doc: &str,
+    root_doc: &Text,
     signer: &[u8],
     issued_at: f64,
     hostname: &Text,
 ) -> Result<(CertificateParams, ed25519_dalek::VerifyingKey), JsError> {
-    let root_doc = DocAnchor::parse(root_doc.trim_start_matches("automerge:"))
-        .map_err(|error| JsError::new(&format!("rootDoc: {error}")))?;
+    let root_doc = text::read(root_doc, "a document anchor")?;
+    let root_doc = DocAnchor::parse(
+        root_doc
+            .strip_prefix(onomancy_core::anchor::doc::SCHEME_PREFIX)
+            .unwrap_or(&root_doc),
+    )
+    .map_err(|error| JsError::new(&format!("rootDoc: {error}")))?;
 
     let signer: [u8; 32] = signer
         .try_into()

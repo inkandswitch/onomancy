@@ -6,17 +6,23 @@
 //! spec, In the Bound Document).
 //!
 //! ```text
-//! doc["onomancy"] = {
+//! doc = {
 //!   "team":                              "automerge:…",   ← names
 //!   "team/john":                         "automerge:…",
 //!   ".well-known/onomancy/certificates": [ <onc>, … ],    ← or a reference
 //! }
 //! ```
 //!
-//! The location is a namestore key that no name can address: keys are
-//! `/`-joined [`Segment`](onomancy_core::name::segment::Segment)s, and
-//! the value is a list rather than a reference, so path resolution
-//! skips it (path-resolution spec, E8).
+//! Top-level keys, flat: a namestore is the document's own map, not a
+//! container inside it. The certificate list sits beside the names
+//! because its value is a list rather than a reference, so path
+//! resolution passes over it (path-resolution spec, E8) without any
+//! resolver needing to know the key.
+//!
+//! The prefix is a **writers' convention**, not an enforced
+//! reservation. A writer may bind a name at this key; the spec says
+//! so plainly, and such a writer has broken their own document. This
+//! module does not police it.
 //!
 //! This module reads and writes bytes. It decodes only far enough to
 //! honour the writer's replacement rule; judging a certificate is
@@ -29,7 +35,7 @@ use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value, transaction::Tr
 use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_dnssec::certificate::Certificate;
 
-use crate::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY, parse_bare_reference};
+use crate::namestore::{HeldDocuments, parse_bare_reference};
 
 /// Where a document's certificates live, inside the reserved map.
 ///
@@ -130,14 +136,12 @@ pub fn put(doc: &mut Automerge, certificate: &Certificate) -> Result<(), WriteEr
     let encoded = certificate.encode();
 
     doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-        let reserved = match tx.get(automerge::ROOT, RESERVED_KEY)? {
-            Some((Value::Object(ObjType::Map), id)) => id,
-            _ => tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?,
-        };
-
-        let list = match tx.get(&reserved, CERTIFICATES_KEY)? {
+        // A root key, beside names and application data. The list is
+        // not a reference, so it takes no part in matching (spec E8)
+        // and needs no resolver to know its name.
+        let list = match tx.get(automerge::ROOT, CERTIFICATES_KEY)? {
             Some((Value::Object(ObjType::List), id)) => id,
-            _ => tx.put_object(&reserved, CERTIFICATES_KEY, ObjType::List)?,
+            _ => tx.put_object(automerge::ROOT, CERTIFICATES_KEY, ObjType::List)?,
         };
 
         match replacing {
@@ -164,12 +168,7 @@ enum Located {
 
 /// Read the key without interpreting what it means to find nothing.
 fn locate(doc: &Automerge) -> Result<Located, MalformedLocation> {
-    let namestore = DocumentNamestore::new(doc.clone());
-    let Some(reserved) = namestore.reserved_map() else {
-        return Ok(Located::Absent);
-    };
-
-    let Ok(Some((value, id))) = doc.get(&reserved, CERTIFICATES_KEY) else {
+    let Ok(Some((value, id))) = doc.get(automerge::ROOT, CERTIFICATES_KEY) else {
         return Ok(Located::Absent);
     };
 
@@ -256,7 +255,7 @@ mod tests {
     use testresult::TestResult;
 
     use super::*;
-    use crate::namestore::path_key;
+    use crate::namestore::{DocumentNamestore, path_key};
 
     fn key(seed: u8) -> SigningKey {
         SigningKey::from_bytes(&[seed; 32])
@@ -290,8 +289,7 @@ mod tests {
     ) -> Automerge {
         let mut doc = Automerge::new();
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            let reserved = tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
-            value(tx, &reserved);
+            value(tx, &automerge::ROOT);
             Ok(())
         })
         .expect("build");

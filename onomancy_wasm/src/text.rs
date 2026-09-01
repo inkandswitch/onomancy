@@ -15,7 +15,7 @@
 //!
 //! [`typescript_type`]: https://rustwasm.github.io/wasm-bindgen/reference/attributes/on-rust-exports/typescript_type.html
 
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast as _, prelude::*};
 
 #[wasm_bindgen]
 extern "C" {

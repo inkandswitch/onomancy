@@ -35,7 +35,7 @@ use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::verdict::{
     self, DeferredEvidence, GenerationCheck, Rejection, Verdict,
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsCast as _, JsError, JsValue};
+use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
 
 // Reading a certificate OUT OF a document needs the document
 // substrate; verifying bytes does not. Only the former is gated.
@@ -77,15 +77,15 @@ use {
 /// # Errors
 ///
 /// Rejects for a malformed hostname, and for any certificate that
-/// fails verification — see [`rejection_message`] for what each
-/// refusal means.
+/// fails verification. Each refusal carries a `reason` code; see the
+/// published `RefusalReason` union for what each means.
 #[wasm_bindgen(js_name = verifyCertificate)]
 pub fn verify_certificate(
     bytes: &[u8],
     hostname: &Text,
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
-    let hostname = parse_hostname(hostname).map_err(JsValue::from)?;
+    let hostname = parse_hostname(hostname)?;
     let now = clock::resolve(now_seconds)
         .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
 
@@ -124,11 +124,11 @@ pub fn verify_certificate(
 #[wasm_bindgen(js_name = verifyBinding)]
 pub fn verify_binding(
     held: &JsHeldDocuments,
-    anchor: &str,
+    anchor: &Text,
     hostname: &Text,
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
-    let hostname = parse_hostname(hostname).map_err(JsValue::from)?;
+    let hostname = parse_hostname(hostname)?;
     let now = clock::resolve(now_seconds)
         .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
     let anchor = parse_anchor(anchor).map_err(JsValue::from)?;
@@ -318,19 +318,27 @@ fn rejection_message(rejection: &Rejection) -> String {
 }
 
 /// Typed `string` for TypeScript, checked at runtime anyway — see
-/// [`crate::hostname`] for why the declaration and the check are
-/// separate concerns here.
-fn parse_hostname(raw: &Text) -> Result<DnsName, JsError> {
-    let raw = text::read(raw, "a hostname")?;
+/// [`crate::text`] for why the declaration and the check are separate
+/// concerns here.
+///
+/// A malformed hostname carries `invalid-hostname`, the same code
+/// `resolveHostname` gives for the same input. They differed until a
+/// review noticed, which made `"reason" in error` mean two things
+/// depending on which entry point a caller reached.
+fn parse_hostname(raw: &Text) -> Result<DnsName, JsValue> {
+    let raw = text::read(raw, "a hostname").map_err(JsValue::from)?;
 
-    DnsName::parse_display(&raw).map_err(|error| JsError::new(&error.to_string()))
+    DnsName::parse_display(&raw).map_err(|error| {
+        refusal::error(&error.to_string(), refusal::RefusalReason::InvalidHostname)
+    })
 }
 
 #[cfg(feature = "names")]
-fn parse_anchor(raw: &str) -> Result<DocAnchor, JsError> {
+fn parse_anchor(raw: &Text) -> Result<DocAnchor, JsError> {
+    let raw = text::read(raw, "a document anchor")?;
     let bare = raw
         .strip_prefix(onomancy_core::anchor::doc::SCHEME_PREFIX)
-        .unwrap_or(raw);
+        .unwrap_or(&raw);
 
     DocAnchor::parse(bare).map_err(|error| JsError::new(&error.to_string()))
 }

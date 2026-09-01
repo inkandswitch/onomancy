@@ -250,7 +250,7 @@ The SVCB record is a [transport hint][Transport Hints] like any other: DNSSEC co
 ## In the Bound Document
 [In the Bound Document]: #in-the-bound-document
 
-The certificate list lives at `.well-known/onomancy/certificates` in the bound document's reserved map ([Onomancy Path Resolution], Namestore Layout). The value is either:
+The certificate list lives at the key `.well-known/onomancy/certificates` in the bound document's top-level map — beside its names, not nested under a container ([Onomancy Path Resolution], Namestore Layout). The value is either:
 
 - **inline** — a list of certificate units; or
 - **a reference** — pointing at a document whose entry at the same path holds the list inline.

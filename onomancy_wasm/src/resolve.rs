@@ -25,11 +25,18 @@ use crate::{
 /// ```js
 /// {
 ///   hostname, links, records: string[],
+///   chain,                               // the validated chain, framed
 ///   freshness: "fresh" | "stale" | "deferred",
 ///   window: { inception, expiration },   // epoch seconds
 ///   checkedAt,                           // the clock reading used
 /// }
 /// ```
+///
+/// `chain` is the DNSSEC chain this call fetched and validated, in the
+/// framing a certificate embeds. A certificate must carry its own
+/// chain and this is the only call that obtains one, so minting from a
+/// browser needs these bytes — pass them straight to
+/// `encodeCertificate`.
 ///
 /// `window` and `checkedAt` are the **inputs** to the freshness
 /// decision, returned alongside it so a caller can check the work:
@@ -55,12 +62,25 @@ pub async fn resolve_hostname(
 ) -> Result<JsResolution, JsValue> {
     // Typed `string` for TypeScript, checked at runtime anyway: a
     // `&str` parameter faults inside the module on non-string input.
-    // No `reason`: an argument error is not a verdict about evidence.
+    // No `reason`: a wrong-typed argument is a caller bug, not a
+    // finding about the name.
     let hostname = text::read(hostname, "a hostname").map_err(JsValue::from)?;
 
     let hostname = DnsName::parse_display(&hostname).map_err(|error| {
         refusal::error(&error.to_string(), refusal::RefusalReason::InvalidHostname)
     })?;
+
+    // Checked before the fetch, so a malformed resolver URL surfaces
+    // as the caller error it is. It previously arrived as
+    // `transport`, which invites a retry that can never succeed.
+    if let Some(url) = doh_url.as_deref()
+        && web_sys::Url::new(url).is_err()
+    {
+        return Err(JsValue::from(JsError::new(&format!(
+            "dohUrl is not a valid URL: {url}"
+        ))));
+    }
+
     let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);
 
     let chain = provider

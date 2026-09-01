@@ -1,6 +1,6 @@
 import { expect, test } from "./harness";
 
-// Held documents: minting, notes, and namestore edges.
+// Held documents: minting, saving, and namestore edges.
 
 test("mints documents the name grammar accepts", async ({ page }) => {
   const minted = await page.evaluate(() => {
@@ -19,15 +19,21 @@ test("mints documents the name grammar accepts", async ({ page }) => {
   expect(minted.anchors).toEqual([minted.anchor]);
 });
 
-test("round-trips a document note", async ({ page }) => {
-  const note = await page.evaluate(() => {
+test("a document's own keys do not become names unless they are references", async ({
+  page,
+}) => {
+  const edges = await page.evaluate(() => {
     const held = new window.onomancy.HeldDocuments();
     const anchor = held.createDocument();
-    held.setNote(anchor, "John's document");
-    return held.note(anchor);
+    held.bind(anchor, "pics", anchor);
+    return held.edges(anchor);
   });
 
-  expect(note).toBe("John's document");
+  // A namestore is the document's own top-level map, so a name is a
+  // root key. Only reference-valued keys are edges.
+  expect(edges).toEqual([
+    expect.objectContaining({ path: "pics" }),
+  ]);
 });
 
 test("binds namestore edges and reads them back", async ({ page }) => {

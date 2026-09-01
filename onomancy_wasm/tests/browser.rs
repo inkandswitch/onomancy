@@ -65,7 +65,6 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     let gallery = held.create_document()?;
     let year = held.create_document()?;
 
-    held.set_note(&year, "🎉")?;
     held.bind(&root, "pics/best", &gallery)?;
     held.bind(&gallery, "2026", &year)?;
 
@@ -77,8 +76,6 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     assert_eq!(status.as_string().as_deref(), Some("resolved"));
     let document = js_sys::Reflect::get(&verdict, &JsValue::from_str("document"))?;
     assert_eq!(document.as_string().as_deref(), Some(year.as_str()));
-    let note = js_sys::Reflect::get(&verdict, &JsValue::from_str("note"))?;
-    assert_eq!(note.as_string().as_deref(), Some("🎉"));
     Ok(())
 }
 
@@ -117,7 +114,6 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     let mut origin = JsHeldDocuments::new();
     let root = origin.create_document()?;
     let leaf = origin.create_document()?;
-    origin.set_note(&leaf, "carried across")?;
     origin.bind(&root, "over/here", &leaf)?;
 
     // A second tab: nothing held, so even the ROOT is an unsynced target.
@@ -139,8 +135,11 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
         .await?;
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("resolved"));
-    let note = js_sys::Reflect::get(&verdict, &JsValue::from_str("note"))?;
-    assert_eq!(note.as_string().as_deref(), Some("carried across"));
+
+    // The bytes carried across resolve to the same document, which is
+    // the point: a namestore is the document, not a view of it.
+    let document = js_sys::Reflect::get(&verdict, &JsValue::from_str("document"))?;
+    assert_eq!(document.as_string().as_deref(), Some(leaf.as_str()));
     Ok(())
 }
 

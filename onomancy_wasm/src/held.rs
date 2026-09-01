@@ -15,10 +15,10 @@
 
 use std::cell::Cell;
 
-use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value, transaction::Transactable};
+use automerge::{transaction::Transactable, Automerge};
 use ed25519_dalek::SigningKey;
 use js_sys::{Array, Reflect};
-use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY};
+use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     collections::Map,
@@ -30,7 +30,7 @@ use onomancy_protocol::resolve::{
     resolution::{PartialReason, Resolution},
     resolve,
 };
-use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsError, JsValue};
 
 /// A browser-held document set: the anchoring and replication
 /// substrate a real agent would sync, reduced to in-memory documents
@@ -116,31 +116,6 @@ impl JsHeldDocuments {
         anchors
     }
 
-    /// Set a display note on a held document.
-    ///
-    /// # Errors
-    ///
-    /// Throws for unknown anchors and write failures.
-    #[wasm_bindgen(js_name = setNote)]
-    pub fn set_note(&mut self, anchor: &str, note: &str) -> Result<(), JsError> {
-        let doc = self.held_mut(anchor)?;
-        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            tx.put(automerge::ROOT, "note", note)?;
-            Ok(())
-        })
-        .map_err(|failure| JsError::new(&failure.error.to_string()))?;
-        Ok(())
-    }
-
-    /// The display note on a held document, when set.
-    ///
-    /// # Errors
-    ///
-    /// Throws for unknown anchors.
-    pub fn note(&self, anchor: &str) -> Result<Option<String>, JsError> {
-        Ok(note_of(self.held(anchor)?))
-    }
-
     /// Add a namestore edge: `path` (segments joined by `/`) names
     /// `target` from the `anchor` document.
     ///
@@ -154,11 +129,10 @@ impl JsHeldDocuments {
 
         let doc = self.held_mut(anchor)?;
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            let map = match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                Some((Value::Object(ObjType::Map), id)) => id,
-                _ => tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?,
-            };
-            tx.put(&map, key.as_str(), value.as_str())?;
+            // A name is a root key: `foo` is `root["foo"]`. The store
+            // is the document's own map, flat, shared with whatever
+            // else the document holds.
+            tx.put(automerge::ROOT, key.as_str(), value.as_str())?;
             Ok(())
         })
         .map_err(|failure| JsError::new(&failure.error.to_string()))?;
@@ -190,7 +164,7 @@ impl JsHeldDocuments {
     /// over `DoH` (optionally at `doh_url`), validated from the
     /// baked-in IANA anchors inside the Wasm.
     ///
-    /// Returns `{ status: "resolved", document, note? }` or
+    /// Returns `{ status: "resolved", document }` or
     /// `{ status: "partial", consumed, total, reason, target? }` — a
     /// partial walk is the designed norm under partition, not an
     /// error. An unheld ROOT is the same partial as any unsynced hop
@@ -240,7 +214,7 @@ impl JsHeldDocuments {
 
         let verdict = js_sys::Object::new();
         match resolve(root_namestore, name.segments(), &tracking) {
-            Resolution::Resolved { target, authority } => {
+            Resolution::Resolved { authority, .. } => {
                 set(&verdict, "status", &JsValue::from_str("resolved"));
                 set(&verdict, "authority", &JsValue::from_str(authority.label()));
                 // The browser has no keyhive route yet: every grade
@@ -261,9 +235,6 @@ impl JsHeldDocuments {
                         "document",
                         &JsValue::from_str(&anchor_string(&landed)),
                     );
-                }
-                if let Some(note) = note_of(target.document()) {
-                    set(&verdict, "note", &JsValue::from_str(&note));
                 }
             }
             Resolution::Partial { consumed, reason } => {
@@ -417,18 +388,6 @@ fn path_of(path: &str) -> Result<String, JsError> {
         .map(Segment::as_str)
         .collect::<Vec<_>>()
         .join("/"))
-}
-
-/// The `note` scalar on a document's root, when set.
-fn note_of(doc: &Automerge) -> Option<String> {
-    let (value, _) = doc.get(automerge::ROOT, "note").ok()??;
-    let Value::Scalar(scalar) = value else {
-        return None;
-    };
-    let ScalarValue::Str(text) = scalar.as_ref() else {
-        return None;
-    };
-    Some(text.to_string())
 }
 
 /// Segment counts fit in a JS number.

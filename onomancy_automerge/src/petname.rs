@@ -7,7 +7,7 @@
 //! the decision document, so renames move only the label and can
 //! never sever divergence detection (P1).
 
-use automerge::{Automerge, ObjType, ReadDoc, transaction::Transactable};
+use automerge::{Automerge, transaction::Transactable};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     collections::Map,
@@ -16,7 +16,7 @@ use onomancy_core::{
 use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::{resolve::namestore::Namestore, verifier::state::decisions::Decisions};
 
-use crate::namestore::{DocumentNamestore, RESERVED_KEY, path_key};
+use crate::namestore::{DocumentNamestore, path_key};
 
 /// Write access to the petname edges of the user's own root document.
 ///
@@ -47,12 +47,10 @@ impl<'a> PetnameStore<'a> {
         let reference = format!("{}{target}", doc::SCHEME_PREFIX);
 
         self.doc
+            // A name is a root key: `foo` is `root["foo"]`, flat, with
+            // no container map to descend into.
             .transact::<_, _, automerge::AutomergeError>(|tx| {
-                let map = match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                    Some((automerge::Value::Object(ObjType::Map), id)) => id,
-                    _ => tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?,
-                };
-                tx.put(&map, key.as_str(), reference.as_str())
+                tx.put(automerge::ROOT, key.as_str(), reference.as_str())
             })
             .map_err(|failure| WriteError::Automerge(failure.error))?;
 
@@ -72,12 +70,7 @@ impl<'a> PetnameStore<'a> {
 
         self.doc
             .transact::<_, _, automerge::AutomergeError>(|tx| {
-                match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                    Some((automerge::Value::Object(ObjType::Map), map)) => {
-                        tx.delete(&map, key.as_str())
-                    }
-                    _ => Ok(()),
-                }
+                tx.delete(automerge::ROOT, key.as_str())
             })
             .map_err(|failure| WriteError::Automerge(failure.error))?;
 

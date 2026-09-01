@@ -22,7 +22,11 @@ use onomancy_core::{
 use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions};
 
-use crate::namestore::RESERVED_KEY;
+/// The decisions schema is protocol data, not names: a single root
+/// key holding a versioned map, namespaced like every other reserved
+/// entry. Its value is a map rather than a reference, so it takes no
+/// part in path matching (spec E8).
+const DECISIONS_KEY: &str = ".well-known/onomancy/decisions";
 
 /// The decisions schema version this reader understands.
 pub const SCHEMA_VERSION: u64 = 0;
@@ -60,7 +64,7 @@ impl<'a> DecisionsView<'a> {
 
     /// The reserved map, gated on the schema version.
     fn schema_root(self) -> Option<ObjId> {
-        let map = self.object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
+        let map = self.object(automerge::ROOT, DECISIONS_KEY, ObjType::Map)?;
 
         let (version, _) = self.doc.get(&map, "v").ok()??;
         let Value::Scalar(scalar) = version else {
@@ -248,12 +252,12 @@ mod tests {
         DnsName::parse(raw).expect("valid hostname")
     }
 
-    /// A decision document skeleton: reserved map with `v` and empty
+    /// A decision document skeleton: the decisions map with `v` and empty
     /// `claims` / `acceptances` / `resets` containers.
     fn skeleton(version: i64) -> TestResult<Automerge> {
         let mut doc = Automerge::new();
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            let root = tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
+            let root = tx.put_object(automerge::ROOT, DECISIONS_KEY, ObjType::Map)?;
             tx.put(&root, "v", version)?;
             tx.put_object(&root, "claims", ObjType::List)?;
             tx.put_object(&root, "acceptances", ObjType::Map)?;
@@ -266,7 +270,7 @@ mod tests {
 
     fn schema_object(doc: &Automerge, prop: &str) -> ObjId {
         let (_, root) = doc
-            .get(automerge::ROOT, RESERVED_KEY)
+            .get(automerge::ROOT, DECISIONS_KEY)
             .expect("read")
             .expect("reserved map");
         let (_, id) = doc.get(&root, prop).expect("read").expect("container");

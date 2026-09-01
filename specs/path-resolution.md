@@ -46,7 +46,9 @@ Path resolution is defined over any substrate providing:
 | Flat string-keyed maps            | REQUIRED                         | A namestore is a map from strings to values; nothing more is assumed about what a namestore contains                                                                       |
 | Deterministic conflict resolution | REQUIRED (replicated substrates) | Concurrent writes to the same key MUST resolve to one deterministic winner, with the losing value(s) still observable                                                      |
 
-A namestore MAY be embedded in a larger document (e.g. as one field among other application data). The namestore is the map itself, not its container: path resolution reads only the map, and a namestore reference designates the map's location within the containing document, however the substrate expresses that.
+A namestore is a document's **own top-level map**, not a container within it. A namestore reference therefore designates a document, and resolution reads that document's top-level keys directly: the name `foo` is the key `foo`, and nothing is nested.
+
+This is why names, protocol entries, and ordinary application data share one map. Isolating names under a container key would be the obvious alternative, and it is rejected: a container makes the reserved prefix below namespace against nothing, and it replaces a rule about **values** (E8, mechanical) with a rule about **location** that every writer and reader must agree on out of band.
 
 # Namestore Layout
 [Namestore Layout]: #namestore-layout

@@ -73,9 +73,15 @@ export interface Resolution {
 /**
  * Why an operation was refused.
  *
- * Present on every error this module throws about *evidence*, and
- * absent on argument errors — so `"reason" in error` separates a
- * verdict about evidence from a failure to form one.
+ * Present on every error that is a **statement about the operation**,
+ * and absent only on **type errors** — an argument of the wrong
+ * JavaScript type, which is a caller bug rather than a finding.
+ *
+ * So `"reason" in error` separates "this is what happened" from "you
+ * passed the wrong kind of thing". An earlier version of this comment
+ * drew the line at argument errors instead, which was wrong:
+ * `invalid-hostname` is an argument error and carries a reason,
+ * because a caller can act on it and a user can see it.
  *
  * Grouped by the remedy, because that is the only distinction a UI
  * can act on — and the grouping below is the grouping, not a
