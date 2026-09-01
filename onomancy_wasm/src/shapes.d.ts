@@ -57,7 +57,7 @@ export interface Resolution {
    * The validated chain, framed as a certificate embeds it.
    *
    * A certificate must carry its own chain, and this call is the only
-   * thing that fetched one 2014 so minting from a browser needs these
+   * thing that fetched one — so minting from a browser needs these
    * bytes. Pass straight to `encodeCertificate`.
    */
   chain: Uint8Array;
@@ -78,27 +78,30 @@ export interface Resolution {
  * verdict about evidence from a failure to form one.
  *
  * Grouped by the remedy, because that is the only distinction a UI
- * can act on:
+ * can act on — and the grouping below is the grouping, not a
+ * commentary on one.
  *
- * - `transport` alone is worth retrying.
- * - `no-binding` and `invalid-hostname` are stable facts; retrying
- *   cannot change them, and telling a user to check their connection
- *   over an unbound name or a typo is the wrong-remedy bug this
- *   union exists to prevent.
- * - The rest are security signals about evidence that did arrive.
+ * Note `malformed` and `invalid-signature` are deliberately separate.
+ * The first means the bytes were never a certificate, which is a
+ * wiring bug; the second means they are one and someone altered it.
+ * Reporting a mistyped buffer as a possible forgery, or a forgery as
+ * a typo, are the two halves of the same mistake.
  */
 export type RefusalReason =
-  // Live walk (`resolveHostname`)
+  // Retrying may help. This one only.
   | "transport"
+  // Stable facts. Retrying cannot change them, and absence of
+  // evidence is never evidence against a binding.
   | "no-binding"
-  | "invalid-hostname"
-  // Certificate verification
-  | "generation-off-path"
-  | "hostname-mismatch"
   | "no-certificate-held"
-  | "decode"
-  // Either
-  | "chain-rejected";
+  // The caller can see and fix these.
+  | "invalid-hostname"
+  | "malformed"
+  // Security signals: evidence arrived and failed.
+  | "invalid-signature"
+  | "hostname-mismatch"
+  | "chain-rejected"
+  | "generation-off-path";
 
 /** An error carrying why the evidence was refused. */
 export interface RefusalError extends Error {

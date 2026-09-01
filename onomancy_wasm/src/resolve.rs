@@ -6,7 +6,7 @@ use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
     chain_provider::ChainProvider, dns_name::DnsName, freshness::Grade, validator::Validator,
 };
-use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
 
 use crate::{
     clock,
@@ -58,8 +58,9 @@ pub async fn resolve_hostname(
     // No `reason`: an argument error is not a verdict about evidence.
     let hostname = text::read(hostname, "a hostname").map_err(JsValue::from)?;
 
-    let hostname = DnsName::parse_display(&hostname)
-        .map_err(|error| refusal::error(&error.to_string(), "invalid-hostname"))?;
+    let hostname = DnsName::parse_display(&hostname).map_err(|error| {
+        refusal::error(&error.to_string(), refusal::RefusalReason::InvalidHostname)
+    })?;
     let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);
 
     let chain = provider
@@ -71,7 +72,8 @@ pub async fn resolve_hostname(
         .validate_detailed(&hostname, &chain)
         .map_err(|error| refusal::error(&error.to_string(), refusal::validation_reason(&error)))?;
 
-    let now = clock::resolve(now_seconds);
+    let now = clock::resolve(now_seconds)
+        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
     let freshness = match proof.window.grade(now) {
         Grade::Fresh => "fresh",
         Grade::Stale => "stale",

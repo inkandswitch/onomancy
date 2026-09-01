@@ -25,7 +25,7 @@
 //! it: a hand-filtered bundle today, a scoped export later.
 
 use js_sys::Uint8Array;
-use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
 use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams},
     chain::DnssecChain,
@@ -33,7 +33,10 @@ use onomancy_dnssec::{
 };
 use wasm_bindgen::{JsError, prelude::wasm_bindgen};
 
-use crate::text::{self, Text};
+use crate::{
+    clock,
+    text::{self, Text},
+};
 
 /// The bytes a signature must cover for this certificate.
 ///
@@ -140,8 +143,11 @@ fn parts(
     let hostname = DnsName::parse_display(&text::read(hostname, "a hostname")?)
         .map_err(|error| JsError::new(&error.to_string()))?;
 
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // epoch seconds fit
-    let issued_at = UnixSeconds::from(issued_at.max(0.0) as u64);
+    // Validated, not clamped: `Date.now()` here would date the
+    // certificate in year 58000, and `NaN` would date it 1970. Both
+    // silently, on the one field a verifier cannot cross-check.
+    let issued_at =
+        clock::seconds(issued_at, "issuedAt").map_err(|error| JsError::new(&error.to_string()))?;
 
     Ok((
         CertificateParams {

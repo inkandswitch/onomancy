@@ -86,7 +86,8 @@ pub fn verify_certificate(
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
     let hostname = parse_hostname(hostname).map_err(JsValue::from)?;
-    let now = clock::resolve(now_seconds);
+    let now = clock::resolve(now_seconds)
+        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
 
     match verdict::verify(bytes, &hostname, now, &Validator::iana(), &KeyhiveAuthority) {
         Ok(verdict) => Ok(verdict_object(&verdict, now)),
@@ -128,7 +129,8 @@ pub fn verify_binding(
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
     let hostname = parse_hostname(hostname).map_err(JsValue::from)?;
-    let now = clock::resolve(now_seconds);
+    let now = clock::resolve(now_seconds)
+        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
     let anchor = parse_anchor(anchor).map_err(JsValue::from)?;
 
     let mut documents = HeldDocuments::default();
@@ -145,11 +147,16 @@ pub fn verify_binding(
         // distinct from a refusal of evidence actually seen.
         return Err(refusal::error(
             "no certificate held for this document — it may be unavailable rather than absent",
-            "no-certificate-held",
+            refusal::RefusalReason::NoCertificateHeld,
         ));
     }
 
-    let mut last = None;
+    // A refusal ABOUT this hostname, if any certificate turns out to
+    // be for it. Kept separate from hostname mismatches, which are
+    // certificates for the document's *other* names and say nothing
+    // about the one asked for.
+    let mut refusal_for_this_hostname = None;
+
     for bytes in &stored {
         match verdict::verify(bytes, &hostname, now, &Validator::iana(), &KeyhiveAuthority) {
             Ok(verdict) => return Ok(verdict_object(&verdict, now)),
@@ -161,23 +168,36 @@ pub fn verify_binding(
                 return Ok(deferred_object(&hostname, &evidence, now));
             }
 
-            // A certificate for one of the document's OTHER hostnames
-            // is not an error; keep looking.
-            Err(rejection) => last = Some(rejection),
+            // Not this hostname's certificate. The caller supplied a
+            // document, not this unit, so which of the document's
+            // other names it binds is an internal detail — reporting
+            // `hostname-mismatch` would answer a question nobody
+            // asked, with a security-signal code.
+            Err(Rejection::HostnameMismatch { .. }) => {}
+
+            // Reached only once the hostname matched (`verify` checks
+            // it first), or on a malformed unit in the list. Either
+            // way this IS a statement about the requested binding, so
+            // the first one is kept and reported with its own reason.
+            Err(rejection) => {
+                refusal_for_this_hostname.get_or_insert(rejection);
+            }
         }
     }
 
-    match last {
+    match refusal_for_this_hostname {
         Some(rejection) => Err(refusal::error(
-            &format!(
-                "no certificate in this document binds that hostname (last: {})",
-                rejection_message(&rejection)
-            ),
+            &rejection_message(&rejection),
             refusal::reason(&rejection),
         )),
+
+        // Every certificate named some other hostname, so this source
+        // holds no evidence about the one asked for. Absence, not
+        // refutation — and unavailability is never proof of either.
         None => Err(refusal::error(
-            "no certificate in this document binds that hostname",
-            "no-certificate-held",
+            "no certificate in this document binds that hostname — it may be \
+             unavailable rather than absent",
+            refusal::RefusalReason::NoCertificateHeld,
         )),
     }
 }

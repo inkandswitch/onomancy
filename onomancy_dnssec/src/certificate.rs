@@ -595,19 +595,28 @@ mod tests {
     }
 
     /// The pin an external signer depends on: what `signable_bytes`
-    /// hands out must be exactly what `sign` would have signed.
+    /// hands out must be exactly what `sign` actually signed.
     ///
-    /// Both route through `Signed::signable_region`, so this cannot
-    /// drift without the shared function changing 2014 but it is asserted
-    /// anyway, because the requirement is not visible from either
-    /// call site and its violation would present as a bad key rather
-    /// than as a layout disagreement.
+    /// Checked through the **signature**, not by comparing two byte
+    /// strings. An earlier version of this test asserted
+    /// `signable_bytes(..) == sample().signed_bytes()`, and both sides
+    /// of that route through `Signed::signable_region` — so it was
+    /// `f(x) == f(x)` and passed even with `Signed::sign` mutated to
+    /// omit the tag from the region it signs. Verifying the real
+    /// signature over the offered bytes is the only form that reaches
+    /// `sign` at all.
     #[test]
     fn signable_bytes_are_what_sign_signs() {
         let key = SigningKey::from_bytes(&[2; 32]);
+        let signed = sample();
         let offered = Certificate::signable_bytes(&sample_params(), key.verifying_key());
 
-        assert_eq!(offered, sample().signed_bytes());
+        assert!(
+            key.verifying_key()
+                .verify_strict(&offered, signed.signed.signature())
+                .is_ok(),
+            "a signature made by `sign` must verify over what `signable_bytes` offers"
+        );
     }
 
     /// A certificate assembled from an outside signature is

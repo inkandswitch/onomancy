@@ -16,69 +16,148 @@
 //! evidence from a failure to obtain any.
 
 use js_sys::{Error, Reflect};
+use onomancy_dnssec::certificate::DecodeCertificateError;
 use onomancy_protocol::verifier::verdict::Rejection;
 use wasm_bindgen::JsValue;
 
+/// Why an operation was refused, as a type rather than a string.
+///
+/// A type because the previous shape kept the vocabulary in three
+/// places — the match arms, a hand-written `CODES` list, and the
+/// TypeScript union — and the tests compared only the second and
+/// third. Renaming an arm passed. Retargeting one passed. Now the
+/// arms produce values, `ALL` is the one list, and a code that no
+/// longer matches its declaration cannot be spelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RefusalReason {
+    /// The resolver was not reached. Retrying may work.
+    Transport,
+
+    /// DNS answered and carried no Onomancy record, or the document
+    /// holds no certificate for this hostname. Retrying cannot help;
+    /// absence is also never proof against a binding.
+    NoBinding,
+
+    /// This source holds no certificate for the document. Distinct
+    /// from `NoBinding` only in which lookup came up empty.
+    NoCertificateHeld,
+
+    /// The hostname is not a DNS name, or cannot sit under
+    /// `_onomancy`. The caller can see and fix this.
+    InvalidHostname,
+
+    /// The bytes are not a well-formed certificate: framing, a wrong
+    /// unit tag, or a non-canonical encoding. A wiring bug, not a
+    /// forgery — the usual cause is passing the wrong buffer.
+    Malformed,
+
+    /// The bytes are a well-formed certificate whose signature does
+    /// not verify. Deliberately NOT merged with `Malformed`: one is
+    /// "you sent me the wrong thing", the other is "someone altered
+    /// this", and they want opposite reactions.
+    InvalidSignature,
+
+    /// The certificate binds a hostname other than the one asked for.
+    HostnameMismatch,
+
+    /// Records arrived and failed validation from the trust anchors.
+    ChainRejected,
+
+    /// A fresh chain whose delegation path lacks the zone-attested
+    /// generation key: revocation working as designed.
+    GenerationOffPath,
+
+    /// Not a refusal at all, and deliberately **not** in [`Self::ALL`]
+    /// or in the published union.
+    ///
+    /// A deferral is a grade, returned as a value by both entry
+    /// points. It reaches this type only if a future path renders a
+    /// grade as a refusal — a bug. Publishing a code for it would
+    /// oblige every consumer to handle a case that cannot legitimately
+    /// occur, so it emits an undeclared string instead, which lands in
+    /// a `switch` default where an impossible value belongs.
+    NotARefusal,
+}
+
+impl RefusalReason {
+    /// Every code this module can emit.
+    ///
+    /// Adding a variant without adding it here is caught by
+    /// `all_lists_every_variant`, which matches exhaustively.
+    pub const ALL: &'static [Self] = &[
+        Self::Transport,
+        Self::NoBinding,
+        Self::NoCertificateHeld,
+        Self::InvalidHostname,
+        Self::Malformed,
+        Self::InvalidSignature,
+        Self::HostnameMismatch,
+        Self::ChainRejected,
+        Self::GenerationOffPath,
+    ];
+
+    /// The wire spelling, which is API and must not be reworded.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Transport => "transport",
+            Self::NoBinding => "no-binding",
+            Self::NoCertificateHeld => "no-certificate-held",
+            Self::InvalidHostname => "invalid-hostname",
+            Self::Malformed => "malformed",
+            Self::InvalidSignature => "invalid-signature",
+            Self::HostnameMismatch => "hostname-mismatch",
+            Self::ChainRejected => "chain-rejected",
+            Self::GenerationOffPath => "generation-off-path",
+            Self::NotARefusal => "deferred",
+        }
+    }
+}
+
 /// Build a refusal carrying both a human message and a stable code.
 #[must_use]
-pub fn error(message: &str, reason: &str) -> JsValue {
+pub fn error(message: &str, reason: RefusalReason) -> JsValue {
     let error = Error::new(message);
 
     // Reflect::set on a fresh Error cannot fail.
     drop(Reflect::set(
         &error,
         &JsValue::from_str("reason"),
-        &JsValue::from_str(reason),
+        &JsValue::from_str(reason.as_str()),
     ));
 
     error.into()
 }
 
-/// The stable code for a rejection.
+/// The code for a certificate rejection.
 ///
 /// Kept beside [`crate::verify::rejection_message`] deliberately: the
 /// prose may be reworded freely, the code may not, and having them
 /// adjacent makes that asymmetry visible when either is edited.
 #[must_use]
-pub const fn reason(rejection: &Rejection) -> &'static str {
+pub const fn reason(rejection: &Rejection) -> RefusalReason {
     match rejection {
-        Rejection::ChainRejected => "chain-rejected",
-        Rejection::Decode(_) => "decode",
-        Rejection::GenerationOffPath => "generation-off-path",
-        Rejection::HostnameMismatch { .. } => "hostname-mismatch",
+        Rejection::ChainRejected => RefusalReason::ChainRejected,
+        Rejection::GenerationOffPath => RefusalReason::GenerationOffPath,
+        Rejection::HostnameMismatch { .. } => RefusalReason::HostnameMismatch,
 
-        // Unreachable by construction: a deferral is a *grade*,
-        // intercepted by both callers and returned as a value, so it
-        // never becomes a refusal. Deliberately absent from the
-        // published `RefusalReason` union — a consumer must never
-        // have to handle it — and asserted below rather than trusted
-        // to this comment.
-        Rejection::Deferred(_) => DEFERRED_IS_A_GRADE,
+        // A signature that does not verify is a different event from
+        // bytes that were never a certificate, and only one of them
+        // is a security signal.
+        Rejection::Decode(DecodeCertificateError::Malformed(malformed)) => match malformed {
+            onomancy_core::signed::payload::Malformed::InvalidSignature => {
+                RefusalReason::InvalidSignature
+            }
+            onomancy_core::signed::payload::Malformed::WrongTag { .. } => RefusalReason::Malformed,
+        },
+        Rejection::Decode(_) => RefusalReason::Malformed,
+
+        // Unreachable by construction: intercepted by both callers
+        // and returned as a grade. Mapping it to a real code would
+        // mislabel an impossible case as a real one.
+        Rejection::Deferred(_) => RefusalReason::NotARefusal,
     }
 }
-
-/// The non-code for a deferral. Never published, never a member of
-/// `RefusalReason`; see [`reason`].
-pub(crate) const DEFERRED_IS_A_GRADE: &str = "deferred";
-
-/// Every code this module can put on a thrown error.
-///
-/// This list and the published `RefusalReason` union are two
-/// spellings of one contract in two languages, and nothing else keeps
-/// them aligned — a Rust arm added without its TypeScript member
-/// would reach consumers as a value their compiler rejects.
-#[cfg_attr(not(test), allow(dead_code))] // half of a contract the tests check
-pub(crate) const CODES: &[&str] = &[
-    "chain-rejected",
-    "decode",
-    "generation-off-path",
-    "hostname-mismatch",
-    "invalid-hostname",
-    "no-binding",
-    "no-certificate-held",
-    "transport",
-];
-
 /// The stable code for a failed live walk.
 ///
 /// Split by **what a caller should do about it**, which is the only
@@ -99,49 +178,51 @@ pub(crate) const CODES: &[&str] = &[
 /// over an unbound name is the failure this exists to prevent.
 #[cfg(feature = "doh")]
 #[must_use]
-pub const fn walk_reason(error: &crate::doh::FetchChainError) -> &'static str {
+pub const fn walk_reason(error: &crate::doh::FetchChainError) -> RefusalReason {
     use crate::doh::FetchChainError;
     use onomancy_chain::builder::BuildError;
 
     match error {
-        FetchChainError::Transport(_) => "transport",
+        FetchChainError::Transport(_) => RefusalReason::Transport,
 
         // DNS answered and carried no Onomancy record.
-        FetchChainError::Build(BuildError::MissingRrset { .. }) => "no-binding",
+        FetchChainError::Build(BuildError::MissingRrset { .. }) => RefusalReason::NoBinding,
 
         // A name too long to sit under `_onomancy` is the caller's to
         // fix and is visible to them. Reporting it as a chain
         // rejection would claim a security failure over a typo — the
         // wrong-remedy bug this module exists to prevent, and what a
         // `_` arm here did until it was enumerated.
-        FetchChainError::Build(BuildError::UnrepresentableName(_)) => "invalid-hostname",
+        FetchChainError::Build(BuildError::UnrepresentableName(_)) => {
+            RefusalReason::InvalidHostname
+        }
 
         // Answers arrived and could not be framed into a chain.
         FetchChainError::Build(
             BuildError::Encode(_) | BuildError::OversizeChain { .. } | BuildError::TooManyCnames,
-        ) => "chain-rejected",
+        ) => RefusalReason::ChainRejected,
     }
 }
 
-/// The stable code for a chain that was fetched but did not validate.
+/// The code for a chain that was fetched but did not validate.
 ///
-/// An absent leaf is `no-binding` rather than a rejection: the chain
+/// An absent leaf is `NoBinding` rather than a rejection: the chain
 /// was well-formed and proved nothing, which is the unbound case
 /// arriving one stage later than [`walk_reason`] catches it.
 ///
 /// Spelled out rather than wildcarded on purpose. A new `WalkError`
-/// variant would inherit `chain-rejected` silently under a `_` arm —
+/// variant would inherit `ChainRejected` silently under a `_` arm —
 /// a correct mapping falsified by a change elsewhere, which is the
-/// failure this codebase has now met twice. Exhaustiveness turns that
-/// into a compile error at the site that must choose.
+/// failure this codebase has met repeatedly. Exhaustiveness turns
+/// that into a compile error at the site that must choose.
 #[cfg(feature = "doh")]
 #[must_use]
-pub const fn validation_reason(error: &onomancy_dnssec::validator::WalkError) -> &'static str {
+pub const fn validation_reason(error: &onomancy_dnssec::validator::WalkError) -> RefusalReason {
     use onomancy_dnssec::validator::WalkError;
 
     match error {
         // DNS answered; nothing was proven.
-        WalkError::Empty | WalkError::MissingLeaf => "no-binding",
+        WalkError::Empty | WalkError::MissingLeaf => RefusalReason::NoBinding,
 
         // Records arrived and failed to hold up: a security signal.
         WalkError::DsMismatch
@@ -156,58 +237,167 @@ pub const fn validation_reason(error: &onomancy_dnssec::validator::WalkError) ->
         | WalkError::UnexpectedLink { .. }
         | WalkError::Verify(_)
         | WalkError::WildcardExpansion
-        | WalkError::WrongOwner => "chain-rejected",
+        | WalkError::WrongOwner => RefusalReason::ChainRejected,
     }
 }
 
 #[cfg(all(test, feature = "doh"))]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use onomancy_dnssec::validator::WalkError;
+
+    /// Adding a variant makes this fail to compile until it is
+    /// listed, which is what keeps `ALL` honest without a macro.
+    #[test]
+    fn all_lists_every_publishable_variant() {
+        for reason in RefusalReason::ALL {
+            match reason {
+                RefusalReason::Transport
+                | RefusalReason::NoBinding
+                | RefusalReason::NoCertificateHeld
+                | RefusalReason::InvalidHostname
+                | RefusalReason::Malformed
+                | RefusalReason::InvalidSignature
+                | RefusalReason::HostnameMismatch
+                | RefusalReason::ChainRejected
+                | RefusalReason::GenerationOffPath => {}
+
+                RefusalReason::NotARefusal => {
+                    panic!("a non-refusal must not be published in ALL")
+                }
+            }
+        }
+
+        assert_eq!(RefusalReason::ALL.len(), 9);
+    }
 
     /// The pair that shares a remedy boundary: one is worth retrying
     /// and the other never is, so they must never collapse together.
     #[test]
     fn absence_and_unreachability_are_different_reasons() {
-        let absent = validation_reason(&WalkError::MissingLeaf);
         let unreachable = walk_reason(&crate::doh::FetchChainError::Transport(
             crate::doh::DohError::NoFetch,
         ));
+        let absent = walk_reason(&crate::doh::FetchChainError::Build(
+            onomancy_chain::builder::BuildError::MissingRrset {
+                owner: String::from("_onomancy.example.com"),
+                rtype: hickory_proto::rr::RecordType::TXT,
+            },
+        ));
 
-        assert_eq!(absent, "no-binding");
-        assert_eq!(unreachable, "transport");
-        assert_ne!(absent, unreachable);
+        assert_eq!(unreachable, RefusalReason::Transport);
+        assert_eq!(absent, RefusalReason::NoBinding);
+        assert_ne!(unreachable, absent);
+    }
+
+    /// A name that cannot sit under `_onomancy` is the caller's to
+    /// fix. Reporting it as a chain rejection would claim a security
+    /// failure over a typo — the regression this arm was enumerated
+    /// to prevent, asserted rather than left to the comment.
+    #[test]
+    fn an_unrepresentable_name_is_the_callers_fault_not_a_security_signal() {
+        let too_long = onomancy_chain::builder::BuildError::UnrepresentableName(
+            hickory_proto::ProtoError::from("name too long"),
+        );
+
+        assert_eq!(
+            walk_reason(&crate::doh::FetchChainError::Build(too_long)),
+            RefusalReason::InvalidHostname
+        );
     }
 
     /// An empty chain is the unbound case, not a security signal:
     /// nothing arrived to be suspicious of.
     #[test]
     fn an_empty_chain_is_not_a_security_signal() {
-        assert_eq!(validation_reason(&WalkError::Empty), "no-binding");
+        assert_eq!(
+            validation_reason(&WalkError::Empty),
+            RefusalReason::NoBinding
+        );
+        assert_eq!(
+            validation_reason(&WalkError::MissingLeaf),
+            RefusalReason::NoBinding
+        );
     }
 
     /// Evidence that arrived and failed is a security signal, and
     /// must not be reported as mere absence.
     #[test]
     fn a_failed_signature_is_a_security_signal() {
-        assert_eq!(validation_reason(&WalkError::Unanchored), "chain-rejected");
-        assert_eq!(validation_reason(&WalkError::DsMismatch), "chain-rejected");
+        for failure in [
+            WalkError::Unanchored,
+            WalkError::DsMismatch,
+            WalkError::NoUsableSignature,
+            WalkError::SignerMismatch,
+            WalkError::WrongOwner,
+        ] {
+            assert_eq!(
+                validation_reason(&failure),
+                RefusalReason::ChainRejected,
+                "{failure:?} must read as a security signal"
+            );
+        }
     }
-}
 
-#[cfg(test)]
-#[allow(clippy::expect_used)]
-mod contract {
-    use super::*;
+    /// Wrong bytes and altered bytes are different events. Merging
+    /// them tells a caller with a wiring bug that they may be under
+    /// attack, and a caller under attack that they mistyped.
+    #[test]
+    fn a_bad_signature_is_not_the_same_as_the_wrong_buffer() {
+        use onomancy_core::signed::payload::Malformed;
 
-    /// The members of the published `RefusalReason` union.
-    ///
-    /// Parsed from the quoted strings only: the union carries comment
-    /// lines, and a substring search over the whole file would also
-    /// match members of *other* unions — `"deferred"` appears in
-    /// `Freshness`, which is exactly the confusion this avoids.
-    fn declared() -> Vec<&'static str> {
+        let altered = Rejection::Decode(DecodeCertificateError::Malformed(
+            Malformed::InvalidSignature,
+        ));
+        let wrong_thing =
+            Rejection::Decode(DecodeCertificateError::Malformed(Malformed::WrongTag {
+                expected: *b"ONC\x00",
+                got: *b"ONR\x00",
+            }));
+
+        assert_eq!(reason(&altered), RefusalReason::InvalidSignature);
+        assert_eq!(reason(&wrong_thing), RefusalReason::Malformed);
+        assert_ne!(reason(&altered), reason(&wrong_thing));
+    }
+
+    /// Every code Rust can emit must be declared to TypeScript, and
+    /// every declared member must be reachable. Two spellings of one
+    /// contract in two languages, with nothing else keeping them
+    /// aligned.
+    #[test]
+    fn the_declared_union_matches_the_emitted_codes() {
+        let declared = declared_union();
+
+        for reason in RefusalReason::ALL {
+            assert!(
+                declared.contains(&reason.as_str()),
+                "`{}` is emitted by Rust but absent from RefusalReason",
+                reason.as_str()
+            );
+        }
+
+        for member in &declared {
+            assert!(
+                RefusalReason::ALL.iter().any(|r| r.as_str() == *member),
+                "`{member}` is declared to TypeScript but no Rust path emits it"
+            );
+        }
+    }
+
+    /// A grade must stay out of the refusal union: publishing it
+    /// would make consumers handle a case only a bug could produce.
+    #[test]
+    fn a_grade_is_not_a_declared_refusal() {
+        assert!(!declared_union().contains(&RefusalReason::NotARefusal.as_str()));
+    }
+
+    /// The members of the published union, by quoted string only —
+    /// the block carries comments, and a substring search over the
+    /// whole file would also match *other* unions (`"deferred"`
+    /// appears in `Freshness`, which is exactly the confusion this
+    /// avoids).
+    fn declared_union() -> Vec<&'static str> {
         let after = crate::shapes::TYPES
             .split("export type RefusalReason =")
             .nth(1)
@@ -226,43 +416,5 @@ mod contract {
                 rest.get(..closing)
             })
             .collect()
-    }
-
-    /// Every code Rust can emit must be a member of the union
-    /// TypeScript is given.
-    ///
-    /// These are one contract written twice in two languages, which
-    /// is the shape that goes stale: a new Rust arm would reach
-    /// consumers as a string their compiler rejects, and nothing in
-    /// either language would notice.
-    #[test]
-    fn every_code_is_declared() {
-        for code in CODES {
-            assert!(
-                declared().contains(code),
-                "`{code}` is emitted by Rust but absent from the RefusalReason union"
-            );
-        }
-    }
-
-    /// And the converse: a declared member no Rust path emits is a
-    /// case consumers write dead handlers for.
-    #[test]
-    fn every_declared_member_is_reachable() {
-        for member in declared() {
-            assert!(
-                CODES.contains(&member),
-                "`{member}` is declared to TypeScript but no Rust path emits it"
-            );
-        }
-    }
-
-    /// A deferral is a grade, so its non-code must stay out of *this*
-    /// union: publishing it would make consumers handle a case only a
-    /// bug could produce.
-    #[test]
-    fn deferred_is_not_a_refusal_reason() {
-        assert!(!CODES.contains(&DEFERRED_IS_A_GRADE));
-        assert!(!declared().contains(&DEFERRED_IS_A_GRADE));
     }
 }

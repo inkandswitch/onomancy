@@ -151,7 +151,10 @@
           '';
 
           ci-wasm = mkCheck "ci-wasm" ''
-            cargo check --target wasm32-unknown-unknown -p onomancy_wasm
+            # --tests so the wasm-only test targets are COMPILE-checked
+            # here in seconds. ci-browser executes them; this catches a
+            # broken test file without waiting for a browser to start.
+            cargo check --target wasm32-unknown-unknown -p onomancy_wasm --tests
             cargo check --target wasm32-unknown-unknown --no-default-features \
               -p onomancy_core -p onomancy_protocol -p onomancy_dnssec
           '';
