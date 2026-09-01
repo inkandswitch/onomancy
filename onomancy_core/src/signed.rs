@@ -81,14 +81,60 @@ impl<P: Payload> Signed<P> {
     /// payload from the signing key's verifying key, so a
     /// payload-vs-key mismatch is unrepresentable at the public API.
     pub fn sign(payload: P, key: &SigningKey) -> Self {
-        let mut region = Vec::new();
-        region.extend_from_slice(&P::TAG);
-        payload.encode_fields(&mut region);
+        let region = Self::signable_region(&payload);
 
         Self {
             signature: key.sign(&region),
             payload,
         }
+    }
+
+    /// The bytes a signature must cover, for a payload not yet signed.
+    ///
+    /// This exists so a holder of the signing key can produce the
+    /// signature **outside** this crate — a browser signing with a key
+    /// its runtime already holds, where handing the key to a
+    /// serializer would be the one thing worth avoiding.
+    ///
+    /// Shares its body with [`Self::sign`] and [`Self::signed_region`]
+    /// deliberately. The three must agree byte for byte or every
+    /// externally-signed unit verifies nowhere, and the failure would
+    /// present as a bad key rather than as a layout disagreement.
+    /// Calling one function is a stronger guarantee than testing three
+    /// for equality.
+    #[must_use]
+    pub fn signable_region(payload: &P) -> Vec<u8> {
+        let mut region = Vec::new();
+        region.extend_from_slice(&P::TAG);
+        payload.encode_fields(&mut region);
+
+        region
+    }
+
+    /// Assemble from a payload and a signature produced elsewhere.
+    ///
+    /// The verifying key is **not** a parameter: [`Payload::signer`]
+    /// already carries it, and accepting a second copy would allow a
+    /// disagreement between them that has no correct resolution.
+    ///
+    /// The signature is verified here rather than trusted. Every
+    /// `Signed` in this crate holds a signature that validated over
+    /// its own bytes — [`Self::decode_from`] maintains it on the way
+    /// in — and a constructor that skipped the check would make the
+    /// type's central invariant conditional on who built the value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Malformed::InvalidSignature`] when the signature does
+    /// not verify under the payload's own signer.
+    pub fn try_from_parts(payload: P, signature: Signature) -> Result<Self, Malformed> {
+        let region = Self::signable_region(&payload);
+
+        if payload.signer().verify_strict(&region, &signature).is_err() {
+            return Err(Malformed::InvalidSignature);
+        }
+
+        Ok(Self { payload, signature })
     }
 
     /// Append the canonical signed skeleton (tag, fields, signature).
@@ -102,10 +148,7 @@ impl<P: Payload> Signed<P> {
     /// target.
     #[must_use]
     pub fn signed_region(&self) -> Vec<u8> {
-        let mut region = Vec::new();
-        region.extend_from_slice(&P::TAG);
-        self.payload.encode_fields(&mut region);
-        region
+        Self::signable_region(&self.payload)
     }
 
     /// The signature-checked fields.

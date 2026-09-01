@@ -53,6 +53,14 @@ export interface Verdict {
 /** The result of a live DNSSEC walk. */
 export interface Resolution {
   hostname: string;
+  /**
+   * The validated chain, framed as a certificate embeds it.
+   *
+   * A certificate must carry its own chain, and this call is the only
+   * thing that fetched one 2014 so minting from a browser needs these
+   * bytes. Pass straight to `encodeCertificate`.
+   */
+  chain: Uint8Array;
   /** Links in the validated chain, root KSK to leaf. */
   links: number;
   /** The proven TXT records, as published. */

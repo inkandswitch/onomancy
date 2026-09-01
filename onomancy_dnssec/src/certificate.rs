@@ -50,7 +50,7 @@ pub mod binding;
 
 use alloc::vec::Vec;
 use core::hash::{Hash, Hasher};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 
 use self::binding::Binding;
 use crate::chain::DnssecChain;
@@ -127,31 +127,18 @@ impl Certificate {
     /// Returns [`OversizeUnit`] when the unit would exceed the 1 MiB
     /// cap — encoders MUST NOT build units their own decoders reject.
     pub fn sign(params: CertificateParams, signer: &SigningKey) -> Result<Self, OversizeUnit> {
+        // Routed through the same builder as `signable_bytes`, so the
+        // two signing paths cannot disagree about what gets signed.
+        let binding = Self::binding(&params, signer.verifying_key());
+
         let CertificateParams {
-            root_doc,
-            issued_at,
-            hostname,
-            mut heads,
-            predecessor,
             delegation_chain,
             lineage,
             chain,
+            ..
         } = params;
 
-        heads.sort_unstable();
-        heads.dedup();
-
-        let signed_unit = Signed::sign(
-            Binding::new(
-                root_doc,
-                signer.verifying_key(),
-                issued_at,
-                hostname,
-                heads,
-                predecessor,
-            ),
-            signer,
-        );
+        let signed_unit = Signed::sign(binding, signer);
 
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);
@@ -165,6 +152,89 @@ impl Certificate {
             lineage,
             chain,
         })
+    }
+
+    /// The bytes a signature must cover, for a certificate not yet
+    /// signed.
+    ///
+    /// The counterpart to [`Self::from_parts`], and the pair exists so
+    /// a signer that is not this process can mint a certificate: the
+    /// Keyhive document root key is destroyed at creation, so the only
+    /// admin key able to sign lives wherever that document's runtime
+    /// keeps it. Handing that key to a serializer to avoid a two-step
+    /// API would trade the property worth having for a convenience.
+    ///
+    /// `signer` is supplied rather than derived because there is no
+    /// signing key here to derive it from — that is the point.
+    ///
+    /// Guaranteed equal to the signed region of the certificate that
+    /// [`Self::sign`] would have produced from the same parameters:
+    /// both route through [`Signed::signable_region`].
+    #[must_use]
+    pub fn signable_bytes(params: &CertificateParams, signer: VerifyingKey) -> Vec<u8> {
+        Signed::<Binding>::signable_region(&Self::binding(params, signer))
+    }
+
+    /// Assemble from parameters and a signature produced elsewhere.
+    ///
+    /// The attached region — carriage, lineage, DNSSEC chain — is
+    /// **not** validated here. Attachments are unsigned evidence and
+    /// the verifier judges them; a second judge at assembly time could
+    /// only disagree with the first, and a certificate refused at
+    /// birth for a reason the verifier would have accepted is worse
+    /// than one that fails loudly where the judging happens.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AssembleError::InvalidSignature`] when the signature
+    /// does not cover [`Self::signable_bytes`] under `signer`, and
+    /// [`AssembleError::Oversize`] when the assembled unit exceeds the
+    /// cap.
+    pub fn from_parts(
+        params: CertificateParams,
+        signer: VerifyingKey,
+        signature: Signature,
+    ) -> Result<Self, AssembleError> {
+        let binding = Self::binding(&params, signer);
+
+        let CertificateParams {
+            delegation_chain,
+            lineage,
+            chain,
+            ..
+        } = params;
+
+        let signed_unit = Signed::try_from_parts(binding, signature)
+            .map_err(|_| AssembleError::InvalidSignature)?;
+
+        let mut bytes = Vec::new();
+        signed_unit.encode_into(&mut bytes);
+        encode_attached(&mut bytes, &delegation_chain, &lineage, &chain);
+        wire::check_unit_len(bytes.len())?;
+
+        Ok(Self {
+            digest: Digest::hash(&bytes),
+            signed: signed_unit,
+            delegation_chain,
+            lineage,
+            chain,
+        })
+    }
+
+    /// The signed payload, built identically for both signing routes.
+    fn binding(params: &CertificateParams, signer: VerifyingKey) -> Binding {
+        let mut heads = params.heads.clone();
+        heads.sort_unstable();
+        heads.dedup();
+
+        Binding::new(
+            params.root_doc,
+            signer,
+            params.issued_at,
+            params.hostname.clone(),
+            heads,
+            params.predecessor.clone(),
+        )
     }
 
     /// Rederive the canonical wire bytes: `encode(decode(b)) = b`.
@@ -450,12 +520,32 @@ pub enum DecodeCertificateError {
     Wire(#[from] WireError),
 }
 
+/// Assembling a certificate from an externally-produced signature
+/// failed.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+pub enum AssembleError {
+    /// The signature does not cover
+    /// [`Certificate::signable_bytes`] under the supplied signer.
+    ///
+    /// The likely causes are signing the wrong bytes, or a signer that
+    /// is not the one named in the parameters — the two are worth
+    /// distinguishing in a caller's own diagnostics, because the first
+    /// is a wiring bug and the second is an authority one.
+    #[error("signature does not cover the certificate's signed region under the given signer")]
+    InvalidSignature,
+
+    /// The assembled unit would exceed the cap.
+    #[error(transparent)]
+    Oversize(#[from] OversizeUnit),
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::txt::generation_key::GenerationKey;
     use alloc::vec;
+    use ed25519_dalek::Signer as _;
     use onomancy_core::delegation_chain::SignedDelegationBytes;
 
     fn doc(seed: u8) -> DocAnchor {
@@ -502,6 +592,54 @@ mod tests {
     fn sample() -> Certificate {
         Certificate::sign(sample_params(), &SigningKey::from_bytes(&[2; 32]))
             .expect("under the unit cap")
+    }
+
+    /// The pin an external signer depends on: what `signable_bytes`
+    /// hands out must be exactly what `sign` would have signed.
+    ///
+    /// Both route through `Signed::signable_region`, so this cannot
+    /// drift without the shared function changing 2014 but it is asserted
+    /// anyway, because the requirement is not visible from either
+    /// call site and its violation would present as a bad key rather
+    /// than as a layout disagreement.
+    #[test]
+    fn signable_bytes_are_what_sign_signs() {
+        let key = SigningKey::from_bytes(&[2; 32]);
+        let offered = Certificate::signable_bytes(&sample_params(), key.verifying_key());
+
+        assert_eq!(offered, sample().signed_bytes());
+    }
+
+    /// A certificate assembled from an outside signature is
+    /// byte-identical to one signed in process.
+    #[test]
+    fn external_signing_reaches_the_same_certificate() {
+        let key = SigningKey::from_bytes(&[2; 32]);
+        let signature = key.sign(&Certificate::signable_bytes(
+            &sample_params(),
+            key.verifying_key(),
+        ));
+
+        let assembled = Certificate::from_parts(sample_params(), key.verifying_key(), signature)
+            .expect("a valid signature assembles");
+
+        assert_eq!(assembled.encode(), sample().encode());
+    }
+
+    /// And the invariant holds: a `Signed` never carries a signature
+    /// that does not verify, whoever produced it.
+    #[test]
+    fn a_wrong_signature_is_refused_at_assembly() {
+        let key = SigningKey::from_bytes(&[2; 32]);
+        let wrong = SigningKey::from_bytes(&[8; 32]).sign(&Certificate::signable_bytes(
+            &sample_params(),
+            key.verifying_key(),
+        ));
+
+        assert!(matches!(
+            Certificate::from_parts(sample_params(), key.verifying_key(), wrong),
+            Err(AssembleError::InvalidSignature)
+        ));
     }
 
     #[test]

@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 automerge = { workspace = true, optional = true }
 console_error_panic_hook = { workspace = true }
-ed25519-dalek = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true }
 # Seed minting + automerge's RNG; the `wasm_js` feature unlocks the
 # backend that .cargo/config.toml's `getrandom_backend` cfg selects.
 getrandom = { workspace = true, features = ["wasm_js"], optional = true }
@@ -57,7 +57,6 @@ wasm-bindgen-test = "=0.3.71"
 default = ["doh", "names"]
 names = [
   "dep:automerge",
-  "dep:ed25519-dalek",
   "dep:getrandom",
   "dep:onomancy_automerge",
   "std",

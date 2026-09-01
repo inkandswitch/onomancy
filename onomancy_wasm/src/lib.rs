@@ -14,6 +14,7 @@ pub mod text;
 pub mod doh;
 #[cfg(feature = "names")]
 pub mod held;
+pub mod issue;
 pub mod name;
 #[cfg(feature = "doh")]
 pub mod resolve;

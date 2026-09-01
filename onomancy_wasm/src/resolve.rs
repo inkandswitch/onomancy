@@ -1,7 +1,7 @@
 //! The live-resolution JS export: fetch, validate, and grade a
 //! hostname's Onomancy binding in one call.
 
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, Object, Reflect, Uint8Array};
 use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
     chain_provider::ChainProvider, dns_name::DnsName, freshness::Grade, validator::Validator,
@@ -111,7 +111,17 @@ pub async fn resolve_hostname(
         &seconds(proof.window.expiration()),
     ));
 
+    // The validated chain itself, framed exactly as
+    // `CertificateParams.chain` consumes it. Returned because a
+    // certificate must EMBED its chain, and this call is the only
+    // thing that fetched one: reporting a link count while dropping
+    // the bytes left a browser able to verify a binding and unable to
+    // mint one.
+    let mut framed = Vec::new();
+    chain.write_framed(&mut framed);
+
     set("hostname", &JsValue::from_str(hostname.as_str()));
+    set("chain", &Uint8Array::from(framed.as_slice()).into());
     set("links", &JsValue::from_f64(links.into()));
     set("freshness", &JsValue::from_str(freshness));
     set("records", &records.into());
