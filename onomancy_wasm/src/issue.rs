@@ -31,7 +31,7 @@ use onomancy_dnssec::{
     chain::DnssecChain,
     dns_name::DnsName,
 };
-use wasm_bindgen::{JsError, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsError};
 
 use crate::{
     clock,

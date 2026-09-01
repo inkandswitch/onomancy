@@ -58,7 +58,7 @@ use onomancy_core::{
     anchor::doc::{DocAnchor, Head},
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
-    signed::{Signed, payload::Malformed},
+    signed::{payload::Malformed, Signed},
     time::UnixSeconds,
     wire::{self, OversizeUnit, Reader, WireError},
 };
@@ -576,15 +576,13 @@ mod tests {
                 0xAA;
                 9
             ])]),
-            lineage: vec![
-                RotationStatement::sign(
-                    &doc(1),
-                    &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
-                    &SigningKey::from_bytes(&[7; 32]),
-                    DelegationChain::default(),
-                )
-                .expect("under the unit cap"),
-            ],
+            lineage: vec![RotationStatement::sign(
+                &doc(1),
+                &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
+                &SigningKey::from_bytes(&[7; 32]),
+                DelegationChain::default(),
+            )
+            .expect("under the unit cap")],
             chain: DnssecChain::from(vec![vec![0xBB; 17].into()]),
         }
     }

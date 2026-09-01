@@ -35,7 +35,7 @@ use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::verdict::{
     self, DeferredEvidence, GenerationCheck, Rejection, Verdict,
 };
-use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast as _, JsError, JsValue};
 
 // Reading a certificate OUT OF a document needs the document
 // substrate; verifying bytes does not. Only the former is gated.
