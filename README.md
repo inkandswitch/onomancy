@@ -37,7 +37,7 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 | [`onomancy_keyhive`](./onomancy_keyhive)     | Keyhive authority verification: delegation-chain replay behind `AuthorityVerifier`     |
 | [`onomancy_hickory`](./onomancy_hickory)     | Host chain courier: stub DNS transport driving the chain builder                       |
 | [`onomancy_wasm`](./onomancy_wasm)           | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
-| [`onomancer`](./onomancer)                   | The agent (binary): keygen · record · resolve                                          |
+| [`onomancer`](./onomancer)                   | The agent (binary): resolve · name · keygen · vouch · bind · refresh · rotate · migrate · record · watch |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
 
@@ -61,7 +61,7 @@ graph TD
         wasm["onomancy_wasm<br/><i>browser bindings · DoH fetch</i>"]
     end
 
-    onomancer["onomancer (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
+    onomancer["onomancer (binary)<br/><i>resolve · name · keygen · vouch · bind<br/>refresh · rotate · migrate · record · watch</i>"]
 
     dnssec --> core
     proto --> dnssec

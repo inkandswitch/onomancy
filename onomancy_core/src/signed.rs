@@ -79,33 +79,30 @@ impl<P: Payload> Signed<P> {
 
     /// Sign a payload with the key the payload names.
     ///
-    /// # Panics
-    ///
-    /// Debug builds assert that `key` is the payload's own signer.
-    /// Signing with any other key yields a `Signed` whose signature
-    /// does not verify — it would encode, and then fail at every
-    /// decoder, presenting as corruption rather than as the caller
-    /// error it is.
+    /// Routed through [`Self::try_from_parts`], so this constructor
+    /// upholds the same invariant the external-signing path does: a
+    /// `Signed` never carries a signature that does not verify under
+    /// its payload's own signer. Previously this was a debug-only
+    /// assertion, which made the in-process path the one route that
+    /// could break the invariant in a release build — the artifact
+    /// would encode, then fail at every decoder, presenting as
+    /// corruption rather than as the caller error it is.
     ///
     /// Every unit constructor in the workspace derives the payload's
-    /// signer field from this key, so the two agree by construction
-    /// and the assertion is unreachable from them. It is here because
-    /// the function is `pub` — `onomancy_dnssec` needs it — and the
-    /// tie was previously stated in a doc comment that called this
-    /// "crate-internal", which it is not.
-    pub fn sign(payload: P, key: &SigningKey) -> Self {
-        debug_assert_eq!(
-            *payload.signer(),
-            key.verifying_key(),
-            "a payload must be signed by the key it names as its signer"
-        );
+    /// signer field from this key, so the error is unreachable from
+    /// them. The check is here because the function is `pub` —
+    /// `onomancy_dnssec` needs it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Malformed::InvalidSignature`] when the produced
+    /// signature does not verify under [`Payload::signer`] — which,
+    /// from this constructor, means exactly one thing: `key` is not
+    /// the key the payload names as its signer.
+    pub fn sign(payload: P, key: &SigningKey) -> Result<Self, Malformed> {
+        let signature = key.sign(&Self::signable_region(&payload));
 
-        let region = Self::signable_region(&payload);
-
-        Self {
-            signature: key.sign(&region),
-            payload,
-        }
+        Self::try_from_parts(payload, signature)
     }
 
     /// The bytes a signature must cover, for a payload not yet signed.
@@ -140,8 +137,8 @@ impl<P: Payload> Signed<P> {
     /// constructor cannot be the one that breaks the type's central
     /// property: a `Signed` holds a signature that validates over its
     /// own bytes. [`Self::decode_from`] maintains it on the way in,
-    /// and [`Self::sign`] maintains it whenever the key matches the
-    /// payload's signer, which it asserts in debug builds.
+    /// and [`Self::sign`] maintains it by routing through this
+    /// function.
     ///
     /// # Errors
     ///

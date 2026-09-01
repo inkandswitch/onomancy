@@ -181,6 +181,22 @@ fn derive_host<A: AuthorityVerifier>(
             .filter(|r| !excluded.contains(&r.hash))
             .filter(|r| !is_deferred(r, now))
             .collect();
+
+        // Both directions or nothing (B14): a bare chain refresh is
+        // the zone's word alone, so it corroborates a document some
+        // certificate record already attests for this hostname — it
+        // never makes a document a candidate by itself. Judged after
+        // exclusion: a reset that clears a document's certificates
+        // clears its refreshes' standing with them.
+        let corroborated: Set<DocAnchor> = records
+            .iter()
+            .filter(|r| r.attestation == Attestation::Certificate)
+            .map(|r| r.document)
+            .collect();
+        records.retain(|r| {
+            r.attestation == Attestation::Certificate || corroborated.contains(&r.document)
+        });
+
         // Deterministic evaluation order regardless of store order.
         records.sort_unstable_by_key(|r| (r.document, r.key, r.hash));
         records
@@ -302,6 +318,8 @@ struct Evidence {
 /// One validated binding record's derivation-relevant facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BindingEvidence {
+    /// What vouches for this record's document (B14).
+    pub(crate) attestation: Attestation,
     pub(crate) document: DocAnchor,
     pub(crate) generation: GenerationKey,
     pub(crate) hash: Digest<Blake3, [u8]>,
@@ -310,6 +328,25 @@ pub(crate) struct BindingEvidence {
     /// Whether the delegation chain lies on the delegation path for the attested `g=` (D10).
     pub(crate) generation_on_path: bool,
     pub(crate) window: ValidityWindow,
+}
+
+/// What vouches for a binding record's document.
+///
+/// A binding needs both directions (dns-anchor, Verification): the
+/// zone's TXT record names the document, and the certificate proves
+/// the document accepts the hostname. A record extracted from a bare
+/// chain refresh carries the zone's word only — it corroborates a
+/// document some certificate record already attests, and MUST NOT
+/// make a document a candidate on its own (binding-cache B14).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Attestation {
+    /// Extracted from a validated certificate: signature verified,
+    /// signer authorized, TXT cross-checked, D10 judged against the
+    /// certificate's own carriage.
+    Certificate,
+
+    /// Extracted from a bare chain refresh: the zone direction only.
+    ChainOnly,
 }
 
 /// Extraction provenance for a carried statement: excluded only when
@@ -419,12 +456,15 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                     continue;
                 };
 
-                // A bare refresh proves the whole RRset: each record
-                // is candidate evidence (dual-publish carries several
-                // documents); the ladder selects downstream.
+                // A bare refresh proves the whole RRset. Each record
+                // is CORROBORATING evidence, never candidacy: the
+                // zone's word is one direction, and stage 2 drops
+                // refresh records whose document no surviving
+                // certificate record attests (B14).
                 evidence
                     .records
                     .extend(records.iter().map(|record| BindingEvidence {
+                        attestation: Attestation::ChainOnly,
                         document: *record.document(),
                         generation: *record.generation(),
                         hash,
@@ -436,8 +476,10 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                             // equal-serial certificate items.
                             issued_at: UnixSeconds::from(0),
                         },
-                        // No delegation chain to check: D10 is a
-                        // certificate rule.
+                        // No carriage of its own to judge: D10 was
+                        // judged on the certificate record whose
+                        // document this refresh corroborates, and a
+                        // refresh never survives without one.
                         generation_on_path: true,
                         window,
                     }));
@@ -472,7 +514,8 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
 
     // Seam parity with statements (B9): a certificate whose signer is
     // not authorized by its own document contributes nothing. Vacuous
-    // under the permissive default; real once delegation graphs land.
+    // under `MemoryAuthority` (tests only); real under
+    // `KeyhiveAuthority`, which replays the carriage.
     if !authority.authorizes(
         certificate.root_doc(),
         certificate.signer(),
@@ -493,6 +536,7 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     let generation_on_path = authority.on_path(certificate.delegation_chain(), record.generation());
 
     Some(BindingEvidence {
+        attestation: Attestation::Certificate,
         document: *certificate.root_doc(),
         generation: *record.generation(),
         hash,

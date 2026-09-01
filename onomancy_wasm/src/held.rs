@@ -164,6 +164,14 @@ impl JsHeldDocuments {
     /// over `DoH` (optionally at `doh_url`), validated from the
     /// baked-in IANA anchors inside the Wasm.
     ///
+    /// **`@hostname` anchoring here is the zone's word only.** The
+    /// DNSSEC walk proves what the zone published — one direction —
+    /// and this method roots the walk on it without checking the
+    /// certificate direction (`verifyBinding` is that check; neither
+    /// direction alone is a binding). Such resolutions carry
+    /// `anchorAuthority: "zone-only"` so a caller reading `status`
+    /// cannot mistake a resolved walk for an authenticated binding.
+    ///
     /// Returns `{ status: "resolved", document }` or
     /// `{ status: "partial", consumed, total, reason, target? }` — a
     /// partial walk is the designed norm under partition, not an
@@ -182,6 +190,10 @@ impl JsHeldDocuments {
         doh_url: Option<String>,
     ) -> Result<JsValue, JsError> {
         let name = SupportedName::parse(name).map_err(|error| JsError::new(&error.to_string()))?;
+        // A DNS-anchored walk roots on the zone's word alone: the
+        // certificate direction is verifyBinding's check, not this
+        // method's, and the outcome says so explicitly below.
+        let zone_anchored = matches!(name, SupportedName::Dns(_));
         let root_anchor = self.anchor_of(&name, root.as_deref(), doh_url).await?;
 
         let mut held = HeldDocuments::default();
@@ -217,6 +229,14 @@ impl JsHeldDocuments {
             Resolution::Resolved { authority, .. } => {
                 set(&verdict, "status", &JsValue::from_str("resolved"));
                 set(&verdict, "authority", &JsValue::from_str(authority.label()));
+                // The zone's word is one direction; the certificate
+                // direction is verifyBinding's check. Said on the
+                // OBJECT, not only in a doc comment: a caller reading
+                // `status: "resolved"` must be able to see that the
+                // anchor itself is unauthenticated.
+                if zone_anchored {
+                    set(&verdict, "anchorAuthority", &JsValue::from_str("zone-only"));
+                }
                 // The browser has no keyhive route yet: every grade
                 // here is the dev bridge's, and says so.
                 set(
@@ -321,14 +341,30 @@ impl JsHeldDocuments {
                         .validate_detailed(hostname, &chain)
                         .map_err(|error| JsError::new(&error.to_string()))?;
 
-                    proof
-                        .records
-                        .iter()
-                        .max_by_key(|record| record.serial())
-                        .map(|record| *record.document())
-                        .ok_or_else(|| {
-                            JsError::new("the zone attests no binding for this hostname")
-                        })
+                    // The zone's word: the highest-serial record. All
+                    // records in one proof share one ∩-window, so the
+                    // zone-state key reduces to the serial — but the
+                    // maximum must be UNIQUE (dns-anchor, Comparing
+                    // Records Offline): a serial tie across documents
+                    // is zone equivocation, and RRset enumeration
+                    // order must never resolve it.
+                    let Some(best) = proof.records.iter().max_by_key(|record| record.serial())
+                    else {
+                        return Err(JsError::new(
+                            "the zone attests no binding for this hostname",
+                        ));
+                    };
+
+                    if proof.records.iter().any(|record| {
+                        record.serial() == best.serial() && record.document() != best.document()
+                    }) {
+                        return Err(JsError::new(
+                            "the zone equivocates: two documents share the highest \
+                             serial — refusing to let RRset order decide",
+                        ));
+                    }
+
+                    Ok(*best.document())
                 }
                 #[cfg(not(feature = "doh"))]
                 {

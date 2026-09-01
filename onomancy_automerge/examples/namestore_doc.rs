@@ -10,7 +10,7 @@
 //!   pics=automerge:VDTcix… "docs/current=automerge:8W3teP…"
 //! ```
 
-use automerge::{transaction::Transactable, Automerge};
+use automerge::{Automerge, transaction::Transactable};
 use onomancy_core::anchor::doc::DocAnchor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

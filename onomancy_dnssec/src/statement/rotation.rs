@@ -30,8 +30,8 @@ use onomancy_core::{
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     signed::{
-        Signed,
         payload::{Malformed, Payload},
+        Signed,
     },
     wire::{self, OversizeUnit, Reader, WireError},
 };
@@ -94,7 +94,8 @@ impl RotationStatement {
                 successor: GenerationKey::from(successor.verifying_key()),
             },
             successor,
-        );
+        )
+        .unwrap_or_else(|_| unreachable!("the rotation names this signer's verifying key"));
 
         let mut bytes = Vec::new();
         signed.encode_into(&mut bytes);

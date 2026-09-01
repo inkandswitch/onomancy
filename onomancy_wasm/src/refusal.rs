@@ -20,96 +20,123 @@ use onomancy_dnssec::certificate::DecodeCertificateError;
 use onomancy_protocol::verifier::verdict::Rejection;
 use wasm_bindgen::JsValue;
 
-/// Why an operation was refused, as a type rather than a string.
+/// Declare the refusal vocabulary exactly once.
 ///
-/// A type because the previous shape kept the vocabulary in three
-/// places — the match arms, a hand-written `CODES` list, and the
-/// TypeScript union — and the tests compared only the second and
-/// third. Renaming an arm passed. Retargeting one passed. Now the
-/// arms produce values, `ALL` is the one list, and a code that no
-/// longer matches its declaration cannot be spelled.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RefusalReason {
-    /// The resolver was not reached. Retrying may work.
-    Transport,
+/// The enum, [`RefusalReason::ALL`], and [`RefusalReason::as_str`]
+/// are all generated from the one list below, so no hand-kept copy
+/// exists to drift. A previous shape kept `ALL` by hand and guarded
+/// it with a test that iterated `ALL` itself — which could not visit
+/// a variant that was missing from it, precisely the case it claimed
+/// to catch. Now adding a `published` variant grows `ALL` by
+/// construction, and the union drift test fails until the `.d.ts`
+/// declares the new code.
+macro_rules! refusal_reasons {
+    (
+        $(#[$enum_meta:meta])*
+        pub enum RefusalReason {
+            published {
+                $($(#[$published_meta:meta])* $published:ident => $published_code:literal,)+
+            }
+            unpublished {
+                $($(#[$unpublished_meta:meta])* $unpublished:ident => $unpublished_code:literal,)+
+            }
+        }
+    ) => {
+        $(#[$enum_meta])*
+        pub enum RefusalReason {
+            $($(#[$published_meta])* $published,)+
+            $($(#[$unpublished_meta])* $unpublished,)+
+        }
 
-    /// DNS answered and carried no Onomancy record, or the document
-    /// holds no certificate for this hostname. Retrying cannot help;
-    /// absence is also never proof against a binding.
-    NoBinding,
+        impl RefusalReason {
+            /// Every code this module can emit: generated from the
+            /// same list that declares the variants, so it cannot be
+            /// out of date with the enum. Whether the published
+            /// `.d.ts` union agrees is what
+            /// `the_declared_union_matches_the_emitted_codes` checks.
+            pub const ALL: &'static [Self] = &[$(Self::$published,)+];
 
-    /// This source holds no certificate for the document. Distinct
-    /// from `NoBinding` only in which lookup came up empty.
-    NoCertificateHeld,
-
-    /// The hostname is not a DNS name, or cannot sit under
-    /// `_onomancy`. The caller can see and fix this.
-    InvalidHostname,
-
-    /// The bytes are not a well-formed certificate: framing, a wrong
-    /// unit tag, or a non-canonical encoding. A wiring bug, not a
-    /// forgery — the usual cause is passing the wrong buffer.
-    Malformed,
-
-    /// The bytes are a well-formed certificate whose signature does
-    /// not verify. Deliberately NOT merged with `Malformed`: one is
-    /// "you sent me the wrong thing", the other is "someone altered
-    /// this", and they want opposite reactions.
-    InvalidSignature,
-
-    /// The certificate binds a hostname other than the one asked for.
-    HostnameMismatch,
-
-    /// Records arrived and failed validation from the trust anchors.
-    ChainRejected,
-
-    /// A fresh chain whose delegation path lacks the zone-attested
-    /// generation key: revocation working as designed.
-    GenerationOffPath,
-
-    /// Not a refusal at all, and deliberately **not** in [`Self::ALL`]
-    /// or in the published union.
-    ///
-    /// A deferral is a grade, returned as a value by both entry
-    /// points. It reaches this type only if a future path renders a
-    /// grade as a refusal — a bug. Publishing a code for it would
-    /// oblige every consumer to handle a case that cannot legitimately
-    /// occur, so it emits an undeclared string instead, which lands in
-    /// a `switch` default where an impossible value belongs.
-    NotARefusal,
+            /// The wire spelling, which is API and must not be
+            /// reworded.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$published => $published_code,)+
+                    $(Self::$unpublished => $unpublished_code,)+
+                }
+            }
+        }
+    };
 }
 
-impl RefusalReason {
-    /// Every code this module can emit.
+refusal_reasons! {
+    /// Why an operation was refused, as a type rather than a string.
     ///
-    /// Adding a variant without adding it here is caught by
-    /// `all_lists_every_variant`, which matches exhaustively.
-    pub const ALL: &'static [Self] = &[
-        Self::Transport,
-        Self::NoBinding,
-        Self::NoCertificateHeld,
-        Self::InvalidHostname,
-        Self::Malformed,
-        Self::InvalidSignature,
-        Self::HostnameMismatch,
-        Self::ChainRejected,
-        Self::GenerationOffPath,
-    ];
+    /// A type because the original shape kept the vocabulary in three
+    /// places — the match arms, a hand-written `CODES` list, and the
+    /// TypeScript union — and the tests compared only the second and
+    /// third. Renaming an arm passed. Retargeting one passed. Now the
+    /// arms produce values, and the list that declares the variants
+    /// is the list `ALL` and `as_str` are generated from.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum RefusalReason {
+        published {
+            /// The resolver was not reached. Retrying may work.
+            Transport => "transport",
 
-    /// The wire spelling, which is API and must not be reworded.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Transport => "transport",
-            Self::NoBinding => "no-binding",
-            Self::NoCertificateHeld => "no-certificate-held",
-            Self::InvalidHostname => "invalid-hostname",
-            Self::Malformed => "malformed",
-            Self::InvalidSignature => "invalid-signature",
-            Self::HostnameMismatch => "hostname-mismatch",
-            Self::ChainRejected => "chain-rejected",
-            Self::GenerationOffPath => "generation-off-path",
-            Self::NotARefusal => "deferred",
+            /// DNS answered and carried no Onomancy record, or the
+            /// document holds no certificate for this hostname.
+            /// Retrying cannot help; absence is also never proof
+            /// against a binding.
+            NoBinding => "no-binding",
+
+            /// This source holds no certificate for the document.
+            /// Distinct from `NoBinding` only in which lookup came up
+            /// empty.
+            NoCertificateHeld => "no-certificate-held",
+
+            /// The hostname is not a DNS name, or cannot sit under
+            /// `_onomancy`. The caller can see and fix this.
+            InvalidHostname => "invalid-hostname",
+
+            /// The bytes are not a well-formed certificate: framing, a
+            /// wrong unit tag, or a non-canonical encoding. A wiring
+            /// bug, not a forgery — the usual cause is passing the
+            /// wrong buffer.
+            Malformed => "malformed",
+
+            /// The bytes are a well-formed certificate whose signature
+            /// does not verify. Deliberately NOT merged with
+            /// `Malformed`: one is "you sent me the wrong thing", the
+            /// other is "someone altered this", and they want opposite
+            /// reactions.
+            InvalidSignature => "invalid-signature",
+
+            /// The certificate binds a hostname other than the one
+            /// asked for.
+            HostnameMismatch => "hostname-mismatch",
+
+            /// Records arrived and failed validation from the trust
+            /// anchors.
+            ChainRejected => "chain-rejected",
+
+            /// A fresh chain whose delegation path lacks the
+            /// zone-attested generation key: revocation working as
+            /// designed.
+            GenerationOffPath => "generation-off-path",
+        }
+        unpublished {
+            /// Not a refusal at all, and deliberately **not** in
+            /// [`Self::ALL`] or in the published union.
+            ///
+            /// A deferral is a grade, returned as a value by both
+            /// entry points. It reaches this type only if a future
+            /// path renders a grade as a refusal — a bug. Publishing
+            /// a code for it would oblige every consumer to handle a
+            /// case that cannot legitimately occur, so it emits an
+            /// undeclared string instead, which lands in a `switch`
+            /// default where an impossible value belongs.
+            NotARefusal => "deferred",
         }
     }
 }
@@ -247,29 +274,14 @@ mod tests {
     use super::*;
     use onomancy_dnssec::validator::WalkError;
 
-    /// Adding a variant makes this fail to compile until it is
-    /// listed, which is what keeps `ALL` honest without a macro.
+    /// `ALL` is generated from the same list that declares the
+    /// variants, so it cannot drift from the enum — the predecessor
+    /// of this test iterated `ALL` itself, which could not visit a
+    /// variant missing from it. What still needs asserting is the
+    /// boundary: the one unpublished variant stays unpublished.
     #[test]
-    fn all_lists_every_publishable_variant() {
-        for reason in RefusalReason::ALL {
-            match reason {
-                RefusalReason::Transport
-                | RefusalReason::NoBinding
-                | RefusalReason::NoCertificateHeld
-                | RefusalReason::InvalidHostname
-                | RefusalReason::Malformed
-                | RefusalReason::InvalidSignature
-                | RefusalReason::HostnameMismatch
-                | RefusalReason::ChainRejected
-                | RefusalReason::GenerationOffPath => {}
-
-                RefusalReason::NotARefusal => {
-                    panic!("a non-refusal must not be published in ALL")
-                }
-            }
-        }
-
-        assert_eq!(RefusalReason::ALL.len(), 9);
+    fn a_non_refusal_is_never_published() {
+        assert!(!RefusalReason::ALL.contains(&RefusalReason::NotARefusal));
     }
 
     /// The pair that shares a remedy boundary: one is worth retrying

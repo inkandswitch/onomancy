@@ -46,7 +46,15 @@ type Instance = Keyhive<
     OsRng,
 >;
 
-/// Authority verification over real Keyhive delegation graphs.
+/// Authority verification over Keyhive delegation graphs — the
+/// spec's one authority model (dns-anchor, Who Signs: the carriage
+/// IS "the standard Keyhive authority proof").
+///
+/// The `AuthorityVerifier` seam this implements exists for layering,
+/// not pluralism: it quarantines the `keyhive_core` dependency tree
+/// out of the sans-IO crates (as `onomancy_dnssec` quarantines its
+/// crypto backends) and gives tests `MemoryAuthority`. This is the
+/// only implementation that judges evidence.
 ///
 /// Stateless between calls: each question replays its carriage into a
 /// fresh instance, so verdicts depend only on the presented evidence
@@ -222,21 +230,30 @@ mod tests {
     /// The signing bar is `>= Access::Admin`, not `== Access::Admin`.
     ///
     /// Those agree on every input only because Admin is currently the
-    /// maximum of Keyhive's ladder. This test pins that assumption:
-    /// if Keyhive ever grows a level above Admin, it fails here rather
-    /// than silently changing what the bar admits.
+    /// maximum of Keyhive's ladder. The pin has to be structural: an
+    /// earlier version asserted `Relay < Read < Edit < Admin` and
+    /// `Admin >= Admin`, all of which still hold with a new level
+    /// ABOVE Admin — it could not fail in the one scenario it named.
+    /// The exhaustive `match` is the only form that notices a new
+    /// variant, by refusing to compile until this test looks at it.
     #[test]
     fn admin_is_the_top_of_the_ladder() {
-        assert!(Access::Relay < Access::Read);
-        assert!(Access::Read < Access::Edit);
-        assert!(Access::Edit < Access::Admin);
+        // Compile-time half: adding a variant to `Access` breaks
+        // this match, forcing the maximum below to be reconsidered.
+        let every_level = |level: Access| match level {
+            Access::Relay | Access::Read | Access::Edit | Access::Admin => level,
+        };
 
-        // The reason equality would have been wrong: a hop holding
-        // something stronger than Admin still holds admin access,
-        // which is what §Who Signs asks.
-        assert!(
-            Access::Admin >= Access::Admin,
-            "the bar must admit the level itself"
+        // Runtime half: Admin is the maximum of the enumerated set.
+        // `Ord` derives from declaration order, so a variant added
+        // above Admin flips this assertion once the match names it.
+        assert_eq!(
+            [Access::Relay, Access::Read, Access::Edit, Access::Admin]
+                .map(every_level)
+                .into_iter()
+                .max(),
+            Some(Access::Admin),
+            "the signing bar admits exactly the ladder's maximum and up"
         );
     }
 }

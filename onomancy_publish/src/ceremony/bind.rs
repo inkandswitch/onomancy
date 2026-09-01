@@ -13,9 +13,10 @@ use onomancy_dnssec::{
     statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
-    ceremony::{CeremonyError, Intent, simulate},
+    ceremony::{simulate, CeremonyError, Intent},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -62,7 +63,12 @@ impl Bind {
     /// Returns [`CeremonyError`] when a unit exceeds the encoder cap
     /// or the simulated derivation does not accept exactly this
     /// binding.
-    pub fn plan(&self, now_ms: u64, signer: &Signer) -> Result<Plan, CeremonyError> {
+    pub fn plan<A: AuthorityVerifier>(
+        &self,
+        now_ms: u64,
+        signer: &Signer,
+        authority: &A,
+    ) -> Result<Plan, CeremonyError> {
         let serial = Serial::from(now_ms);
         let now = UnixSeconds::from(now_ms / 1000);
 
@@ -96,6 +102,7 @@ impl Bind {
                 generation: self.generation,
                 serial,
             },
+            authority,
         )?;
 
         Ok(Plan {

@@ -14,11 +14,11 @@ Global names could be rooted in pure DNS, but the thing we actually want is shar
 | [`names`](./names.md)             | The three-anchor name grammar                          |
 | [`anchors`](./anchors.md)         | Trust model: documents as ground truth               |
 | [`dns-binding`](./dns-binding.md) | DNSSEC TXT binding record and chain validation         |
-| [`certificate`](./certificate.md) | The Onomancy certificate and its lookup endpoint       |
+| [`certificate`](./certificate.md) | The Onomancy certificate and where it lives            |
 | [`resolution`](./resolution.md)   | Petname store, binding cache, and resolution semantics |
 | [`security`](./security.md)       | Threat model and accepted risks                        |
 | [`verification`](./verification.md) | Lean 4 model, theorems, and conformance-vector pipeline |
-| [`keyhive-coordination`](./keyhive-coordination.md) | Upstream asks blocking `onomancy_keyhive` (the last stubbed seam) |
+| [`keyhive-coordination`](./keyhive-coordination.md) | Upstream asks for verified document content (`onomancy_keyhive`'s remaining gap) |
 | [`limitations`](./limitations.md)   | What Onomancy does NOT fix (phishing, custody, DNS politics, …) |
 | [`comparisons/`](./comparisons/README.md) | How Onomancy relates to prior naming systems |
 

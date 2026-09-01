@@ -58,7 +58,7 @@ use onomancy_core::{
     anchor::doc::{DocAnchor, Head},
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
-    signed::{Signed, payload::Malformed},
+    signed::{payload::Malformed, Signed},
     time::UnixSeconds,
     wire::{self, OversizeUnit, Reader, WireError},
 };
@@ -138,7 +138,8 @@ impl Certificate {
             ..
         } = params;
 
-        let signed_unit = Signed::sign(binding, signer);
+        let signed_unit = Signed::sign(binding, signer)
+            .unwrap_or_else(|_| unreachable!("the binding names this signer's verifying key"));
 
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);
@@ -576,15 +577,13 @@ mod tests {
                 0xAA;
                 9
             ])]),
-            lineage: vec![
-                RotationStatement::sign(
-                    &doc(1),
-                    &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
-                    &SigningKey::from_bytes(&[7; 32]),
-                    DelegationChain::default(),
-                )
-                .expect("under the unit cap"),
-            ],
+            lineage: vec![RotationStatement::sign(
+                &doc(1),
+                &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
+                &SigningKey::from_bytes(&[7; 32]),
+                DelegationChain::default(),
+            )
+            .expect("under the unit cap")],
             chain: DnssecChain::from(vec![vec![0xBB; 17].into()]),
         }
     }
@@ -649,6 +648,28 @@ mod tests {
             Certificate::from_parts(sample_params(), key.verifying_key(), wrong),
             Err(AssembleError::InvalidSignature)
         ));
+    }
+
+    /// The same invariant on the in-process route: `Signed::sign`
+    /// with a key that is not the payload's named signer is refused,
+    /// in release builds too. Formerly a debug-only assertion, which
+    /// made this the one constructor that could ship a `Signed` no
+    /// decoder would ever accept.
+    #[test]
+    fn signing_with_a_key_the_payload_does_not_name_is_refused() {
+        let named = SigningKey::from_bytes(&[2; 32]);
+        let other = SigningKey::from_bytes(&[8; 32]);
+        let binding = Certificate::decode(&sample().encode())
+            .expect("own encoding decodes")
+            .signed
+            .payload()
+            .clone();
+
+        assert_eq!(binding.signer(), &named.verifying_key(), "fixture sanity");
+        assert!(
+            onomancy_core::signed::Signed::sign(binding, &other).is_err(),
+            "a payload must be signed by the key it names as its signer"
+        );
     }
 
     #[test]

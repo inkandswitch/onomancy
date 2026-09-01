@@ -10,6 +10,7 @@ use onomancy_dnssec::{
     dns_name::DnsName,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::memory::authority::MemoryAuthority;
 use onomancy_publish::{
     ceremony::{CeremonyError, bind::Bind, migrate::Migrate, refresh::Refresh, rotate::Rotate},
     plan::{ArtifactKind, DnsOp, Postcondition},
@@ -45,7 +46,7 @@ fn bind_emits_a_verified_plan() -> TestResult {
         lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(1))?;
+    .plan(NOW_MS, &signer(1), &MemoryAuthority::default())?;
 
     assert_eq!(plan.dns_ops.len(), 1, "one TXT publish");
     assert!(matches!(plan.dns_ops[0], DnsOp::PublishTxt { .. }));
@@ -67,7 +68,7 @@ fn rotate_emits_statement_and_certificate() -> TestResult {
         prior_lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(3), &signer(1))?;
+    .plan(NOW_MS, &signer(3), &signer(1), &MemoryAuthority::default())?;
 
     assert_eq!(plan.artifacts.len(), 2, "certificate + standalone ONR");
     assert!(
@@ -94,7 +95,7 @@ fn rotate_refuses_generation_reuse() {
         prior_lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(3), &signer(1))
+    .plan(NOW_MS, &signer(3), &signer(1), &MemoryAuthority::default())
     .expect("first rotation plans");
 
     // Recover the signed statement from the plan for the next step.
@@ -115,7 +116,12 @@ fn rotate_refuses_generation_reuse() {
         prior_lineage: vec![statement],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS + 1000, &signer(2), &signer(1)); // signer(2) = retired G
+    .plan(
+        NOW_MS + 1000,
+        &signer(2),
+        &signer(1),
+        &MemoryAuthority::default(),
+    ); // signer(2) = retired G
 
     assert_eq!(reuse.unwrap_err(), CeremonyError::GenerationReuse);
 }
@@ -140,7 +146,7 @@ fn rotate_catches_forks_the_reuse_check_cannot_see() -> TestResult {
         prior_lineage: vec![earlier],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(4), &signer(1));
+    .plan(NOW_MS, &signer(4), &signer(1), &MemoryAuthority::default());
 
     assert_eq!(forked.unwrap_err(), CeremonyError::WouldFork);
     Ok(())
@@ -159,7 +165,7 @@ fn migrate_dual_publishes_and_proves_continuity() -> TestResult {
         lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(1), &signer(5))?;
+    .plan(NOW_MS, &signer(1), &signer(5), &MemoryAuthority::default())?;
 
     assert_eq!(plan.dns_ops.len(), 2, "retain old + publish new");
     assert!(matches!(plan.dns_ops[0], DnsOp::RetainTxt { .. }));
@@ -186,7 +192,7 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
         lineage: vec![],
         carriage: DelegationChain::default(),
     };
-    let bound = bind.plan(NOW_MS, &signer(1))?;
+    let bound = bind.plan(NOW_MS, &signer(1), &MemoryAuthority::default())?;
 
     let certificate = onomancy_dnssec::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
     let record = *bound.dns_ops[0].record();
@@ -196,7 +202,10 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
         chain: onomancy_dnssec::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
         records: vec![record],
     }
-    .plan(onomancy_core::time::UnixSeconds::from(NOW_MS / 1000))?;
+    .plan(
+        onomancy_core::time::UnixSeconds::from(NOW_MS / 1000),
+        &MemoryAuthority::default(),
+    )?;
 
     assert!(refreshed.dns_ops.is_empty(), "refresh never touches DNS");
     assert_eq!(refreshed.artifacts.len(), 1);
@@ -217,7 +226,7 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS, &signer(1))?;
+    .plan(NOW_MS, &signer(1), &MemoryAuthority::default())?;
 
     // …rotate to G3…
     let rotated = Rotate {
@@ -227,7 +236,12 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         prior_lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS + 1_000, &signer(3), &signer(1))?;
+    .plan(
+        NOW_MS + 1_000,
+        &signer(3),
+        &signer(1),
+        &MemoryAuthority::default(),
+    )?;
     let rotated_record = *rotated.dns_ops[0].record();
 
     // …then migrate the name to a new document.
@@ -240,7 +254,12 @@ fn full_lifecycle_bind_rotate_migrate() -> TestResult {
         lineage: vec![],
         carriage: DelegationChain::default(),
     }
-    .plan(NOW_MS + 2_000, &signer(1), &signer(5))?;
+    .plan(
+        NOW_MS + 2_000,
+        &signer(1),
+        &signer(5),
+        &MemoryAuthority::default(),
+    )?;
 
     assert_eq!(migrated.dns_ops.len(), 2);
     Ok(())

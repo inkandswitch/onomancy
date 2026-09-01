@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::Args;
 use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_dnssec::{dns_name::DnsName, txt::generation_key::GenerationKey};
-use onomancy_keyhive::mint;
+use onomancy_keyhive::{authority::KeyhiveAuthority, mint};
 use onomancy_publish::{ceremony::bind::Bind as BindCeremony, signer::Signer};
 
 use crate::{
@@ -69,7 +69,7 @@ impl Bind {
             lineage: vec![],
             carriage,
         }
-        .plan(now_ms(), &Signer::new(doc_key))?;
+        .plan(now_ms(), &Signer::new(doc_key), &KeyhiveAuthority)?;
 
         crate::block_on(plan_io::execute(&plan, &self.out_dir))??;
         Ok(())

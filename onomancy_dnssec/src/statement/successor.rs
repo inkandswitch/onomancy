@@ -32,8 +32,8 @@ use onomancy_core::{
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     signed::{
-        Signed,
         payload::{Malformed, Payload},
+        Signed,
     },
     wire::{self, OversizeUnit, Reader, WireError},
 };
@@ -99,7 +99,8 @@ impl SuccessorStatement {
                 hostname: hostname.clone(),
             },
             signer,
-        );
+        )
+        .unwrap_or_else(|_| unreachable!("the succession names this signer's verifying key"));
 
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);

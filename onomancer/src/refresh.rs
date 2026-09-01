@@ -9,6 +9,7 @@ use onomancy_dnssec::{
     validator::{Validator, WalkError},
 };
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_publish::ceremony::refresh::Refresh as RefreshCeremony;
 
 use crate::{now_ms, plan_io};
@@ -48,7 +49,7 @@ impl Refresh {
             chain,
             records: proof.records,
         }
-        .plan(UnixSeconds::from(now_ms() / 1000))?;
+        .plan(UnixSeconds::from(now_ms() / 1000), &KeyhiveAuthority)?;
 
         crate::block_on(plan_io::execute(&plan, &self.out_dir))??;
         Ok(())

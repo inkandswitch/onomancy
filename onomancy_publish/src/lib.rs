@@ -28,9 +28,13 @@
 //! wrong generation fails at plan time, not in production. A `Plan`'s
 //! existence is the witness (parse, don't validate).
 //!
-//! Delegation carriages are empty until `onomancy_keyhive` lands
-//! (the simulation's authority seam is permissive, like the live
-//! verifier's — the same loudly-documented gap).
+//! Ceremonies carry real delegation carriages (minted by
+//! `onomancy_keyhive`), and the simulation judges them with whatever
+//! [`AuthorityVerifier`] the caller supplies — `onomancer` passes
+//! `KeyhiveAuthority`, so a plan whose carriage the live verifier
+//! would reject fails at plan time too.
+//!
+//! [`AuthorityVerifier`]: onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]

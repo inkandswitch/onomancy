@@ -39,5 +39,5 @@ onomancer resolve --hostname example.com --cert example.onc
 
 ## Caveats (v0)
 
-- **Keyhive pending**: delegation carriages are not verified — certificates are self-signed by the document key, and the verifier runs a permissive `AuthorityVerifier`. The DNSSEC walk is fully real; the delegation half of the trust story lands with `onomancy_keyhive`.
+- **Delegation carriages are verified** — `resolve` and `watch` run `KeyhiveAuthority`, which replays each certificate's carriage into a throwaway Keyhive instance and answers the spec's signing bar; `bind`/`record` mint real generation carriages. The remaining gaps are narrower: document *content* authorship is not yet checkable (resolutions grade `carriage-verified` at best), `sanctioned` is direct-membership only (nested-group delegation chains are future work — the `#[ignore]`d test in `onomancy_keyhive` is the executable gap), and no verb writes the decision document yet, so acceptance-on-use (binding-cache spec) never fires from this CLI.
 - Seeds on the command line are a dev-tool convenience, not key management. Shells keep history.

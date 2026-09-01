@@ -15,9 +15,10 @@ use onomancy_dnssec::{
     statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
-    ceremony::{CeremonyError, Intent, simulate},
+    ceremony::{simulate, CeremonyError, Intent},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };
@@ -60,11 +61,12 @@ impl Rotate {
     /// appears anywhere in the lineage (reuse converts the lineage
     /// into a permanent surfaced fork), and the usual cap/simulation
     /// failures otherwise.
-    pub fn plan(
+    pub fn plan<A: AuthorityVerifier>(
         &self,
         now_ms: u64,
         successor: &Signer,
         certificate_signer: &Signer,
+        authority: &A,
     ) -> Result<Plan, CeremonyError> {
         let next_generation = GenerationKey::from(successor.verifying_key());
 
@@ -121,6 +123,7 @@ impl Rotate {
                 generation: next_generation,
                 serial,
             },
+            authority,
         )?;
 
         Ok(Plan {

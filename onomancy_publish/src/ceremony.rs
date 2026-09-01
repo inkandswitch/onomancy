@@ -24,10 +24,11 @@ use onomancy_dnssec::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 use onomancy_protocol::verifier::state::{
-    VerifierState,
+    authority_verifier::AuthorityVerifier,
     decisions::Decisions,
-    memory::{authority::MemoryAuthority, validator::MemoryValidator},
-    store::{Store, item::Item},
+    memory::validator::MemoryValidator,
+    store::{item::Item, Store},
+    VerifierState,
 };
 
 /// The simulated chain window around `now`: comfortably fresh, zero
@@ -46,14 +47,18 @@ pub(crate) struct Intent {
 /// Run the real derivation against a zone that says exactly what the
 /// plan publishes; error unless it accepts precisely the intent.
 ///
-/// The authority seam is permissive here, matching the live verifier
-/// until `onomancy_keyhive` lands — the same loudly-documented gap.
-pub(crate) fn simulate(
+/// The authority seam is the CALLER's: a plan is a witness only
+/// against the authority its verifiers will run, so `onomancer`
+/// passes `KeyhiveAuthority` and a plan whose carriage the real
+/// verifier would reject under D10 or §Who Signs fails here, at plan
+/// time — not at the first verifier.
+pub(crate) fn simulate<A: AuthorityVerifier>(
     hostname: &DnsName,
     zone_records: &[TxtRecord],
     certificates: &[&Certificate],
     now: UnixSeconds,
     intent: &Intent,
+    authority: &A,
 ) -> Result<(), CeremonyError> {
     let window = ValidityWindow::new(
         UnixSeconds::from(u64::from(now).saturating_sub(SIMULATED_WINDOW_SLACK)),
@@ -79,7 +84,7 @@ pub(crate) fn simulate(
         &Decisions::default(),
         &Map::default(),
         &validator,
-        &MemoryAuthority::default(),
+        authority,
     );
 
     let Some(host) = state.bindings.get(hostname) else {

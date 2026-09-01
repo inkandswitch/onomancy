@@ -1,21 +1,21 @@
 # DNS Binding
 
-How a DNS name becomes a verified pointer to a document: a DNSSEC-protected TXT record, validated from the baked-in IANA root KSK, corroborated by an [Onomancy certificate](./certificate.md) served over HTTP.
+How a DNS name becomes a verified pointer to a document: a DNSSEC-protected TXT record, validated from the baked-in IANA root KSK, corroborated by an [Onomancy certificate](./certificate.md) carried inside the document it binds.
 
 ## Name Setup
 
-The protocol requires exactly one record — the TXT binding. A second record designates where the certificate is fetched from:
+The protocol requires exactly one record — the TXT binding. A second record designates a peer from which the bound document (and with it, the certificate it carries) can be replicated:
 
 ```zone
 ; The one required record:
 _onomancy.expede.wtf.  IN TXT  "v=ONO0;k=ed25519;n=1;g=<base64 gen key>;p=<base64 doc ID>"
 
-; RECOMMENDED: designate a certificate endpoint (any host — the
-; publisher's own server, a mirror, a friend's):
-_onomancy.expede.wtf.  IN SVCB 1 certs.example.
+; RECOMMENDED: designate a sync peer that holds the bound document
+; (any host — the publisher's own node, a mirror, a friend's):
+_onomancy.expede.wtf.  IN SVCB 1 sync.example.
 
-; With neither hint, the name is still fully conformant; the cert
-; travels by gossip and mirrors, it just isn't self-bootstrapping cold.
+; With neither hint, the name is still fully conformant; the document
+; travels by sync and gossip, it just isn't self-bootstrapping cold.
 ```
 
 Only the TXT record anchors trust. The SVCB record is a **transport hint, not a canonical location**: it names a peer from which the bound document can be replicated — and with it the certificate the document carries — and nothing more. The binding has no home: any peer holding the document can supply it (mirrors, relays, a friend's node), gossip works with no peer at all, and verifiers attach no meaning to where the bytes came from. The analogy is a magnet link: the TXT `p=` is the infohash (all of the authority), the hints are trackers (none of it), and gossip is PEX. A lying hint can waste your time; it cannot change what verifies.

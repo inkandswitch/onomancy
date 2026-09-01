@@ -15,14 +15,14 @@ use testresult::TestResult;
 
 use onomancy_protocol::{
     test_utils::{
-        Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
+        binding, binding_carrying, doc, generation, host, rotation, signer, succession, Binding,
     },
     verifier::state::{
-        VerifierState,
         binding_state::{BindingGrade, BindingState, ContinuityGrade},
         decisions::{Acceptance, Claim, Decisions},
         memory::{authority::MemoryAuthority, validator::MemoryValidator},
-        store::{Store, item::Item},
+        store::{item::Item, Store},
+        VerifierState,
     },
 };
 
@@ -823,6 +823,90 @@ fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
     assert!(
         state.accepted.is_none(),
         "an unauthorized signer's certificate must be inert"
+    );
+    Ok(())
+}
+
+// ───── B14: a bare chain refresh is corroboration, not candidacy ─────
+
+#[test]
+fn a_bare_chain_refresh_alone_is_not_a_binding() -> TestResult {
+    // B14: the zone's word is one direction, and neither direction
+    // alone is a binding (dns-anchor, Verification). A store holding
+    // exactly one bare refresh — no certificate anywhere — must
+    // derive no accepted binding, however valid the chain.
+    let b = binding(1, 2, 7, 100, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+
+    let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+    let mut store = Store::default();
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: b.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &MemoryAuthority::default(),
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    assert_eq!(
+        state.accepted, None,
+        "a bare chain refresh must never make a document a candidate"
+    );
+    assert!(!state.contested, "absence of candidates is not a contest");
+    Ok(())
+}
+
+#[test]
+fn a_bare_chain_refresh_corroborates_a_certificate_backed_document() -> TestResult {
+    // B14's other half: the refresh's real job. A stale certificate
+    // supplies candidacy (the document's direction, proven once); a
+    // fresh bare refresh supplies the zone's current word — together
+    // they confirm, where the certificate alone would only be
+    // provisional (B10).
+    let lapsed = binding(1, 2, 7, 100, (NOW - 200_000, NOW - 50_000), NOW - 150_000)?;
+    let fresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+
+    let validator = MemoryValidator::default()
+        .with(host(), &lapsed.chain, lapsed.proof.clone())
+        .with(host(), &fresh.chain, fresh.proof.clone());
+
+    let mut store = Store::default();
+    store.insert(Item::Record(lapsed.cert.clone()));
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: fresh.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &MemoryAuthority::default(),
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    let accepted = state
+        .accepted
+        .expect("the certificate-backed document is accepted");
+    assert_eq!(accepted.document, doc(1));
+    assert_eq!(
+        accepted.grade,
+        BindingGrade::Confirmed,
+        "the refresh's fresh window is what confirms"
     );
     Ok(())
 }

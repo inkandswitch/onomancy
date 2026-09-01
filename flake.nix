@@ -240,7 +240,21 @@
           runtimeInputs = pkgs.lib.attrValues ci-checks;
           text = pkgs.lib.concatMapStringsSep "\n"
             (check: "onomancy-${check}")
-            (builtins.attrNames ci-checks);
+            (builtins.attrNames ci-checks)
+          + ''
+
+            # Say what did NOT run, loudly: ci-browser is the ONLY job
+            # that EXECUTES the wasm test suites (ci-test compiles
+            # them away as cfg(wasm32) and reports "running 0 tests"),
+            # and ci-e2e is the only one driving the npm build. A
+            # green board here without this notice reproduced the
+            # exact "ornamental suite" failure the hosted matrix was
+            # fixed for.
+            echo
+            echo "NOT RUN (hosted CI runs both): ci-browser, ci-e2e"
+            echo "  nix run .#ci-browser   # executes the wasm test suites"
+            echo "  nix run .#ci-e2e       # Playwright against the npm build"
+          '';
         };
 
         # Build the Wasm module and serve the browser demos (the live

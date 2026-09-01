@@ -25,7 +25,7 @@ use crate::{
     text::{self, Text},
 };
 use js_sys::{Object, Reflect};
-use onomancy_core::time::UnixSeconds;
+use onomancy_core::{anchor::doc::SCHEME_PREFIX, time::UnixSeconds};
 use onomancy_dnssec::{
     dns_name::DnsName,
     freshness::{Freshness, ValidityWindow},
@@ -35,7 +35,7 @@ use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::verdict::{
     self, DeferredEvidence, GenerationCheck, Rejection, Verdict,
 };
-use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast as _, JsError, JsValue};
 
 // Reading a certificate OUT OF a document needs the document
 // substrate; verifying bytes does not. Only the former is gated.
@@ -128,6 +128,15 @@ pub fn verify_binding(
     hostname: &Text,
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
+    // A successfully graded candidate: a verdict, or proven evidence
+    // whose window has not opened. Boxed on both sides — each
+    // carries a `DocAnchor`, which caches its decompressed curve
+    // point.
+    enum Graded {
+        Accepted(Box<Verdict>),
+        Deferred(Box<DeferredEvidence>),
+    }
+
     let hostname = parse_hostname(hostname)?;
     let now = clock::resolve(now_seconds)
         .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
@@ -156,16 +165,17 @@ pub fn verify_binding(
     // certificates for the document's *other* names and say nothing
     // about the one asked for.
     let mut refusal_for_this_hostname = None;
+    let mut candidates: Vec<Graded> = Vec::new();
 
     for bytes in &stored {
         match verdict::verify(bytes, &hostname, now, &Validator::iana(), &KeyhiveAuthority) {
-            Ok(verdict) => return Ok(verdict_object(&verdict, now)),
+            Ok(verdict) => candidates.push(Graded::Accepted(Box::new(verdict))),
 
             // A deferred certificate is this hostname's and proven;
             // only its window is ahead of the clock. Grading it here
             // keeps both entry points on one freshness axis.
             Err(Rejection::Deferred(evidence)) => {
-                return Ok(deferred_object(&hostname, &evidence, now));
+                candidates.push(Graded::Deferred(evidence));
             }
 
             // Not this hostname's certificate. The caller supplied a
@@ -183,6 +193,40 @@ pub fn verify_binding(
                 refusal_for_this_hostname.get_or_insert(rejection);
             }
         }
+    }
+
+    // Order-insensitive selection (dns-anchor, Comparing Records
+    // Offline): fresh beats stale beats deferred, then the window
+    // end (zone-vouched), then the serial — never "the first that
+    // verifies", which would let Automerge list order decide, and a
+    // deferred entry at index 0 mask a fresh one at index 1. A
+    // full-key tie breaks on the document anchor: deterministic
+    // under any enumeration order. Genuine zone equivocation is the
+    // derivation's to surface as contested (binding-cache B13); a
+    // one-shot check reports the maximal candidate.
+    let best = candidates.into_iter().max_by_key(|graded| match graded {
+        Graded::Accepted(verdict) => (
+            match verdict.freshness {
+                Freshness::Fresh => 2_u8,
+                Freshness::Stale => 1,
+            },
+            verdict.window.expiration(),
+            verdict.serial,
+            verdict.document,
+        ),
+        Graded::Deferred(deferred) => (
+            0,
+            deferred.window.expiration(),
+            deferred.serial,
+            deferred.document,
+        ),
+    });
+
+    if let Some(graded) = best {
+        return Ok(match graded {
+            Graded::Accepted(verdict) => verdict_object(&verdict, now),
+            Graded::Deferred(evidence) => deferred_object(&hostname, &evidence, now),
+        });
     }
 
     match refusal_for_this_hostname {
@@ -222,7 +266,10 @@ pub fn verify_binding(
 fn verdict_object(verdict: &Verdict, now: UnixSeconds) -> JsVerdict {
     grade_object(
         verdict.certificate.hostname().as_str(),
-        &verdict.document.to_string(),
+        // Prefixed: the declared contract says "as an `automerge:`
+        // anchor", and this is the one field a consumer feeds back
+        // into the API — `new Name(document)` requires the scheme.
+        &format!("{SCHEME_PREFIX}{}", verdict.document),
         &verdict.serial.to_string(),
         match verdict.freshness {
             Freshness::Fresh => "fresh",
@@ -247,7 +294,7 @@ fn verdict_object(verdict: &Verdict, now: UnixSeconds) -> JsVerdict {
 fn deferred_object(hostname: &DnsName, evidence: &DeferredEvidence, now: UnixSeconds) -> JsVerdict {
     grade_object(
         hostname.as_str(),
-        &evidence.document.to_string(),
+        &format!("{SCHEME_PREFIX}{}", evidence.document),
         &evidence.serial.to_string(),
         "deferred",
         None,
@@ -336,9 +383,7 @@ fn parse_hostname(raw: &Text) -> Result<DnsName, JsValue> {
 #[cfg(feature = "names")]
 fn parse_anchor(raw: &Text) -> Result<DocAnchor, JsError> {
     let raw = text::read(raw, "a document anchor")?;
-    let bare = raw
-        .strip_prefix(onomancy_core::anchor::doc::SCHEME_PREFIX)
-        .unwrap_or(&raw);
+    let bare = raw.strip_prefix(SCHEME_PREFIX).unwrap_or(&raw);
 
     DocAnchor::parse(bare).map_err(|error| JsError::new(&error.to_string()))
 }

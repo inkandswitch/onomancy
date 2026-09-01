@@ -15,7 +15,11 @@
 // a failed `expect` here is the test failing, which is its job.
 #![allow(clippy::expect_used, clippy::panic)]
 
-use onomancy_wasm::{text::Text, verify::verify_certificate};
+use onomancy_wasm::{
+    held::JsHeldDocuments,
+    text::Text,
+    verify::{verify_binding, verify_certificate},
+};
 use wasm_bindgen::{JsCast as _, JsValue};
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -69,6 +73,32 @@ fn field(verdict: &JsValue, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The machine-readable code on a refusal — the discriminator the
+/// published contract promises (`"reason" in error`).
+fn reason_of(value: &JsValue) -> String {
+    js_sys::Reflect::get(value, &JsValue::from_str("reason"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .expect("a substantive refusal carries a reason")
+}
+
+/// A held-document set whose one document carries `CERT` at the
+/// reserved well-known path — what a verifier that replicated the
+/// bound document actually holds.
+fn held_with_certificate() -> (JsHeldDocuments, Text) {
+    let cert = onomancy_dnssec::certificate::Certificate::decode(CERT)
+        .expect("the frozen capture decodes");
+    let anchor = format!("automerge:{}", cert.root_doc());
+
+    let mut doc = automerge::Automerge::new();
+    onomancy_automerge::certificates::put(&mut doc, &cert).expect("stored at the reserved key");
+
+    let mut held = JsHeldDocuments::new();
+    held.hold(&anchor, &doc.save()).expect("held");
+
+    (held, host(&anchor))
+}
+
 #[wasm_bindgen_test]
 fn a_real_certificate_verifies_inside_the_module() {
     let verdict = verify_certificate(CERT, &host("brooklynzelenka.com"), Some(YEARS_LATER))
@@ -76,8 +106,9 @@ fn a_real_certificate_verifies_inside_the_module() {
 
     assert_eq!(
         field(&verdict, "document"),
-        "VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj",
-        "the document the zone named"
+        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj",
+        "the document the zone named, spelled as the declared `automerge:` \
+         anchor — round-trippable into `new Name(document)`"
     );
     assert_eq!(field(&verdict, "hostname"), "brooklynzelenka.com");
     assert_eq!(field(&verdict, "serial"), "1787291588428");
@@ -88,7 +119,7 @@ fn a_real_certificate_verifies_inside_the_module() {
 
     // The half a DNSSEC walk cannot do: the signer's authority
     // threads the attested generation key, checked by replaying the
-    // carriage into a real Keyhive graph.
+    // carriage into a throwaway Keyhive instance.
     assert_eq!(field(&verdict, "generation"), "on-path");
 }
 
@@ -126,20 +157,26 @@ fn the_grading_inputs_come_back_with_the_grade() {
 
 #[wasm_bindgen_test]
 fn a_certificate_for_another_hostname_is_refused() {
-    let refused = verify_certificate(CERT, &host("example.com"), Some(YEARS_LATER));
+    let Err(refused) = verify_certificate(CERT, &host("example.com"), Some(YEARS_LATER)) else {
+        panic!("a certificate binds one hostname and says so in its signature");
+    };
 
-    assert!(
-        refused.is_err(),
-        "a certificate binds one hostname and says so in its signature"
-    );
+    // The CODE, not just "some error": retargeting this arm to a
+    // security-signal reason must fail here, not ship.
+    assert_eq!(reason_of(&refused), "hostname-mismatch");
 }
 
 #[wasm_bindgen_test]
 fn garbage_is_refused_without_panicking() {
-    assert!(
-        verify_certificate(&[0xFF; 64], &host("brooklynzelenka.com"), Some(YEARS_LATER)).is_err(),
-        "unparseable bytes"
-    );
+    let Err(refused) =
+        verify_certificate(&[0xFF; 64], &host("brooklynzelenka.com"), Some(YEARS_LATER))
+    else {
+        panic!("unparseable bytes");
+    };
+
+    // A wiring bug, not a forgery: `malformed`, never a security
+    // signal.
+    assert_eq!(reason_of(&refused), "malformed");
 
     assert!(
         verify_certificate(&[], &host("brooklynzelenka.com"), None).is_err(),
@@ -183,7 +220,7 @@ fn a_not_yet_valid_chain_grades_deferred_rather_than_throwing() {
     // Proven, just not in force: the binding is still reported.
     assert_eq!(
         field(&verdict, "document"),
-        "VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj"
+        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj"
     );
 
     // The D10 check was never reached, and `null` says so where a
@@ -263,4 +300,80 @@ fn the_same_certificate_is_provisional_once_stale() {
 
     assert_eq!(field(&verdict, "freshness"), "stale");
     assert_eq!(field(&verdict, "generation"), "provisional");
+}
+
+/// `verifyBinding` over a held document must agree with
+/// `verifyCertificate` over the same bytes: the document route reads
+/// the certificate out of the reserved well-known path and judges it
+/// with the same verifier.
+#[wasm_bindgen_test]
+fn verify_binding_agrees_with_verify_certificate() {
+    let (held, anchor) = held_with_certificate();
+
+    let from_document = verify_binding(
+        &held,
+        &anchor,
+        &host("brooklynzelenka.com"),
+        Some(YEARS_LATER),
+    )
+    .expect("the stored certificate verifies");
+    let from_bytes = verify_certificate(CERT, &host("brooklynzelenka.com"), Some(YEARS_LATER))
+        .expect("the same bytes verify");
+
+    for key in ["document", "hostname", "serial", "freshness", "generation"] {
+        assert_eq!(
+            field(&from_document, key),
+            field(&from_bytes, key),
+            "`{key}` must not depend on which entry point judged the evidence"
+        );
+    }
+}
+
+/// An empty or unheld document is absence, not refutation — and the
+/// code says which: `no-certificate-held`, never a security signal.
+#[wasm_bindgen_test]
+fn an_empty_document_is_absence_with_its_own_code() {
+    let cert = onomancy_dnssec::certificate::Certificate::decode(CERT).expect("decodes");
+    let anchor = format!("automerge:{}", cert.root_doc());
+
+    let mut held = JsHeldDocuments::new();
+    held.hold(&anchor, &automerge::Automerge::new().save())
+        .expect("held");
+
+    let Err(refused) = verify_binding(
+        &held,
+        &host(&anchor),
+        &host("brooklynzelenka.com"),
+        Some(YEARS_LATER),
+    ) else {
+        panic!("an empty document holds no certificate");
+    };
+    assert_eq!(reason_of(&refused), "no-certificate-held");
+
+    // Unheld is the same absence arriving one lookup earlier.
+    let Err(unheld) = verify_binding(
+        &JsHeldDocuments::new(),
+        &host(&anchor),
+        &host("brooklynzelenka.com"),
+        Some(YEARS_LATER),
+    ) else {
+        panic!("an unheld document holds no certificate");
+    };
+    assert_eq!(reason_of(&unheld), "no-certificate-held");
+}
+
+/// A document that binds OTHER hostnames is honest absence for this
+/// one — the exact confusion a past review caught: `hostname-mismatch`
+/// is a security signal about a unit, not the answer to "does this
+/// document bind that name".
+#[wasm_bindgen_test]
+fn another_hostnames_certificate_is_absence_not_a_mismatch() {
+    let (held, anchor) = held_with_certificate();
+
+    let Err(refused) = verify_binding(&held, &anchor, &host("example.com"), Some(YEARS_LATER))
+    else {
+        panic!("this document holds no certificate for example.com");
+    };
+
+    assert_eq!(reason_of(&refused), "no-certificate-held");
 }
