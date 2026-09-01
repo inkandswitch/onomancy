@@ -15,7 +15,7 @@
 
 use std::cell::Cell;
 
-use automerge::{transaction::Transactable, Automerge};
+use automerge::{Automerge, transaction::Transactable};
 use ed25519_dalek::SigningKey;
 use js_sys::{Array, Reflect};
 use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
@@ -30,7 +30,7 @@ use onomancy_protocol::resolve::{
     resolution::{PartialReason, Resolution},
     resolve,
 };
-use wasm_bindgen::{prelude::wasm_bindgen, JsError, JsValue};
+use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
 
 /// A browser-held document set: the anchoring and replication
 /// substrate a real agent would sync, reduced to in-memory documents

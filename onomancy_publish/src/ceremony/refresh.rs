@@ -12,7 +12,7 @@ use onomancy_dnssec::{certificate::Certificate, chain::DnssecChain, txt::record:
 use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, FreshBinding, Plan, Postcondition},
 };
 use alloc::boxed::Box;

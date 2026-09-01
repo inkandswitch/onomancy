@@ -18,7 +18,7 @@ use onomancy_dnssec::{
 use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
-    ceremony::{simulate, CeremonyError, Intent},
+    ceremony::{CeremonyError, Intent, simulate},
     plan::{Artifact, ArtifactKind, DnsOp, FreshBinding, Plan, Postcondition},
     signer::Signer,
 };

@@ -15,14 +15,14 @@ use testresult::TestResult;
 
 use onomancy_protocol::{
     test_utils::{
-        binding, binding_carrying, doc, generation, host, rotation, signer, succession, Binding,
+        Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
     },
     verifier::state::{
+        VerifierState,
         binding_state::{BindingGrade, BindingState, ContinuityGrade},
         decisions::{Acceptance, Claim, Decisions},
         memory::{authority::MemoryAuthority, validator::MemoryValidator},
-        store::{item::Item, Store},
-        VerifierState,
+        store::{Store, item::Item},
     },
 };
 

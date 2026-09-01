@@ -30,8 +30,8 @@ use onomancy_core::{
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
     signed::{
-        payload::{Malformed, Payload},
         Signed,
+        payload::{Malformed, Payload},
     },
     wire::{self, OversizeUnit, Reader, WireError},
 };

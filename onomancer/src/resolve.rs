@@ -19,10 +19,10 @@ use onomancy_hickory::provider::FetchChainError;
 use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::{
     state::{
+        VerifierState,
         decisions::Decisions,
         diff::{Event, EventKind},
         store::item::Item,
-        VerifierState,
     },
     verdict::{self, Rejection},
 };

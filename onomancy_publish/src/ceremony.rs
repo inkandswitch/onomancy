@@ -24,11 +24,11 @@ use onomancy_dnssec::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 use onomancy_protocol::verifier::state::{
+    VerifierState,
     authority_verifier::AuthorityVerifier,
     decisions::Decisions,
     memory::validator::MemoryValidator,
-    store::{item::Item, Store},
-    VerifierState,
+    store::{Store, item::Item},
 };
 
 /// The simulated chain window around `now`: comfortably fresh, zero
