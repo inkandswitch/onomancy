@@ -195,11 +195,23 @@ impl JsHeldDocuments {
     pub async fn resolve(
         &self,
         name: &Text,
-        root: Option<String>,
-        doh_url: Option<String>,
+        root: Option<Text>,
+        doh_url: Option<Text>,
     ) -> Result<JsValue, JsError> {
         let name = text::read(name, "a name")?;
         let name = SupportedName::parse(&name).map_err(|error| JsError::new(&error.to_string()))?;
+
+        // `Option<Text>` rather than `Option<String>`: the latter
+        // TRAPS inside the module on a non-string `Some` (`resolve(n,
+        // 42, …)` was `RuntimeError: memory access out of bounds`)
+        // and silently coerces `[]` to `""`.
+        let root = root
+            .map(|raw| text::read(&raw, "a root anchor"))
+            .transpose()?;
+        let doh_url = doh_url
+            .map(|raw| text::read(&raw, "a DoH URL"))
+            .transpose()?;
+
         // A DNS-anchored walk roots on the zone's word alone: the
         // certificate direction is verifyBinding's check, not this
         // method's, and the outcome says so explicitly below.

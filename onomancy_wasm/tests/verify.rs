@@ -466,3 +466,52 @@ fn a_clobbered_certificate_entry_names_the_pointer_problem() {
 
     assert_eq!(reason, "broken-indirection");
 }
+
+/// A deferred candidate never outranks an accepted one.
+///
+/// The selection key gives deferrals rank 0 below stale (1) and
+/// fresh (2). That claim was previously only a comment: a reviewer's
+/// mutant promoting deferrals to rank 3 survived the whole suite,
+/// because no document ever held a deferred and an accepted
+/// certificate at once. At this instant the record capture's window
+/// has not opened (deferred) while the carriage capture's has
+/// (fresh) — and the deferred one is stored FIRST, so first-wins
+/// would also fail this.
+#[wasm_bindgen_test]
+fn a_deferred_certificate_does_not_mask_an_accepted_one() {
+    /// After the carriage capture's inception (1_787_201_748), before
+    /// the record capture's (1_787_241_600).
+    const ONE_OPEN_ONE_NOT: f64 = 1_787_220_000.0;
+
+    let deferred_first = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
+        .expect("the record-made capture decodes");
+    let fresh_second = onomancy_dnssec::certificate::Certificate::decode(CERT)
+        .expect("the carriage capture decodes");
+    let anchor = format!("automerge:{}", fresh_second.root_doc());
+
+    let mut doc = automerge::Automerge::new();
+    onomancy_automerge::certificates::put(&mut doc, &deferred_first).expect("stored at index 0");
+    onomancy_automerge::certificates::put(&mut doc, &fresh_second).expect("stored at index 1");
+
+    let mut held = JsHeldDocuments::new();
+    held.hold(&host(&anchor), &doc.save()).expect("held");
+
+    let verdict = verify_binding(
+        &held,
+        &host(&anchor),
+        &host("brooklynzelenka.com"),
+        Some(ONE_OPEN_ONE_NOT),
+    )
+    .expect("an open window plus an unopened one is a verdict, not a deferral");
+
+    assert_eq!(
+        field(&verdict, "freshness"),
+        "fresh",
+        "the accepted candidate must win over the deferred one"
+    );
+    assert_eq!(
+        field(&verdict, "serial"),
+        "1787291588428",
+        "and it is the carriage capture's verdict"
+    );
+}

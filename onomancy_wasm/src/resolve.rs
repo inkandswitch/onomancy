@@ -57,14 +57,19 @@ use crate::{
 #[wasm_bindgen(js_name = resolveHostname)]
 pub async fn resolve_hostname(
     hostname: &Text,
-    doh_url: Option<String>,
+    doh_url: Option<Text>,
     now_seconds: Option<f64>,
 ) -> Result<JsResolution, JsValue> {
     // Typed `string` for TypeScript, checked at runtime anyway: a
-    // `&str` parameter faults inside the module on non-string input.
+    // `&str` parameter faults inside the module on non-string input,
+    // and `Option<String>` did the same for a non-string `Some`.
     // No `reason`: a wrong-typed argument is a caller bug, not a
     // finding about the name.
     let hostname = text::read(hostname, "a hostname").map_err(JsValue::from)?;
+    let doh_url = doh_url
+        .map(|raw| text::read(&raw, "a DoH URL"))
+        .transpose()
+        .map_err(JsValue::from)?;
 
     let hostname = DnsName::parse_display(&hostname).map_err(|error| {
         refusal::error(&error.to_string(), refusal::RefusalReason::InvalidHostname)
