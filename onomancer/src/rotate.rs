@@ -3,8 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Args;
-use ed25519_dalek::VerifyingKey;
-use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_core::{anchor::doc::DocAnchor, key};
 use onomancy_dnssec::{
     certificate::Certificate, dns_name::DnsName, txt::generation_key::GenerationKey,
 };
@@ -107,7 +106,7 @@ impl Rotate {
 /// Parse a TXT `g=`-spelled (base64) generation key.
 pub(crate) fn parse_generation(text: &str) -> Result<GenerationKey, NotAGenerationKey> {
     let bytes = plan_io::parse_base64_key(text).ok_or(NotAGenerationKey)?;
-    let key = VerifyingKey::from_bytes(&bytes).map_err(|_| NotAGenerationKey)?;
+    let key = key::decode(&bytes).map_err(|_| NotAGenerationKey)?;
     Ok(GenerationKey::from(key))
 }
 

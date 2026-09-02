@@ -16,7 +16,7 @@ use super::{
     generation_key::GenerationKey,
     serial::{ParseSerialError, Serial},
 };
-use onomancy_core::anchor::doc::DocAnchor;
+use onomancy_core::{anchor::doc::DocAnchor, key};
 
 /// The format tag this module implements, as it appears on the wire.
 pub const FORMAT_TAG: &str = "v=ONO0";
@@ -273,8 +273,7 @@ fn decode_key_field(
                 got: bytes.len(),
             })?;
 
-    VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|_| ParseTxtRecordError::NotACurvePoint { field: name })
+    key::decode(&key_bytes).map_err(|_| ParseTxtRecordError::NotACurvePoint { field: name })
 }
 
 /// Which field of the record an error is about.
@@ -667,6 +666,35 @@ mod tests {
                     field: FieldName::DocumentId
                 })
             );
+        }
+
+        /// Non-canonical spellings that lenient decompression accepts:
+        /// the negative-zero encoding (RFC 8032 §5.1.3 names no point)
+        /// and a `y` past the field prime. One key must have one
+        /// spelling, or a serial-tie dedup reads one claim as two.
+        #[test]
+        fn non_canonical_key_spellings_are_rejected() {
+            let mut negative_zero = [0u8; 32];
+            negative_zero[0] = 1;
+            negative_zero[31] = 0x80;
+
+            let good = vector(3, 7, 9).to_string();
+            let p_value = good
+                .split(';')
+                .nth(4)
+                .and_then(|f| f.strip_prefix("p="))
+                .expect("well-formed vector")
+                .to_string();
+
+            for spelling in [negative_zero, [0xff; 32]] {
+                let swapped = good.replace(&p_value, &BASE64.encode(spelling));
+                assert_eq!(
+                    TxtRecord::parse(&swapped),
+                    Err(ParseTxtRecordError::NotACurvePoint {
+                        field: FieldName::DocumentId
+                    })
+                );
+            }
         }
 
         /// The classify-vs-parse difference: dispositions become

@@ -35,7 +35,7 @@
 //! it: a hand-filtered bundle today, a scoped export later.
 
 use js_sys::Uint8Array;
-use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain, key};
 use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams},
     chain::DnssecChain,
@@ -237,7 +237,7 @@ fn parts(
         .map_err(|_| IssueError::SignerKeyLength)
         .map_err(JsValue::from)?;
 
-    let signer = ed25519_dalek::VerifyingKey::from_bytes(&signer)
+    let signer = key::decode(&signer)
         .map_err(|_| IssueError::SignerKeyNotACurvePoint)
         .map_err(JsValue::from)?;
 

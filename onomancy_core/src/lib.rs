@@ -15,6 +15,7 @@ pub mod anchor;
 pub mod collections;
 pub mod delegation_chain;
 pub mod digest;
+pub mod key;
 pub mod name;
 pub mod signed;
 pub mod time;
