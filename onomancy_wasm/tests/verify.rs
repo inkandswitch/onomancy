@@ -486,8 +486,8 @@ fn a_clobbered_certificate_entry_names_the_pointer_problem() {
 /// on `freshness_rank`, the function the selection key calls.
 #[wasm_bindgen_test]
 fn both_deferral_causes_grade_deferred_through_a_held_document() {
-    /// After the carriage capture's inception (1_787_201_748), before
-    /// the record capture's (1_787_241_600) — and before both serials.
+    /// After the carriage capture's inception (`1_787_201_748`), before
+    /// the record capture's (`1_787_241_600`) — and before both serials.
     const BEFORE_EVERYTHING_SETTLES: f64 = 1_787_220_000.0;
 
     let window_deferred = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
