@@ -25,6 +25,36 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(format!("{name}.chain"))
 }
 
+/// The catalog names every committed synthetic fixture. Without
+/// this, an empty (or shrunken) catalog passes the other tests
+/// vacuously — they iterate whatever `all_fixtures` returns. The
+/// `real_*` captures are excluded: they are production snapshots
+/// owned by `real_world.rs`, not catalog-generated.
+#[test]
+fn the_catalog_covers_every_committed_fixture() -> TestResult {
+    let fixtures_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut committed: Vec<String> = fs::read_dir(fixtures_dir)?
+        .filter_map(|entry| {
+            let file_name = entry.ok()?.file_name().into_string().ok()?;
+            let stem = file_name.strip_suffix(".chain")?;
+            (!stem.starts_with("real_")).then(|| stem.to_owned())
+        })
+        .collect();
+    committed.sort_unstable();
+
+    let mut cataloged: Vec<String> = all_fixtures()
+        .iter()
+        .map(|(name, _, _)| (*name).to_owned())
+        .collect();
+    cataloged.sort_unstable();
+
+    assert_eq!(
+        cataloged, committed,
+        "the fixture catalog and tests/fixtures/*.chain drifted apart"
+    );
+    Ok(())
+}
+
 #[test]
 fn committed_bytes_match_the_catalog() -> TestResult {
     for (name, chain, _) in all_fixtures() {

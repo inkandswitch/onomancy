@@ -303,6 +303,29 @@ mod tests {
         assert_eq!(format!("{owner}"), "_onomancy.expede.wtf");
     }
 
+    /// `onomancy_owner`'s cap is exact: a 243-octet hostname wires
+    /// to precisely 255 with the ten-octet service label and
+    /// composes; one more octet is refused.
+    #[test]
+    fn onomancy_owner_cap_is_exact() {
+        let hostname_of = |last: usize| {
+            let a = "a".repeat(63);
+            DnsName::parse(&alloc::format!("{a}.{a}.{a}.{}", "a".repeat(last))).expect("valid")
+        };
+
+        let at_cap = hostname_of(51);
+        assert_eq!(at_cap.as_str().len(), 243);
+        let owner = Name::onomancy_owner(&at_cap).expect("exactly the cap composes");
+        let mut wire = Vec::new();
+        owner.write(&mut wire);
+        assert_eq!(wire.len(), MAX_WIRE_LEN);
+
+        assert!(matches!(
+            Name::onomancy_owner(&hostname_of(52)),
+            Err(ParseNameError::NameTooLong)
+        ));
+    }
+
     #[test]
     fn compression_pointers_are_rejected() {
         assert!(matches!(

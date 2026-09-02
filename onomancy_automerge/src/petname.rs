@@ -501,8 +501,7 @@ mod tests {
                     right_first.merge(&mut left.clone()).expect("merge");
 
                     let joined_left_first = pins(&DocumentNamestore::new(left_first), &decisions);
-                    let joined_right_first =
-                        pins(&DocumentNamestore::new(right_first), &decisions);
+                    let joined_right_first = pins(&DocumentNamestore::new(right_first), &decisions);
 
                     assert_eq!(
                         joined_left_first, joined_right_first,
