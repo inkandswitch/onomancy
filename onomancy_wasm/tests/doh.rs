@@ -19,7 +19,7 @@ use onomancy_wasm::{
     doh::{DohError, DohProvider, FetchChainError},
     text::Text,
 };
-use wasm_bindgen::{closure::Closure, JsCast as _, JsValue};
+use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::JsFuture;
 use wasm_bindgen_test::wasm_bindgen_test;
 use web_sys::{Headers, Request, Response, ResponseInit};
