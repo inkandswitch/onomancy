@@ -170,7 +170,7 @@ fn garbage_is_refused_without_panicking() {
     let Err(refused) =
         verify_certificate(&[0xFF; 64], &host("brooklynzelenka.com"), Some(YEARS_LATER))
     else {
-        panic!("unparseable bytes");
+        panic!("unparsable bytes");
     };
 
     // A wiring bug, not a forgery: `malformed`, never a security

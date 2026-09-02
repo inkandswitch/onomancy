@@ -471,7 +471,7 @@ mod tests {
         }
     }
 
-    /// Pinned regressions: shapes that once mis-parsed stay parsed.
+    /// Pinned regressions: shapes that once parsed wrongly stay parsed.
     mod regressions {
         use super::*;
 
