@@ -18,10 +18,11 @@ Plus `petname::PetnameStore` for the writes the petname-anchor spec mandates: pi
 
 ## What lives in Automerge (and what does not)
 
-Automerge documents hold exactly two kinds of Onomancy data, both under the reserved top-level key `onomancy`:
+Automerge documents hold three kinds of Onomancy data, all as **top-level keys**. A namestore is the document's own map, not a container inside it, so a name `foo` is the key `foo` and nothing is nested. Protocol data sits beside the names under the `.well-known/onomancy/` prefix, and is absent from name matching because its value is not a reference rather than because any resolver knows the key.
 
-- **Namestore edges** — the flat `path → automerge:‹id›` map that path resolution walks; in the user's own root document these are the petnames.
-- **The decision document** — the user's decisions (acceptances, resets, claims), private to the user but replicated across the user's own devices; concurrent decisions surface as ordinary MV conflicts, resolved by the derivation's receipts rule.
+- **Namestore edges** — `path → automerge:‹id›` entries that path resolution walks; in the user's own root document these are the petnames.
+- **`.well-known/onomancy/certificates`** — the certificates binding DNS hostnames to this document, inline or one hop away.
+- **`.well-known/onomancy/decisions`** — the user's decisions (acceptances, resets, claims), private to the user but replicated across the user's own devices; concurrent decisions surface as ordinary MV conflicts, resolved by the derivation's receipts rule.
 
 The verifiable protocol records — certificates, DNSSEC chains, TXT records, statements — live in the binding-cache store (`onomancy_protocol::verifier_state::store`), never here: decision entries reference them only by opaque content hash.
 

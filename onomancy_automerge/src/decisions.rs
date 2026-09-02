@@ -27,7 +27,7 @@ use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions
 /// entry. Its value is a map rather than a reference, so it takes no
 /// part in path matching: non-reference values are absent from
 /// matching (path-resolution spec, Error Conditions).
-const DECISIONS_KEY: &str = ".well-known/onomancy/decisions";
+pub(crate) const DECISIONS_KEY: &str = ".well-known/onomancy/decisions";
 
 /// The decisions schema version this reader understands.
 pub const SCHEMA_VERSION: u64 = 0;

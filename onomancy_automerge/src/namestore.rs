@@ -35,9 +35,11 @@ pub const RESERVED_PREFIX: &str = ".well-known/onomancy/";
 /// A namestore read from one held Automerge document.
 ///
 /// Non-conforming stored keys (empty, `.`, or `..` segments; `#`;
-/// leading or trailing `/`) are absent by construction:
+/// leading or trailing `/`) are absent from *lookup* by construction:
 /// lookups are exact joins of already-valid [`Segment`]s, which no
-/// malformed key can equal. Values that are not bare `automerge:`
+/// malformed key can equal. [`Self::edges`] must exclude them
+/// explicitly, since enumeration has no such protection. Values that
+/// are not bare `automerge:`
 /// references are absent too — a name where a reference belongs is
 /// the symlink ban, and anything else is simply not an edge. That
 /// non-reference values are absent from matching is what lets
@@ -78,8 +80,19 @@ impl DocumentNamestore {
         self.doc
             .keys(automerge::ROOT)
             .filter_map(|key| {
+                // Both halves, or this is not the view `reference`
+                // has. That function can only be asked about
+                // already-valid segments, so a malformed key is
+                // unreachable through it; enumeration has to exclude
+                // such keys explicitly, or it reports as an edge
+                // something no name could ever match (spec E6).
+                if !is_path_key(&key) {
+                    return None;
+                }
+
                 let (value, _) = self.doc.get(automerge::ROOT, key.as_str()).ok()??;
                 let target = parse_bare_reference(&value)?;
+
                 Some((key, target))
             })
             .collect()
@@ -91,6 +104,17 @@ impl Namestore for DocumentNamestore {
         let (value, _) = self.doc.get(automerge::ROOT, path_key(path)).ok()??;
         parse_bare_reference(&value)
     }
+}
+
+/// Whether a stored key is a well-formed path: one or more valid
+/// segments joined by `/`.
+///
+/// The inverse of [`path_key`], and the check enumeration needs.
+/// Rejects the empty key, empty segments (`a//b`), leading and
+/// trailing `/`, and any segment [`Segment::parse`] refuses — `.`,
+/// `..`, and `#` among them (Namestore Layout, E6).
+fn is_path_key(key: &str) -> bool {
+    !key.is_empty() && key.split('/').all(|raw| Segment::parse(raw).is_ok())
 }
 
 /// The flat-map key for a segment path: segments joined by `/` — the
@@ -252,6 +276,16 @@ mod tests {
         Ok(())
     }
 
+    /// The prefix constant and the keys that use it must agree.
+    ///
+    /// They are separate string literals in separate modules, so a
+    /// rename desynchronizes them silently. This is the only thing
+    /// tying them together.
+    #[test]
+    fn reserved_keys_use_the_reserved_prefix() {
+        assert!(crate::certificates::CERTIFICATES_KEY.starts_with(RESERVED_PREFIX));
+        assert!(crate::decisions::DECISIONS_KEY.starts_with(RESERVED_PREFIX));
+    }
     #[test]
     fn an_empty_document_has_no_names() {
         let store = DocumentNamestore::new(Automerge::new());
@@ -268,6 +302,46 @@ mod tests {
             held.replica(&anchor(2)).is_none(),
             "not replicated here — never fetched"
         );
+        Ok(())
+    }
+
+    /// `edges` must see exactly what `reference` sees.
+    ///
+    /// `reference` is only ever asked about already-valid segments,
+    /// so a malformed key is unreachable through it. Enumeration has
+    /// no such protection, and without an explicit filter every one
+    /// of these came back as an edge — shown to a caller as a name
+    /// that no lookup could ever match (spec E6).
+    #[test]
+    fn enumeration_excludes_keys_no_name_could_match() -> TestResult {
+        let target = format!("automerge:{}", anchor(1));
+        let entries: Vec<(&str, &str)> =
+            ["", ".", "..", "/lead", "a//b", "has#hash", "trail/", "ok"]
+                .iter()
+                .map(|key| (*key, target.as_str()))
+                .collect();
+
+        let store = DocumentNamestore::new(namestore_doc(&entries)?);
+        let found: Vec<String> = store.edges().into_iter().map(|(key, _)| key).collect();
+
+        assert_eq!(found, vec!["ok"], "only well-formed keys are edges");
+        Ok(())
+    }
+
+    /// The other half of that parity: a well-formed key whose value
+    /// is not a reference is not an edge either — which is what lets
+    /// protocol entries sit beside names in one map.
+    #[test]
+    fn enumeration_excludes_non_reference_values() -> TestResult {
+        let reference = format!("automerge:{}", anchor(1));
+        let store = DocumentNamestore::new(namestore_doc(&[
+            (".well-known/onomancy/certificates", "not-a-reference"),
+            ("ok", reference.as_str()),
+        ])?);
+
+        let found: Vec<String> = store.edges().into_iter().map(|(key, _)| key).collect();
+
+        assert_eq!(found, vec!["ok"]);
         Ok(())
     }
 }

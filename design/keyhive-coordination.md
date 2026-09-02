@@ -73,7 +73,7 @@ ARK's membership events and our `kh0` carriage entries are the same underlying K
 
 ## Adjacent (automerge-repo, not Keyhive proper)
 
-- **Reserved namestore location**: Onomancy walks a flat map at a reserved top-level key (currently `onomancy`, marked provisional) in the document. Coordination so no upstream convention collides — and a ruling on the flat-map-with-multi-segment-keys vs sub-tree-path tension ([names.md](./names.md), open warning).
+- **Top-level key conventions**: Onomancy walks a document's **own** top-level map — a name is a bare root key, with no container to reserve. Protocol data uses the `.well-known/<owner>/<artifact>` prefix, and Onomancy claims only `.well-known/onomancy/`. What we need from upstream is agreement on that prefix convention rather than on a reserved container, so an application's keys and a protocol's keys can share one map without either enumerating the other. Still open: the flat-map-with-multi-segment-keys vs sub-tree-path tension ([names.md](./names.md), open warning).
 - **Doc-ID text encoding**: we adopted `automerge:` + bs58check wholesale; confirm key-based document IDs keep that spelling.
 
 ## What we run meanwhile
