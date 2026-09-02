@@ -106,6 +106,32 @@ refusal_reasons! {
             /// `_onomancy`. The caller can see and fix this.
             InvalidHostname => "invalid-hostname",
 
+            /// The supplied `dohUrl` does not parse as a URL. Not
+            /// `Transport`: retrying a URL that cannot parse can
+            /// never succeed, and telling a caller to check their
+            /// connection over a typo is the wrong-remedy bug this
+            /// vocabulary exists to prevent.
+            InvalidResolverUrl => "invalid-resolver-url",
+
+            /// A timestamp argument that cannot be epoch seconds —
+            /// negative, non-finite, or millisecond-scale
+            /// (`Date.now()` is the usual culprit; divide by 1000).
+            /// Refused rather than guessed at, because grading at the
+            /// wrong instant can turn a refusal into an acceptance.
+            InvalidTimestamp => "invalid-timestamp",
+
+            /// An argument of the right type whose value cannot be
+            /// used — a key of the wrong length, bytes that do not
+            /// frame, an anchor that does not parse. The message
+            /// names which argument.
+            ///
+            /// One code, deliberately: end-user-visible inputs (a
+            /// typed hostname, a clock) get specific codes because a
+            /// UI branches on them; developer wiring has one remedy
+            /// — fix the argument the message names — and codes
+            /// exist for remedies.
+            InvalidArgument => "invalid-argument",
+
             /// The bytes are not a well-formed certificate: framing, a
             /// wrong unit tag, or a non-canonical encoding. A wiring
             /// bug, not a forgery — the usual cause is passing the

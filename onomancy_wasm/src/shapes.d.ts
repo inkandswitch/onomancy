@@ -115,6 +115,9 @@ export type RefusalReason =
   | "broken-indirection"
   // The caller can see and fix these.
   | "invalid-hostname"
+  | "invalid-resolver-url"
+  | "invalid-timestamp"
+  | "invalid-argument"
   | "malformed"
   // Security signals: evidence arrived and failed.
   | "invalid-signature"

@@ -86,8 +86,9 @@ pub fn verify_certificate(
     now_seconds: Option<f64>,
 ) -> Result<JsVerdict, JsValue> {
     let hostname = parse_hostname(hostname)?;
-    let now = clock::resolve(now_seconds)
-        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
+    let now = clock::resolve(now_seconds).map_err(|error| {
+        refusal::error(&error.to_string(), refusal::RefusalReason::InvalidTimestamp)
+    })?;
 
     match verdict::verify(bytes, &hostname, now, &Validator::iana(), &KeyhiveAuthority) {
         Ok(verdict) => Ok(verdict_object(&verdict, now)),
@@ -140,8 +141,9 @@ pub fn verify_binding(
     }
 
     let hostname = parse_hostname(hostname)?;
-    let now = clock::resolve(now_seconds)
-        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
+    let now = clock::resolve(now_seconds).map_err(|error| {
+        refusal::error(&error.to_string(), refusal::RefusalReason::InvalidTimestamp)
+    })?;
     let anchor = parse_anchor(anchor).map_err(JsValue::from)?;
 
     let mut documents = HeldDocuments::default();

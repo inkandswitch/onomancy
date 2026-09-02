@@ -31,10 +31,10 @@ use onomancy_dnssec::{
     chain::DnssecChain,
     dns_name::DnsName,
 };
-use wasm_bindgen::{JsError, prelude::wasm_bindgen};
+use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 use crate::{
-    clock,
+    clock, refusal,
     text::{self, Text},
 };
 
@@ -58,7 +58,7 @@ pub fn signable_bytes(
     signer: &[u8],
     issued_at: f64,
     hostname: &Text,
-) -> Result<Uint8Array, JsError> {
+) -> Result<Uint8Array, JsValue> {
     let (params, signer) = parts(root_doc, signer, issued_at, hostname)?;
 
     Ok(Uint8Array::from(
@@ -99,12 +99,13 @@ pub fn encode_certificate(
     signature: &[u8],
     carriage: Vec<Uint8Array>,
     chain: &[u8],
-) -> Result<Uint8Array, JsError> {
+) -> Result<Uint8Array, JsValue> {
     let (mut params, signer) = parts(root_doc, signer, issued_at, hostname)?;
 
     let signature: [u8; 64] = signature
         .try_into()
-        .map_err(|_| JsError::new("a signature must be 64 bytes"))?;
+        .map_err(|_| IssueError::SignatureLength)
+        .map_err(JsValue::from)?;
 
     params.delegation_chain = DelegationChain::from(
         carriage
@@ -113,13 +114,93 @@ pub fn encode_certificate(
             .collect::<Vec<_>>(),
     );
 
-    params.chain = DnssecChain::read_framed(chain)
-        .map_err(|error| JsError::new(&format!("chain: {error}")))?;
+    params.chain =
+        DnssecChain::read_framed(chain).map_err(|error| JsValue::from(IssueError::Chain(error)))?;
 
     let certificate = Certificate::from_parts(params, signer, signature.into())
-        .map_err(|error| JsError::new(&error.to_string()))?;
+        .map_err(|error| JsValue::from(IssueError::Assemble(error)))?;
 
     Ok(Uint8Array::from(certificate.encode().as_slice()))
+}
+
+/// Why issuance refused its inputs.
+///
+/// A type so the reason code lives with the error's definition rather
+/// than at every call site, and so `?` carries both the message and
+/// the code across the JS boundary through the `From` impl below.
+#[derive(Debug, thiserror::Error)]
+enum IssueError {
+    /// The document anchor did not parse.
+    #[error("rootDoc: {0}")]
+    Anchor(onomancy_core::anchor::doc::ParseDocAnchorError),
+
+    /// The signer key is not 32 bytes.
+    #[error("a signer key must be 32 bytes")]
+    SignerKeyLength,
+
+    /// The signer bytes are not a curve point.
+    #[error("signer: not a valid ed25519 verifying key")]
+    SignerKeyNotACurvePoint,
+
+    /// The hostname is not a DNS name.
+    #[error(transparent)]
+    Hostname(onomancy_dnssec::dns_name::ParseDnsNameError),
+
+    /// The timestamp cannot be epoch seconds.
+    #[error(transparent)]
+    Timestamp(#[from] crate::clock::ClockError),
+
+    /// The signature is not 64 bytes.
+    #[error("a signature must be 64 bytes")]
+    SignatureLength,
+
+    /// The chain bytes did not frame.
+    #[error("chain: {0}")]
+    Chain(onomancy_core::wire::WireError),
+
+    /// Assembly refused: the signature does not cover the fields, or
+    /// the unit is over the cap.
+    #[error(transparent)]
+    Assemble(#[from] onomancy_dnssec::certificate::AssembleError),
+}
+
+impl IssueError {
+    /// The published code for this refusal.
+    ///
+    /// End-user-visible inputs (a hostname someone typed, a clock)
+    /// keep their specific codes; developer wiring gets the one
+    /// generic `invalid-argument`, with the message naming which
+    /// argument — codes exist for remedies, and "fix the argument the
+    /// message names" is one remedy, not five.
+    const fn reason(&self) -> refusal::RefusalReason {
+        use onomancy_dnssec::certificate::AssembleError;
+
+        match self {
+            Self::Hostname(_) => refusal::RefusalReason::InvalidHostname,
+            Self::Timestamp(_) => refusal::RefusalReason::InvalidTimestamp,
+
+            // The signature is well-formed and does not verify over
+            // these fields: either the wrong bytes were signed or the
+            // wrong key signed them, and both read as
+            // `invalid-signature`.
+            Self::Assemble(AssembleError::InvalidSignature) => {
+                refusal::RefusalReason::InvalidSignature
+            }
+
+            Self::Anchor(_)
+            | Self::SignerKeyLength
+            | Self::SignerKeyNotACurvePoint
+            | Self::SignatureLength
+            | Self::Chain(_)
+            | Self::Assemble(AssembleError::Oversize(_)) => refusal::RefusalReason::InvalidArgument,
+        }
+    }
+}
+
+impl From<IssueError> for JsValue {
+    fn from(error: IssueError) -> Self {
+        refusal::error(&error.to_string(), error.reason())
+    }
 }
 
 /// The shared field parsing, so the two calls cannot disagree about
@@ -129,30 +210,36 @@ fn parts(
     signer: &[u8],
     issued_at: f64,
     hostname: &Text,
-) -> Result<(CertificateParams, ed25519_dalek::VerifyingKey), JsError> {
-    let root_doc = text::read(root_doc, "a document anchor")?;
+) -> Result<(CertificateParams, ed25519_dalek::VerifyingKey), JsValue> {
+    // Type errors stay reasonless — `"reason" in error` separates a
+    // statement about the operation from "you passed the wrong kind
+    // of thing" — so `text::read` bypasses `IssueError`.
+    let root_doc = text::read(root_doc, "a document anchor").map_err(JsValue::from)?;
     let root_doc = DocAnchor::parse(
         root_doc
             .strip_prefix(onomancy_core::anchor::doc::SCHEME_PREFIX)
             .unwrap_or(&root_doc),
     )
-    .map_err(|error| JsError::new(&format!("rootDoc: {error}")))?;
+    .map_err(|error| JsValue::from(IssueError::Anchor(error)))?;
 
     let signer: [u8; 32] = signer
         .try_into()
-        .map_err(|_| JsError::new("a signer key must be 32 bytes"))?;
+        .map_err(|_| IssueError::SignerKeyLength)
+        .map_err(JsValue::from)?;
 
     let signer = ed25519_dalek::VerifyingKey::from_bytes(&signer)
-        .map_err(|_| JsError::new("signer: not a valid ed25519 verifying key"))?;
+        .map_err(|_| IssueError::SignerKeyNotACurvePoint)
+        .map_err(JsValue::from)?;
 
-    let hostname = DnsName::parse_display(&text::read(hostname, "a hostname")?)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    let hostname = text::read(hostname, "a hostname").map_err(JsValue::from)?;
+    let hostname = DnsName::parse_display(&hostname)
+        .map_err(|error| JsValue::from(IssueError::Hostname(error)))?;
 
     // Validated, not clamped: `Date.now()` here would date the
     // certificate in year 58000, and `NaN` would date it 1970. Both
     // silently, on the one field a verifier cannot cross-check.
-    let issued_at =
-        clock::seconds(issued_at, "issuedAt").map_err(|error| JsError::new(&error.to_string()))?;
+    let issued_at = clock::seconds(issued_at, "issuedAt")
+        .map_err(|error| JsValue::from(IssueError::Timestamp(error)))?;
 
     Ok((
         CertificateParams {

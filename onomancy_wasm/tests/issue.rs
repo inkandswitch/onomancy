@@ -195,3 +195,62 @@ fn an_assembled_certificate_without_a_chain_fails_at_the_chain() {
     // formed and correctly signed. It is the evidence that is absent.
     assert_eq!(reason, "chain-rejected");
 }
+
+/// Every refusal that is a statement about the operation carries a
+/// machine-readable `reason`, per the published contract — including
+/// this surface, which threw bare `JsError`s until a review noticed.
+#[wasm_bindgen_test]
+fn issuance_refusals_carry_reason_codes() {
+    let reason_of = |result: Result<js_sys::Uint8Array, JsValue>| -> String {
+        let Err(refusal) = result else {
+            panic!("expected a refusal");
+        };
+        js_sys::Reflect::get(&refusal, &JsValue::from_str("reason"))
+            .ok()
+            .and_then(|value| value.as_string())
+            .expect("a substantive refusal carries a reason")
+    };
+
+    // End-user-visible inputs keep their specific codes…
+    assert_eq!(
+        reason_of(signable_bytes(
+            &anchor(),
+            &signer_bytes(),
+            1_788_100_000_000.0, // Date.now(): milliseconds
+            &host(HOST),
+        )),
+        "invalid-timestamp"
+    );
+
+    // …developer wiring gets the one generic code, with the message
+    // naming the argument.
+    assert_eq!(
+        reason_of(signable_bytes(
+            &anchor(),
+            &[7u8; 31], // one byte short
+            ISSUED_AT,
+            &host(HOST),
+        )),
+        "invalid-argument"
+    );
+
+    // A signature that does not cover the fields is its own thing:
+    // not a malformed argument, a signature that fails.
+    let offered = signable_bytes(&anchor(), &signer_bytes(), ISSUED_AT, &host(HOST))
+        .expect("the fields are well formed");
+    let impostor = SigningKey::from_bytes(&[9u8; 32]);
+    let signature = impostor.sign(&offered.to_vec()).to_bytes().to_vec();
+
+    assert_eq!(
+        reason_of(encode_certificate(
+            &anchor(),
+            &signer_bytes(),
+            ISSUED_AT,
+            &host(HOST),
+            &signature,
+            vec![],
+            &[0x00],
+        )),
+        "invalid-signature"
+    );
+}

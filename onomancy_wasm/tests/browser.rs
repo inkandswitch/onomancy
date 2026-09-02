@@ -65,11 +65,11 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     let gallery = held.create_document()?;
     let year = held.create_document()?;
 
-    held.bind(&root, "pics/best", &gallery)?;
-    held.bind(&gallery, "2026", &year)?;
+    held.bind(&text(&root), &text("pics/best"), &text(&gallery))?;
+    held.bind(&text(&gallery), &text("2026"), &text(&year))?;
 
     let verdict = held
-        .resolve(&format!("{root}/pics/best/2026"), None, None)
+        .resolve(&text(&format!("{root}/pics/best/2026")), None, None)
         .await?;
 
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
@@ -87,15 +87,15 @@ async fn unsynced_targets_walk_partially() -> JsTestResult {
     let mut held = JsHeldDocuments::new();
     let root = held.create_document()?;
     let elsewhere = held.create_document()?;
-    held.bind(&root, "away", &elsewhere)?;
+    held.bind(&text(&root), &text("away"), &text(&elsewhere))?;
 
     // A second store holding only the root: the edge dangles there.
     let mut sparse = JsHeldDocuments::new();
     let sparse_root = sparse.create_document()?;
-    sparse.bind(&sparse_root, "away", &elsewhere)?;
+    sparse.bind(&text(&sparse_root), &text("away"), &text(&elsewhere))?;
 
     let verdict = sparse
-        .resolve(&format!("{sparse_root}/away/deeper"), None, None)
+        .resolve(&text(&format!("{sparse_root}/away/deeper")), None, None)
         .await?;
 
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
@@ -114,12 +114,12 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     let mut origin = JsHeldDocuments::new();
     let root = origin.create_document()?;
     let leaf = origin.create_document()?;
-    origin.bind(&root, "over/here", &leaf)?;
+    origin.bind(&text(&root), &text("over/here"), &text(&leaf))?;
 
     // A second tab: nothing held, so even the ROOT is an unsynced target.
     let mut other = JsHeldDocuments::new();
     let verdict = other
-        .resolve(&format!("{root}/over/here"), None, None)
+        .resolve(&text(&format!("{root}/over/here")), None, None)
         .await?;
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("partial"));
@@ -127,11 +127,11 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     assert_eq!(target.as_string().as_deref(), Some(root.as_str()));
 
     // Carry the real bytes across (the demo does this over HTTP).
-    other.hold(&root, &origin.save(&root)?)?;
-    other.hold(&leaf, &origin.save(&leaf)?)?;
+    other.hold(&text(&root), &origin.save(&text(&root))?)?;
+    other.hold(&text(&leaf), &origin.save(&text(&leaf))?)?;
 
     let verdict = other
-        .resolve(&format!("{root}/over/here"), None, None)
+        .resolve(&text(&format!("{root}/over/here")), None, None)
         .await?;
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("resolved"));

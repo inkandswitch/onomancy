@@ -6,7 +6,7 @@ use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{
     chain_provider::ChainProvider, dns_name::DnsName, freshness::Grade, validator::Validator,
 };
-use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
 
 use crate::{
     clock,
@@ -76,9 +76,10 @@ pub async fn resolve_hostname(
     if let Some(url) = doh_url.as_deref()
         && web_sys::Url::new(url).is_err()
     {
-        return Err(JsValue::from(JsError::new(&format!(
-            "dohUrl is not a valid URL: {url}"
-        ))));
+        return Err(refusal::error(
+            &format!("dohUrl is not a valid URL: {url}"),
+            refusal::RefusalReason::InvalidResolverUrl,
+        ));
     }
 
     let provider = doh_url.map_or_else(DohProvider::cloudflare, DohProvider::new);
@@ -92,8 +93,9 @@ pub async fn resolve_hostname(
         .validate_detailed(&hostname, &chain)
         .map_err(|error| refusal::error(&error.to_string(), refusal::validation_reason(&error)))?;
 
-    let now = clock::resolve(now_seconds)
-        .map_err(|error| JsValue::from(JsError::new(&error.to_string())))?;
+    let now = clock::resolve(now_seconds).map_err(|error| {
+        refusal::error(&error.to_string(), refusal::RefusalReason::InvalidTimestamp)
+    })?;
     let freshness = match proof.window.grade(now) {
         Grade::Fresh => "fresh",
         Grade::Stale => "stale",

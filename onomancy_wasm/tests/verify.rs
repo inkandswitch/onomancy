@@ -93,7 +93,7 @@ fn held_with_certificate() -> (JsHeldDocuments, Text) {
     onomancy_automerge::certificates::put(&mut doc, &cert).expect("stored at the reserved key");
 
     let mut held = JsHeldDocuments::new();
-    held.hold(&anchor, &doc.save()).expect("held");
+    held.hold(&host(&anchor), &doc.save()).expect("held");
 
     (held, host(&anchor))
 }
@@ -337,7 +337,7 @@ fn an_empty_document_is_absence_with_its_own_code() {
     let anchor = format!("automerge:{}", cert.root_doc());
 
     let mut held = JsHeldDocuments::new();
-    held.hold(&anchor, &automerge::Automerge::new().save())
+    held.hold(&host(&anchor), &automerge::Automerge::new().save())
         .expect("held");
 
     let Err(refused) = verify_binding(
@@ -399,7 +399,7 @@ fn a_stale_certificate_first_in_the_list_does_not_mask_a_fresh_one() {
     onomancy_automerge::certificates::put(&mut doc, &fresh_second).expect("stored at index 1");
 
     let mut held = JsHeldDocuments::new();
-    held.hold(&anchor, &doc.save()).expect("held");
+    held.hold(&host(&anchor), &doc.save()).expect("held");
 
     let verdict = verify_binding(
         &held,
@@ -448,7 +448,7 @@ fn a_clobbered_certificate_entry_names_the_pointer_problem() {
 
     let mut held = JsHeldDocuments::new();
     let anchor = "automerge:2nBeEMDjAzFa9Ev2pxwejYrgCRmSLx96SbA24uhdMMTUktJWvK";
-    held.hold(anchor, &doc.save()).expect("held");
+    held.hold(&host(anchor), &doc.save()).expect("held");
 
     let Err(refusal) = onomancy_wasm::verify::verify_binding(
         &held,

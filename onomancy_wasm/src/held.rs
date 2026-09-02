@@ -32,6 +32,8 @@ use onomancy_protocol::resolve::{
 };
 use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
 
+use crate::text::{self, Text};
+
 /// A browser-held document set: the anchoring and replication
 /// substrate a real agent would sync, reduced to in-memory documents
 /// for the demo.
@@ -76,8 +78,8 @@ impl JsHeldDocuments {
     ///
     /// Throws for malformed anchors.
     #[wasm_bindgen(js_name = holdAt)]
-    pub fn hold_at(&mut self, anchor: &str) -> Result<(), JsError> {
-        let anchor = parse_anchor(anchor)?;
+    pub fn hold_at(&mut self, anchor: &Text) -> Result<(), JsError> {
+        let anchor = parse_anchor(&text::read(anchor, "a document anchor")?)?;
         self.docs.entry(anchor).or_default();
         Ok(())
     }
@@ -90,8 +92,8 @@ impl JsHeldDocuments {
     ///
     /// Throws for malformed anchors and bytes that do not load as an
     /// Automerge document.
-    pub fn hold(&mut self, anchor: &str, bytes: &[u8]) -> Result<(), JsError> {
-        let anchor = parse_anchor(anchor)?;
+    pub fn hold(&mut self, anchor: &Text, bytes: &[u8]) -> Result<(), JsError> {
+        let anchor = parse_anchor(&text::read(anchor, "a document anchor")?)?;
         let doc = Automerge::load(bytes)
             .map_err(|error| JsError::new(&format!("not an automerge document: {error}")))?;
         self.docs.insert(anchor, doc);
@@ -103,8 +105,8 @@ impl JsHeldDocuments {
     /// # Errors
     ///
     /// Throws for unknown anchors.
-    pub fn save(&self, anchor: &str) -> Result<Vec<u8>, JsError> {
-        Ok(self.held(anchor)?.save())
+    pub fn save(&self, anchor: &Text) -> Result<Vec<u8>, JsError> {
+        Ok(self.held(&text::read(anchor, "a document anchor")?)?.save())
     }
 
     /// Every held anchor (`automerge:…`), sorted.
@@ -123,11 +125,15 @@ impl JsHeldDocuments {
     ///
     /// Throws for unknown anchors, malformed paths or targets, and
     /// write failures.
-    pub fn bind(&mut self, anchor: &str, path: &str, target: &str) -> Result<(), JsError> {
-        let key = path_of(path)?;
-        let value = format!("{}{}", doc::SCHEME_PREFIX, parse_anchor(target)?);
+    pub fn bind(&mut self, anchor: &Text, path: &Text, target: &Text) -> Result<(), JsError> {
+        let key = path_of(&text::read(path, "a path")?)?;
+        let value = format!(
+            "{}{}",
+            doc::SCHEME_PREFIX,
+            parse_anchor(&text::read(target, "a target anchor")?)?
+        );
 
-        let doc = self.held_mut(anchor)?;
+        let doc = self.held_mut(&text::read(anchor, "a document anchor")?)?;
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
             // A name is a root key: `foo` is `root["foo"]`. The store
             // is the document's own map, flat, shared with whatever
@@ -144,8 +150,11 @@ impl JsHeldDocuments {
     /// # Errors
     ///
     /// Throws for unknown anchors.
-    pub fn edges(&self, anchor: &str) -> Result<JsValue, JsError> {
-        let namestore = DocumentNamestore::new(self.held(anchor)?.clone());
+    pub fn edges(&self, anchor: &Text) -> Result<JsValue, JsError> {
+        let namestore = DocumentNamestore::new(
+            self.held(&text::read(anchor, "a document anchor")?)?
+                .clone(),
+        );
 
         let list = Array::new();
         for (path, target) in namestore.edges() {
@@ -185,11 +194,12 @@ impl JsHeldDocuments {
     /// and live-anchoring failures.
     pub async fn resolve(
         &self,
-        name: &str,
+        name: &Text,
         root: Option<String>,
         doh_url: Option<String>,
     ) -> Result<JsValue, JsError> {
-        let name = SupportedName::parse(name).map_err(|error| JsError::new(&error.to_string()))?;
+        let name = text::read(name, "a name")?;
+        let name = SupportedName::parse(&name).map_err(|error| JsError::new(&error.to_string()))?;
         // A DNS-anchored walk roots on the zone's word alone: the
         // certificate direction is verifyBinding's check, not this
         // method's, and the outcome says so explicitly below.
