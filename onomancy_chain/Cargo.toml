@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_chain"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sans-IO DNSSEC chain building for Onomancy: questions out, records in, framed links"
 readme = "./README.md"
 

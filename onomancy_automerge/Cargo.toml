@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_automerge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automerge substrate adapter for Onomancy: namestore walking, decision reading, petnames"
 readme = "./README.md"
 

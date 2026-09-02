@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_dnssec"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sans-IO DNSSEC chain validation for Onomancy: RFC 4034/4035 over supplied bytes"
 readme = "./README.md"
 

@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_publish"
-version = "0.1.0"
+version = "0.2.0"
 description = "Publisher ceremonies for Onomancy: Plans that verify by construction"
 readme = "./README.md"
 

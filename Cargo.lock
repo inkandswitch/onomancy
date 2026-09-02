@@ -1452,7 +1452,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "onomancer"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "automerge",
  "base64",
@@ -1472,7 +1472,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_automerge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "automerge",
  "ed25519-dalek",
@@ -1486,7 +1486,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_chain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hickory-proto",
  "onomancy_core",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arbitrary",
  "base64",
@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_dnssec"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arbitrary",
  "base64",
@@ -1535,7 +1535,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_hickory"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hickory-proto",
  "onomancy_chain",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_keyhive"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "ed25519-dalek",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bolero",
  "ed25519-dalek",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_publish"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ed25519-dalek",
  "onomancy_core",
@@ -1594,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "onomancy_wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "automerge",
  "console_error_panic_hook",
