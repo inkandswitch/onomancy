@@ -178,10 +178,11 @@ fn garbage_is_refused_without_panicking() {
     // signal.
     assert_eq!(reason_of(&refused), "malformed");
 
-    assert!(
-        verify_certificate(&[], &host("brooklynzelenka.com"), None).is_err(),
-        "no bytes at all"
-    );
+    // No bytes at all is the same wiring bug wearing a shorter coat.
+    let Err(empty) = verify_certificate(&[], &host("brooklynzelenka.com"), None) else {
+        panic!("no bytes at all");
+    };
+    assert_eq!(reason_of(&empty), "malformed");
 }
 
 #[wasm_bindgen_test]
@@ -376,4 +377,48 @@ fn another_hostnames_certificate_is_absence_not_a_mismatch() {
     };
 
     assert_eq!(reason_of(&refused), "no-certificate-held");
+}
+
+/// Selection is order-insensitive: a stale certificate stored at
+/// index 0 must not mask a fresh one at index 1. The two frozen
+/// captures overlap so that at this instant one is stale
+/// (`real_brooklynzelenka`, window ends 1787355259) and the other
+/// fresh (`…_carriage`, window ends 1787381748) — under the old
+/// first-that-verifies loop, list order decided which verdict a
+/// caller saw.
+#[wasm_bindgen_test]
+fn a_stale_certificate_first_in_the_list_does_not_mask_a_fresh_one() {
+    const BOTH_HELD_ONE_FRESH: f64 = 1_787_360_000.0;
+
+    let stale_first = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
+        .expect("the record-made capture decodes");
+    let fresh_second = onomancy_dnssec::certificate::Certificate::decode(CERT)
+        .expect("the carriage capture decodes");
+    let anchor = format!("automerge:{}", fresh_second.root_doc());
+
+    let mut doc = automerge::Automerge::new();
+    onomancy_automerge::certificates::put(&mut doc, &stale_first).expect("stored at index 0");
+    onomancy_automerge::certificates::put(&mut doc, &fresh_second).expect("stored at index 1");
+
+    let mut held = JsHeldDocuments::new();
+    held.hold(&anchor, &doc.save()).expect("held");
+
+    let verdict = verify_binding(
+        &held,
+        &host(&anchor),
+        &host("brooklynzelenka.com"),
+        Some(BOTH_HELD_ONE_FRESH),
+    )
+    .expect("both certificates verify; the ladder picks");
+
+    assert_eq!(
+        field(&verdict, "freshness"),
+        "fresh",
+        "the fresh candidate must win whatever its list position"
+    );
+    assert_eq!(
+        field(&verdict, "serial"),
+        "1787291588428",
+        "and it is the carriage capture's verdict, not the stale one's"
+    );
 }

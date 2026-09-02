@@ -669,8 +669,12 @@ mod tests {
 
         assert_eq!(binding.signer(), &named.verifying_key(), "fixture sanity");
         assert!(
-            onomancy_core::signed::Signed::sign(binding, &other).is_err(),
-            "a payload must be signed by the key it names as its signer"
+            matches!(
+                onomancy_core::signed::Signed::sign(binding, &other),
+                Err(onomancy_core::signed::payload::Malformed::InvalidSignature)
+            ),
+            "a payload must be signed by the key it names as its signer — \
+             refused as the documented `InvalidSignature`, not some other shape"
         );
     }
 

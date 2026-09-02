@@ -910,3 +910,334 @@ fn a_bare_chain_refresh_corroborates_a_certificate_backed_document() -> TestResu
     );
     Ok(())
 }
+
+#[test]
+fn a_refresh_never_revives_a_d10_rejected_certificate() -> TestResult {
+    // B14 across the stage boundary (review probe B): the hostname's
+    // only certificate is FRESH with an off-path generation — D10
+    // MUST reject it — and a fresh bare refresh attests the same
+    // document. The refresh is the zone's word alone; it must not
+    // relaunder the document into candidacy, and its own D10 input
+    // is judged against validated carriages, never assumed.
+    let b = binding(1, 2, 7, 100, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+    let refresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+    let validator = MemoryValidator::default()
+        .with(host(), &b.chain, b.proof.clone())
+        .with(host(), &refresh.chain, refresh.proof.clone());
+    let authority = MemoryAuthority::default().off_path(&generation(2));
+
+    let mut store = Store::default();
+    store.insert(Item::Record(b.cert.clone()));
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: refresh.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &authority,
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    assert_eq!(
+        state.accepted, None,
+        "a bare refresh must not confirm the binding D10 just rejected"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_refresh_never_revives_a_d12_rejected_certificate() -> TestResult {
+    // The D12 flavour (review probe A), sharpened: the settled
+    // rotation G2→G3 puts G2 in the protected prefix, so the stale
+    // certificate attesting G2 is rejected at stage 4. The fresh
+    // bare refresh attests G3 — the CURRENT generation, on-path,
+    // unprotected — so the refresh row itself survives every
+    // stage-4 rule, and only the stage-5 candidacy restriction
+    // (certificate-attested survivors) stands between the zone's
+    // word and a Confirmed binding. This is the case the stage-2
+    // filter alone cannot carry.
+    let statement = rotation(1, 2, 3)?;
+    let old = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+    let refresh = binding(1, 3, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+    let validator = MemoryValidator::default()
+        .with(host(), &old.chain, old.proof.clone())
+        .with(host(), &refresh.chain, refresh.proof.clone());
+
+    let mut store = Store::default();
+    store.insert(Item::Record(old.cert.clone()));
+    store.insert(Item::Rotation(statement));
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: refresh.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &MemoryAuthority::default(),
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    assert_eq!(
+        state.accepted, None,
+        "a bare refresh must not revive candidacy D12 killed"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_refresh_cannot_swap_the_accepted_generation_off_path() -> TestResult {
+    // The generation-swap (review probe B's sharp end): the document
+    // IS a candidate — its certificate survives, stale, attesting
+    // G2 on-path — and the zone then publishes a fresh record for a
+    // NEW generation G9 that lies on no validated carriage's path.
+    // A bare refresh carries that record. Its D10 input must be
+    // judged against the validated carriages (off-path ⇒ fresh
+    // reject), never assumed: otherwise the fresh refresh row
+    // becomes the document's ladder-best record and the accepted
+    // binding silently carries a generation key no carriage was
+    // ever checked against.
+    let cert = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+    let refresh = binding(1, 9, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+    let validator = MemoryValidator::default()
+        .with(host(), &cert.chain, cert.proof.clone())
+        .with(host(), &refresh.chain, refresh.proof.clone());
+    let authority = MemoryAuthority::default().off_path(&generation(9));
+
+    let mut store = Store::default();
+    store.insert(Item::Record(cert.cert.clone()));
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: refresh.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &authority,
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    let accepted = state
+        .accepted
+        .expect("the certificate-backed document stands");
+    assert_eq!(
+        accepted.generation,
+        generation(2),
+        "the accepted generation must be the certificate-attested one"
+    );
+    assert_eq!(
+        accepted.grade,
+        BindingGrade::Provisional,
+        "an off-path fresh refresh confers no fresh support"
+    );
+    Ok(())
+}
+
+#[test]
+fn equal_key_junk_never_blanks_an_acceptance_backed_incumbent() -> TestResult {
+    // B1 + B13 together (review probe C): an acceptance-backed
+    // incumbent, plus two stale, unproven, unconnected candidates
+    // whose zone-state keys are fully equal. One junk record is a
+    // pending badge; two junk records must not become a contest that
+    // masks the binding — B13's candidate arm requires "no
+    // incumbent", and B1's challengers never displace one, however
+    // many arrive or how late their keys read.
+    let incumbent = binding(1, 2, 1, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+    let junk_a = binding(2, 3, 2, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+    let junk_b = binding(3, 4, 3, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+
+    let state = run(
+        &[&incumbent, &junk_a, &junk_b],
+        &accept(doc(1), &incumbent),
+        vec![],
+    );
+
+    assert!(
+        !state.contested,
+        "ineligible ties are pending, never a contest"
+    );
+    let accepted = state.accepted.expect("the incumbent stands");
+    assert_eq!(accepted.document, doc(1));
+    assert_eq!(
+        state.pending,
+        vec![doc(2), doc(3)],
+        "both challengers badge pending"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_dual_publish_refresh_does_not_contest_its_own_hostname() -> TestResult {
+    // Review probe F: a bare refresh of an RRset carrying TWO records
+    // for one document (serials 100 and 150) — the spec's sanctioned
+    // migration shape. Within one item the highest serial is the
+    // zone's word, exactly as the certificate path reads it; a
+    // publisher doing what the spec recommends must not render their
+    // own name contested.
+    let cert = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+    let refresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+    let dual = onomancy_dnssec::chain_proof::ChainProof {
+        records: vec![
+            onomancy_dnssec::txt::record::TxtRecord::new(
+                Serial::from(100),
+                onomancy_protocol::test_utils::generation(2),
+                doc(1),
+            ),
+            onomancy_dnssec::txt::record::TxtRecord::new(
+                Serial::from(150),
+                onomancy_protocol::test_utils::generation(2),
+                doc(1),
+            ),
+        ],
+        window: refresh.proof.window,
+    };
+
+    let validator = MemoryValidator::default()
+        .with(host(), &cert.chain, cert.proof.clone())
+        .with(host(), &refresh.chain, dual);
+
+    let mut store = Store::default();
+    store.insert(Item::Record(cert.cert.clone()));
+    store.insert(Item::ChainRefresh {
+        hostname: host(),
+        chain: refresh.chain.clone(),
+    });
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &Decisions::default(),
+        &Map::default(),
+        &validator,
+        &MemoryAuthority::default(),
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    assert!(
+        !state.contested,
+        "dual-publish is sanctioned, not a contest"
+    );
+    let accepted = state.accepted.expect("the document stands");
+    assert_eq!(accepted.document, doc(1));
+    assert_eq!(accepted.grade, BindingGrade::Confirmed);
+    assert_eq!(
+        state.effective_serial,
+        Some(Serial::from(150)),
+        "the higher serial is the zone's word"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_acceptance_citing_a_dual_publish_refresh_holds() -> TestResult {
+    // Review probe E: one cited ITEM can legally yield several
+    // evidence rows — a bare refresh of a migration RRset carries one
+    // row per document. A receipt-shape check that counts rows
+    // against cited hashes silently voids exactly those receipts,
+    // reverting the hostname to ladder-maximal incumbency. The check
+    // must be per item.
+    let cert_one = binding(1, 2, 1, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+    let challenger = binding(2, 3, 2, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+    let refresh = binding(1, 2, 8, 150, (NOW - 80_000, NOW - 40_000), 45)?;
+
+    // The refresh's RRset dual-publishes ACROSS documents: one record
+    // each for doc(1) and doc(2) — two evidence rows, one item hash.
+    let dual = onomancy_dnssec::chain_proof::ChainProof {
+        records: vec![
+            onomancy_dnssec::txt::record::TxtRecord::new(
+                Serial::from(150),
+                onomancy_protocol::test_utils::generation(2),
+                doc(1),
+            ),
+            onomancy_dnssec::txt::record::TxtRecord::new(
+                Serial::from(150),
+                onomancy_protocol::test_utils::generation(3),
+                doc(2),
+            ),
+        ],
+        window: refresh.proof.window,
+    };
+
+    let refresh_item = Item::ChainRefresh {
+        hostname: host(),
+        chain: refresh.chain.clone(),
+    };
+
+    let mut cited = Set::default();
+    cited.insert(refresh_item.content_hash());
+    let mut acceptances = Map::default();
+    acceptances.insert(
+        host(),
+        vec![Acceptance {
+            document: doc(1),
+            cited,
+        }],
+    );
+    let decisions = Decisions {
+        acceptances,
+        ..Decisions::default()
+    };
+
+    let validator = MemoryValidator::default()
+        .with(host(), &cert_one.chain, cert_one.proof.clone())
+        .with(host(), &challenger.chain, challenger.proof.clone())
+        .with(host(), &refresh.chain, dual);
+
+    let mut store = Store::default();
+    store.insert(Item::Record(cert_one.cert.clone()));
+    store.insert(Item::Record(challenger.cert.clone()));
+    store.insert(refresh_item);
+
+    let state = VerifierState::compute(
+        &store,
+        UnixSeconds::from(NOW),
+        &decisions,
+        &Map::default(),
+        &validator,
+        &MemoryAuthority::default(),
+    )
+    .bindings
+    .get(&host())
+    .cloned()
+    .unwrap_or_default();
+
+    assert!(!state.contested);
+    let accepted = state
+        .accepted
+        .expect("the acceptance-backed incumbent stands");
+    assert_eq!(
+        accepted.document,
+        doc(1),
+        "a well-formed receipt must not be voided by a row count"
+    );
+    assert_eq!(state.pending, vec![doc(2)], "the challenger badges pending");
+    Ok(())
+}

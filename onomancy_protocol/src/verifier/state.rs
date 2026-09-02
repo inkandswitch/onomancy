@@ -54,6 +54,7 @@ use onomancy_core::{
 };
 use onomancy_dnssec::{
     certificate::Certificate,
+    chain::DnssecChain,
     chain_proof::{ChainProof, ChainValidator},
     dns_name::DnsName,
     freshness::{Freshness, Grade, ValidityWindow},
@@ -182,12 +183,17 @@ fn derive_host<A: AuthorityVerifier>(
             .filter(|r| !is_deferred(r, now))
             .collect();
 
-        // Both directions or nothing (B14): a bare chain refresh is
-        // the zone's word alone, so it corroborates a document some
-        // certificate record already attests for this hostname — it
-        // never makes a document a candidate by itself. Judged after
-        // exclusion: a reset that clears a document's certificates
-        // clears its refreshes' standing with them.
+        // Both directions or nothing (B14), first cut: a bare chain
+        // refresh is the zone's word alone, so it rides only beside a
+        // certificate record for the same document. Judged after
+        // exclusion — a reset that clears a document's certificates
+        // clears its refreshes' standing with them — but BEFORE the
+        // stage-4 generation rules, so this filter alone cannot carry
+        // B14: a certificate can still die under D10/D12 below.
+        // Candidacy is therefore restricted to certificate-attested
+        // SURVIVORS again at stage 5, and a refresh row's own D10
+        // input is judged against validated carriages at extraction,
+        // never assumed.
         let corroborated: Set<DocAnchor> = records
             .iter()
             .filter(|r| r.attestation == Attestation::Certificate)
@@ -416,7 +422,22 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
     validator: &V,
     authority: &A,
 ) -> Evidence {
+    /// A refresh item deferred to the second extraction pass, so it
+    /// is judged against every validated certificate carriage
+    /// regardless of store order.
+    struct PendingRefresh<'a> {
+        hostname: &'a DnsName,
+        chain: &'a DnssecChain,
+        hash: Digest<Blake3, [u8]>,
+    }
+
     let mut evidence = Evidence::default();
+
+    // Carriages of certificates that VALIDATED (chain proven, signer
+    // authorized): the only delegation evidence a bare refresh may be
+    // judged against.
+    let mut validated_carriages: Vec<(DnsName, DocAnchor, &DelegationChain)> = Vec::new();
+    let mut refreshes: Vec<PendingRefresh<'_>> = Vec::new();
 
     for item in store.items() {
         let hash = item.content_hash();
@@ -447,43 +468,23 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                 }
 
                 if let Some(binding) = validate_record(certificate, hash, validator, authority) {
+                    validated_carriages.push((
+                        binding.hostname.clone(),
+                        binding.document,
+                        certificate.delegation_chain(),
+                    ));
                     evidence.records.push(binding);
                 }
             }
 
-            Item::ChainRefresh { hostname, chain } => {
-                let Ok(ChainProof { records, window }) = validator.validate(hostname, chain) else {
-                    continue;
-                };
-
-                // A bare refresh proves the whole RRset. Each record
-                // is CORROBORATING evidence, never candidacy: the
-                // zone's word is one direction, and stage 2 drops
-                // refresh records whose document no surviving
-                // certificate record attests (B14).
-                evidence
-                    .records
-                    .extend(records.iter().map(|record| BindingEvidence {
-                        attestation: Attestation::ChainOnly,
-                        document: *record.document(),
-                        generation: *record.generation(),
-                        hash,
-                        hostname: hostname.clone(),
-                        key: ZoneStateKey {
-                            window_end: window.expiration(),
-                            serial: record.serial(),
-                            // Bare refreshes sort below equal-window,
-                            // equal-serial certificate items.
-                            issued_at: UnixSeconds::from(0),
-                        },
-                        // No carriage of its own to judge: D10 was
-                        // judged on the certificate record whose
-                        // document this refresh corroborates, and a
-                        // refresh never survives without one.
-                        generation_on_path: true,
-                        window,
-                    }));
-            }
+            // Deferred to the second pass: a refresh's D10 standing
+            // is judged against validated certificate carriages, and
+            // store order must not decide which certificates it sees.
+            Item::ChainRefresh { hostname, chain } => refreshes.push(PendingRefresh {
+                hostname,
+                chain,
+                hash,
+            }),
 
             Item::Rotation(statement) => {
                 extract_rotation(&mut evidence, authority, statement, None);
@@ -492,6 +493,70 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
             Item::Successor(statement) => {
                 extract_successor(&mut evidence, authority, statement, None);
             }
+        }
+    }
+
+    for PendingRefresh {
+        hostname,
+        chain,
+        hash,
+    } in refreshes
+    {
+        let Ok(ChainProof { records, window }) = validator.validate(hostname, chain) else {
+            continue;
+        };
+
+        // A bare refresh proves the whole RRset — as corroborating
+        // evidence, never candidacy (B14; stage 5 restricts the
+        // candidate universe to certificate-attested survivors).
+        // Within one RRset, several records for one document are
+        // legal only as migration dual-publish ACROSS documents; for
+        // a single document the highest serial is the zone's word,
+        // exactly as `validate_record` reads it on the certificate
+        // path — emitting every serial as its own row would make one
+        // refresh item contest itself.
+        let mut documents: Vec<DocAnchor> = records.iter().map(|r| *r.document()).collect();
+        documents.sort_unstable();
+        documents.dedup();
+
+        for document in documents {
+            let Some(record) = records
+                .iter()
+                .filter(|r| r.document() == &document)
+                .max_by_key(|r| r.serial())
+            else {
+                continue;
+            };
+
+            // D10 judged HONESTLY, never assumed: the refresh carries
+            // no carriage of its own, so its attested generation is on
+            // a delegation path only if some VALIDATED certificate's
+            // carriage for this same binding puts it there. No such
+            // certificate ⇒ fail closed — a zone-capture attacker
+            // must not be able to swap the accepted generation key
+            // with a bare refresh (dns-anchor D10: positive path
+            // membership).
+            let generation_on_path = validated_carriages
+                .iter()
+                .filter(|(h, d, _)| h == hostname && *d == document)
+                .any(|(_, _, carriage)| authority.on_path(carriage, record.generation()));
+
+            evidence.records.push(BindingEvidence {
+                attestation: Attestation::ChainOnly,
+                document,
+                generation: *record.generation(),
+                hash,
+                hostname: hostname.clone(),
+                key: ZoneStateKey {
+                    window_end: window.expiration(),
+                    serial: record.serial(),
+                    // Bare refreshes sort below equal-window,
+                    // equal-serial certificate items.
+                    issued_at: UnixSeconds::from(0),
+                },
+                generation_on_path,
+                window,
+            });
         }
     }
 
@@ -1011,7 +1076,20 @@ fn resolve_document<A: AuthorityVerifier>(
     // in a deterministic order.
     let mut internally_contested = false;
     let best: Vec<&BindingEvidence> = {
-        let mut documents: Vec<DocAnchor> = surviving.iter().map(|r| r.document).collect();
+        // Candidates are the documents of surviving CERTIFICATE-
+        // attested records (binding-cache, stage 5): "surviving" is a
+        // post-stage-4 predicate, so a document whose only
+        // certificate died under D10/D12 is no candidate however
+        // fresh its bare refreshes — the stage-2 corroboration filter
+        // ran before the generation rules and cannot be trusted for
+        // candidacy. Surviving ChainOnly rows still corroborate: they
+        // feed freshness, tenure, and the per-document ladder of
+        // documents that ARE candidates.
+        let mut documents: Vec<DocAnchor> = surviving
+            .iter()
+            .filter(|r| r.attestation == Attestation::Certificate)
+            .map(|r| r.document)
+            .collect();
         documents.sort_unstable();
         documents.dedup();
 
@@ -1042,14 +1120,15 @@ fn resolve_document<A: AuthorityVerifier>(
         .copied()
         .collect();
 
-    let mut contested = undominated.len() != 1 || internally_contested;
+    let mut contested = internally_contested;
     // Under a dominance cycle (undominated empty) the output is
     // contested and masked; the fallback feeds masked internals only,
     // deterministically (best is document-sorted).
     let maximal = undominated.first().copied().unwrap_or(first_candidate);
 
     // The winning acceptance, by the receipts rule; its losers are
-    // surfaced through the output state.
+    // surfaced through the output state. Receipt ties contest
+    // unconditionally — they are the user's own conflicting records.
     let acceptance_resolution = winning_acceptance(hostname, decisions, evidence, &mut contested);
     let acceptance = acceptance_resolution.winner;
 
@@ -1059,6 +1138,31 @@ fn resolve_document<A: AuthorityVerifier>(
     let incumbent = acceptance.map_or(maximal.document, |document| {
         *ctx.graph.chain_from(document).last().unwrap_or(&document)
     });
+
+    // A cross-document tie contests only among ELIGIBLE candidates
+    // (binding-cache stage 5; B13's "no incumbent" qualifier). A
+    // stale, unproven challenger is B1's pending set however late
+    // its zone-state key reads — and two of them must not do
+    // together what one cannot do alone: blank an acceptance-backed
+    // incumbent. With no acceptance there is no incumbent to defend,
+    // and any non-unique undominated set is B13's contest. A
+    // dominance cycle (empty undominated set) is pathological and
+    // contests regardless.
+    contested |= if acceptance.is_some() && !undominated.is_empty() {
+        let eligible_documents: Set<DocAnchor> = undominated
+            .iter()
+            .filter(|record| {
+                record.document == incumbent
+                    || freshness(record, ctx.now) == Freshness::Fresh
+                    || ctx.graph.proves(incumbent, record.document)
+            })
+            .map(|record| record.document)
+            .collect();
+
+        eligible_documents.len() > 1
+    } else {
+        undominated.len() != 1
+    };
 
     // Eligibility: the pending doctrine (B1). Every stale, unproven
     // non-incumbent candidate is pending — not just the maximal one.
@@ -1299,13 +1403,23 @@ fn winning_acceptance(
             // Receipt shape: every cited item a record for THIS
             // hostname, at least one attesting the acceptance's
             // document. Malformed receipts contribute nothing.
+            // Judged per ITEM, never by row count: one cited item can
+            // legally yield several evidence rows (a bare refresh of
+            // a dual-publish RRset carries one row per document), and
+            // a row-count comparison would silently void exactly
+            // those receipts.
             let cited_records: Vec<&BindingEvidence> = evidence
                 .records
                 .iter()
                 .filter(|r| acceptance.cited.contains(&r.hash))
                 .collect();
 
-            if cited_records.len() != acceptance.cited.len()
+            let every_cited_item_is_a_record = acceptance
+                .cited
+                .iter()
+                .all(|hash| cited_records.iter().any(|r| r.hash == *hash));
+
+            if !every_cited_item_is_a_record
                 || cited_records.iter().any(|r| r.hostname != *hostname)
                 || !cited_records
                     .iter()

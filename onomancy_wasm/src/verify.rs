@@ -108,9 +108,11 @@ pub fn verify_certificate(
 ///
 /// Reads the document's certificates from the reserved well-known
 /// path, following at most one hop of indirection, and verifies each
-/// against `hostname`. The first that verifies wins; a document
-/// naming several hostnames carries several certificates, and the
-/// ones for other names are simply not this hostname's.
+/// against `hostname`. The ladder-maximal candidate wins — fresh
+/// beats stale beats deferred, then window end, then serial — never
+/// the first in list order. A document naming several hostnames
+/// carries several certificates, and the ones for other names are
+/// simply not this hostname's.
 ///
 /// The document must already be held — replication is the substrate's
 /// job, not this module's. Use `hold()` to supply it.
@@ -196,14 +198,18 @@ pub fn verify_binding(
     }
 
     // Order-insensitive selection (dns-anchor, Comparing Records
-    // Offline): fresh beats stale beats deferred, then the window
-    // end (zone-vouched), then the serial — never "the first that
-    // verifies", which would let Automerge list order decide, and a
-    // deferred entry at index 0 mask a fresh one at index 1. A
-    // full-key tie breaks on the document anchor: deterministic
-    // under any enumeration order. Genuine zone equivocation is the
-    // derivation's to surface as contested (binding-cache B13); a
-    // one-shot check reports the maximal candidate.
+    // Offline): fresh beats stale beats deferred, then the full
+    // zone-state key `(window_end, serial, issued_at)` — never "the
+    // first that verifies", which would let Automerge list order
+    // decide, and a deferred entry at index 0 mask a fresh one at
+    // index 1. `issued_at` is in the key so two re-issues of one
+    // document at the same zone state still order deterministically;
+    // a full-key tie then breaks on the document anchor. Genuine
+    // zone equivocation is the derivation's to surface as contested
+    // (binding-cache B13); a one-shot check reports the maximal
+    // candidate. A deferred candidate's `issued_at` reads as zero,
+    // mirroring the derivation's bare-refresh convention — rank
+    // already places every deferral below every verdict.
     let best = candidates.into_iter().max_by_key(|graded| match graded {
         Graded::Accepted(verdict) => (
             match verdict.freshness {
@@ -212,12 +218,14 @@ pub fn verify_binding(
             },
             verdict.window.expiration(),
             verdict.serial,
+            verdict.certificate.issued_at(),
             verdict.document,
         ),
         Graded::Deferred(deferred) => (
             0,
             deferred.window.expiration(),
             deferred.serial,
+            UnixSeconds::from(0),
             deferred.document,
         ),
     });
