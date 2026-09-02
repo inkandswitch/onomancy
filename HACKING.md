@@ -88,14 +88,15 @@ Related invariants:
 
 ## Testing Strategy
 
-| Level | Tool | Notes |
-|-------|------|-------|
-| Property tests | `bolero` | Roundtrips, grammar disjointness, termination; live in `mod tests { mod props }` — `cargo test props::` selects them |
-| Golden vectors | checked-in bytes | `onomancy_core/tests/vectors/` — byte drift is a wire-format break |
-| Conformance | scenario replay | `verifier_state_conformance.rs` rows map to spec disposition tables; scenarios replay identically under memory fakes and the real validator |
-| Never-rots fixtures | frozen production chains | `onomancy_dnssec/tests/fixtures/real_*` validate clock-free, forever |
-| Browser | wasm-bindgen-test | `nix run .#ci-browser` (Chromium + Firefox); live DoH tests behind the `live` feature |
-| Live smoke | `--ignored` tests | Query real resolvers; run deliberately |
+| Level               | Tool                     | Notes                                                                                                                                       |
+|---------------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| Property tests      | `bolero`                 | Roundtrips, grammar disjointness, termination; live in `mod tests { mod props }` — `cargo test props::` selects them                        |
+| Golden vectors      | checked-in bytes         | `onomancy_core/tests/vectors/` — byte drift is a wire-format break                                                                          |
+| Conformance         | scenario replay          | `verifier_state_conformance.rs` rows map to spec disposition tables; scenarios replay identically under memory fakes and the real validator |
+| Never-rots fixtures | frozen production chains | `onomancy_dnssec/tests/fixtures/real_*` validate clock-free, forever                                                                        |
+| Browser             | wasm-bindgen-test        | `nix run .#ci-browser` (Chromium + Firefox); live DoH tests behind the `live` feature                                                       |
+| Live smoke          | `--ignored` tests        | Query real resolvers; run deliberately                                                                                                      |
+| Mutation            | `cargo-mutants`          | CI mutates only the PR diff (blocking); `nix run .#ci-mutants` for the full-workspace sweep. Config: `.cargo/mutants.toml`                  |
 
 Tests prefer `TestResult` returns and `matches!` on error variants; `expect` is confined to test modules under scoped allows.
 
@@ -108,6 +109,7 @@ nix develop            # dev shell: pinned rust 1.91 + nightly rustfmt wrapper
 nix run .#ci           # the full gate: fmt, clippy, test, wasm, no-std, deny
 nix run .#ci-fmt       # any single check: ci-{fmt,clippy,test,wasm,no-std,deny}
 nix run .#ci-browser   # real-browser wasm tests (pulls whole browsers)
+nix run .#ci-mutants   # full-workspace mutation testing (slow; CI scopes it to the PR diff)
 ```
 
 GitHub Actions is a thin matrix over the same apps, so local runs are CI runs.

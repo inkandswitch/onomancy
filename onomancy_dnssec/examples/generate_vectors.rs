@@ -1,8 +1,9 @@
 //! Regenerate the golden-vector files in `tests/vectors/` from the
-//! catalog (`tests/vectors_catalog.rs` — the single source of truth).
+//! catalog (`tests/support/vectors_catalog.rs` — the single source of
+//! truth).
 //!
 //! ```sh
-//! cargo run -p onomancy_core --example generate_vectors
+//! cargo run -p onomancy_dnssec --example generate_vectors
 //! ```
 //!
 //! Byte drift in the regenerated files is a wire-format break: the

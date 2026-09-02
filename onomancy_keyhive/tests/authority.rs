@@ -179,6 +179,187 @@ fn the_root_key_speaks_for_itself() -> TestResult {
         ),
         "identity rule: the document root key needs no chain"
     );
+
+    // The identity rule short-circuits BEFORE replay — deliberate
+    // (authority.rs module docs): a signer that IS the root has
+    // nothing to prove, so even a garbage carriage cannot demote it.
+    let garbage = DelegationChain::from(vec![
+        onomancy_core::delegation_chain::SignedDelegationBytes::from(b"zz9garbage".to_vec()),
+    ]);
+    assert!(
+        KeyhiveAuthority.authorizes(&f.anchor, f.anchor.verifying_key(), &garbage),
+        "the short-circuit precedes carriage parsing, by design"
+    );
+    Ok(())
+}
+
+/// The signing bar's REJECTION direction (dns-anchor §Who Signs): a
+/// signer who is a genuine DIRECT member of the root group, whose
+/// delegating hop holds LESS than Admin, is refused. This is the
+/// only test the access comparison itself protects: `sanctioned`
+/// finds the signer among the root's members (no absence, no
+/// depth-2 gap), reads the delegating hop's proof (`can = Edit`),
+/// and the bar refuses it. Weakening the bar to `>= Access::Read` —
+/// or deleting the access check — fails here and nowhere else.
+#[test]
+#[allow(clippy::too_many_lines)] // two instances must exchange a real graph
+fn sub_admin_delegating_hops_fail_the_signing_bar() -> TestResult {
+    let built = block_on(async {
+        let owner = instance().await?;
+        let deputy = instance().await?;
+        let signer = instance().await?;
+
+        let root = owner.generate_group(vec![]).await?;
+        let root_id = { root.lock().await.group_id() };
+        let anchor = DocAnchor::from(Identifier::from(root_id).0);
+
+        // root ──Edit──▶ deputy: the sub-Admin hop.
+        let deputy_card = deputy.contact_card().await?;
+        owner.receive_contact_card(&deputy_card).await?;
+        let deputy_agent = owner
+            .get_agent(Identifier::from(deputy_card.id()))
+            .await
+            .ok_or("just introduced")?;
+        owner
+            .add_member(
+                deputy_agent,
+                &Membered::Group(root_id, root.clone()),
+                Access::Edit,
+                &[],
+            )
+            .await?;
+
+        // The deputy materializes the group from the owner's export.
+        // Retried to a fixpoint: export order is dependency-
+        // compatible, not dependency-sorted — the same discipline the
+        // verifier's replay uses.
+        let mut remaining: Vec<StaticEvent<[u8; 32]>> = Vec::new();
+        for ops in owner
+            .reachable_prekey_ops_for_all_agents()
+            .await
+            .ops
+            .values()
+        {
+            for op in ops {
+                remaining.push(prekey_event(op));
+            }
+        }
+        for op_map in owner.membership_ops_for_all_agents().await.ops.values() {
+            for op in op_map.values() {
+                let event: Event<_, _, _, _> = op.clone().into();
+                remaining.push(event.into());
+            }
+        }
+        loop {
+            let mut deferred = Vec::with_capacity(remaining.len());
+            for event in remaining.drain(..) {
+                if deputy.receive_static_event(event.clone()).await.is_err() {
+                    deferred.push(event);
+                }
+            }
+            match (deferred.is_empty(), deferred.len() == deferred.capacity()) {
+                (true, _) => break,
+                (false, true) => return Err("deputy ingest stalled".into()),
+                (false, false) => remaining = deferred,
+            }
+        }
+
+        // …and adds the signer DIRECTLY to the root group. The
+        // signer's delegation proof is the deputy's own Edit-access
+        // delegation — the sub-Admin delegating hop §Who Signs bars.
+        let signer_card = signer.contact_card().await?;
+        deputy.receive_contact_card(&signer_card).await?;
+        let signer_agent = deputy
+            .get_agent(Identifier::from(signer_card.id()))
+            .await
+            .ok_or("just introduced to the deputy")?;
+        let root_at_deputy = deputy
+            .get_group(root_id)
+            .await
+            .ok_or("the deputy holds the group")?;
+        deputy
+            .add_member(
+                signer_agent,
+                &Membered::Group(root_id, root_at_deputy),
+                Access::Read,
+                &[],
+            )
+            .await?;
+
+        let signer_key = Identifier::from(signer_card.id()).0;
+
+        // The carriage is the DEPUTY's view: it holds the owner's
+        // ops plus its own delegation of the signer — and the
+        // delegates' introductions, which live in their contact-card
+        // ops and ride no all-agents export.
+        let mut events: Vec<StaticEvent<[u8; 32]>> = Vec::new();
+        events.push(prekey_event(deputy_card.op()));
+        events.push(prekey_event(signer_card.op()));
+        for ops in deputy
+            .reachable_prekey_ops_for_all_agents()
+            .await
+            .ops
+            .values()
+        {
+            for op in ops {
+                events.push(prekey_event(op));
+            }
+        }
+        for op_map in deputy.membership_ops_for_all_agents().await.ops.values() {
+            for op in op_map.values() {
+                let event: Event<_, _, _, _> = op.clone().into();
+                events.push(event.into());
+            }
+        }
+
+        Ok::<_, testresult::TestError>((
+            anchor,
+            signer_key,
+            Carriage::new(events).to_delegation_bytes()?,
+        ))
+    })?;
+    let (anchor, signer_key, carriage) = built;
+
+    // Sanity: the signer IS in the graph — the refusal below is the
+    // access bar, never absence.
+    assert!(
+        KeyhiveAuthority.on_path(&carriage, &GenerationKey::from(signer_key)),
+        "the signer is a genuine (direct) member of the root group"
+    );
+
+    assert!(
+        !KeyhiveAuthority.authorizes(&anchor, &signer_key, &carriage),
+        "a delegating hop below Admin fails the signing bar"
+    );
+    Ok(())
+}
+
+/// The replay's no-progress fixpoint, specifically: a carriage whose
+/// delegation names a key the (dropped) prekey introduction would
+/// have introduced can never fully ingest — the replay refuses,
+/// rather than looping or accepting a partial graph.
+#[test]
+fn dangling_dependencies_refuse_at_the_fixpoint() -> TestResult {
+    let doc_key = SigningKey::from_bytes(&[11; 32]);
+    let generation_key = SigningKey::from_bytes(&[12; 32]);
+    let minted = onomancy_keyhive::mint::generation_carriage(&doc_key, &generation_key)?;
+
+    // Drop the prekey introduction (entry 0), keeping the delegation
+    // that depends on it. Every entry still PARSES — the refusal is
+    // the ingest fixpoint, not the envelope.
+    let entries = minted.entries().to_vec();
+    let dangling = DelegationChain::from(entries.get(1..).ok_or("two entries")?.to_vec());
+    assert_eq!(dangling.len(), 1);
+
+    let generation = GenerationKey::from(generation_key.verifying_key());
+    assert!(
+        KeyhiveAuthority.on_path(&minted, &generation),
+        "the complete carriage proves the path"
+    );
+    assert!(
+        !KeyhiveAuthority.on_path(&dangling, &generation),
+        "dropping the introduction dangles the delegation: refused"
+    );
     Ok(())
 }
 

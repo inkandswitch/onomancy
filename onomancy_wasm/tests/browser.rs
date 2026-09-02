@@ -33,25 +33,50 @@ fn local_anchors_parse() -> JsTestResult {
     let name = JsName::new(&text("~/bob/pics"))?;
 
     assert_eq!(name.anchor_kind(), "local");
+    assert_eq!(name.anchor(), "~");
+    assert_eq!(name.segments(), vec!["bob".to_string(), "pics".to_string()]);
+    assert_eq!(name.value(), "~/bob/pics");
     Ok(())
 }
 
+/// Names carry no version pins: heads are certificate state, so a
+/// `#`-suffixed name is a parse error, not a doc anchor with extras.
 #[wasm_bindgen_test]
-fn doc_anchors_parse_with_heads() -> JsTestResult {
-    let name = JsName::new(&text(
-        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj/pics",
-    ))?;
+fn doc_anchors_parse_and_version_pins_are_rejected() -> JsTestResult {
+    const ANCHOR: &str = "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj";
+
+    let name = JsName::new(&text(&format!("{ANCHOR}/pics")))?;
 
     assert_eq!(name.anchor_kind(), "doc");
+    assert_eq!(name.anchor(), ANCHOR);
     assert_eq!(name.segments(), vec!["pics".to_string()]);
+
+    assert!(
+        JsName::new(&text(&format!("{ANCHOR}/pics#head"))).is_err(),
+        "a version-pinned name must be a flat parse error"
+    );
     Ok(())
 }
 
 #[wasm_bindgen_test]
-fn garbage_is_rejected() {
-    // A dotless `@` is a flat parse error, even in JS.
-    assert!(JsName::new(&text("@nodots/path")).is_err());
-    assert!(JsName::new(&text("")).is_err());
+fn garbage_is_rejected_with_a_parse_message() {
+    // A dotless `@` is a flat parse error, even in JS — and a real
+    // `Error` with prose, not a wasm trap or a bare throw.
+    for garbage in ["@nodots/path", ""] {
+        let Err(value) = JsName::new(&text(garbage)) else {
+            panic!("{garbage:?} is not a name");
+        };
+
+        let message = JsValue::from(value)
+            .unchecked_into::<js_sys::Error>()
+            .message()
+            .as_string()
+            .unwrap_or_default();
+        assert!(
+            !message.is_empty(),
+            "a parse refusal must say what is wrong"
+        );
+    }
 }
 
 /// Documents naming documents, entirely in-tab: mint three docs,
@@ -102,6 +127,14 @@ async fn unsynced_targets_walk_partially() -> JsTestResult {
     assert_eq!(status.as_string().as_deref(), Some("partial"));
     let reason = js_sys::Reflect::get(&verdict, &JsValue::from_str("reason"))?;
     assert_eq!(reason.as_string().as_deref(), Some("unsynced target"));
+
+    // The declared shape's whole point: WHERE it stopped (one segment
+    // consumed by the hop to `elsewhere`) and WHAT is missing (the
+    // unheld document, so a caller can `holdAt` it and retry).
+    let consumed = js_sys::Reflect::get(&verdict, &JsValue::from_str("consumed"))?;
+    assert_eq!(consumed.as_f64(), Some(1.0));
+    let target = js_sys::Reflect::get(&verdict, &JsValue::from_str("target"))?;
+    assert_eq!(target.as_string().as_deref(), Some(elsewhere.as_str()));
     Ok(())
 }
 

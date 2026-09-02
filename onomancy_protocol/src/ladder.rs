@@ -288,6 +288,74 @@ mod tests {
                 });
         }
 
+        /// Rung 0 is absolute: a fresh contender beats a stale one
+        /// under EVERY continuity verdict — even a fork — because
+        /// freshness is DNSSEC-vouched and statements are not
+        /// consulted across freshness classes. Subsumes the
+        /// fresh-beats-stale and rung-precedence examples.
+        #[test]
+        fn fresh_always_beats_stale_under_any_continuity() {
+            bolero::check!()
+                .with_type::<((u8, u64, u64, u64), (u8, u64, u64, u64), u8)>()
+                .for_each(|(l, r, c)| {
+                    let fresh =
+                        contender(l.0 % 4, Freshness::Fresh, key(l.1 % 4, l.2 % 4, l.3 % 4));
+                    let stale =
+                        contender(r.0 % 4, Freshness::Stale, key(r.1 % 4, r.2 % 4, r.3 % 4));
+
+                    let continuity = match c % 4 {
+                        0 => Continuity::Silent,
+                        1 => Continuity::LeftNewer,
+                        2 => Continuity::RightNewer,
+                        _ => Continuity::Fork,
+                    };
+
+                    assert_eq!(compare(&fresh, &stale, continuity), Verdict::Left);
+                    assert_eq!(compare(&stale, &fresh, continuity), Verdict::Right);
+                });
+        }
+
+        /// `Equal` is exactly same-document, same-key, same-grade —
+        /// anything less is an order or an equivocation, never
+        /// silent equality.
+        #[test]
+        fn equal_is_exactly_same_document_same_key_same_grade() {
+            bolero::check!()
+                .with_type::<((u8, bool, u64, u64, u64), (u8, bool, u64, u64, u64))>()
+                .for_each(|(l, r)| {
+                    let left = arb_contender(*l);
+                    let right = arb_contender(*r);
+
+                    let expected = left.freshness == right.freshness
+                        && left.document == right.document
+                        && left.key == right.key;
+
+                    assert_eq!(
+                        compare(&left, &right, Continuity::Silent) == Verdict::Equal,
+                        expected
+                    );
+                });
+        }
+
+        /// Within one freshness class, a fork verdict from rung 1 is
+        /// always surfaced — never outvoted by rung 2's key.
+        #[test]
+        fn forks_within_a_freshness_class_always_surface() {
+            bolero::check!()
+                .with_type::<((u8, u64, u64, u64), (u8, u64, u64, u64), bool)>()
+                .for_each(|(l, r, fresh)| {
+                    let grade = if *fresh {
+                        Freshness::Fresh
+                    } else {
+                        Freshness::Stale
+                    };
+                    let left = contender(l.0 % 4, grade, key(l.1 % 4, l.2 % 4, l.3 % 4));
+                    let right = contender(r.0 % 4, grade, key(r.1 % 4, r.2 % 4, r.3 % 4));
+
+                    assert_eq!(compare(&left, &right, Continuity::Fork), Verdict::Fork);
+                });
+        }
+
         /// With continuity silent, rung 0+2 comparison is transitive
         /// in its strict wins — the no-cycles property the single
         /// lexicographic key exists to buy.

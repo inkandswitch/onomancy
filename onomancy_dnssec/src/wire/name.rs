@@ -90,13 +90,24 @@ impl Name {
     }
 
     /// The `_onomancy.<hostname>` owner name a binding lives under.
-    #[must_use]
-    pub fn onomancy_owner(hostname: &DnsName) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParseNameError::NameTooLong`] when the composed name
+    /// exceeds the 255-octet wire cap: hostname grammar admits up to
+    /// 253 presentation octets, but the ten-octet service label
+    /// leaves room for only 243.
+    pub fn onomancy_owner(hostname: &DnsName) -> Result<Self, ParseNameError> {
         let mut labels: Vec<Vec<u8>> = Vec::with_capacity(1);
         labels.push(SERVICE_LABEL.to_vec());
         labels.extend(hostname.as_str().split('.').map(|l| l.as_bytes().to_vec()));
 
-        Self { labels }
+        let wire_len = 1 + labels.iter().map(|l| 1 + l.len()).sum::<usize>();
+        if wire_len > MAX_WIRE_LEN {
+            return Err(ParseNameError::NameTooLong);
+        }
+
+        Ok(Self { labels })
     }
 
     /// Build a name from raw labels — crate-internal, for callers
@@ -288,8 +299,31 @@ mod tests {
     #[test]
     fn onomancy_owner_prepends_the_service_label() {
         let hostname = DnsName::parse("expede.wtf").expect("valid");
-        let owner = Name::onomancy_owner(&hostname);
+        let owner = Name::onomancy_owner(&hostname).expect("fits under the cap");
         assert_eq!(format!("{owner}"), "_onomancy.expede.wtf");
+    }
+
+    /// `onomancy_owner`'s cap is exact: a 243-octet hostname wires
+    /// to precisely 255 with the ten-octet service label and
+    /// composes; one more octet is refused.
+    #[test]
+    fn onomancy_owner_cap_is_exact() {
+        let hostname_of = |last: usize| {
+            let a = "a".repeat(63);
+            DnsName::parse(&alloc::format!("{a}.{a}.{a}.{}", "a".repeat(last))).expect("valid")
+        };
+
+        let at_cap = hostname_of(51);
+        assert_eq!(at_cap.as_str().len(), 243);
+        let owner = Name::onomancy_owner(&at_cap).expect("exactly the cap composes");
+        let mut wire = Vec::new();
+        owner.write(&mut wire);
+        assert_eq!(wire.len(), MAX_WIRE_LEN);
+
+        assert!(matches!(
+            Name::onomancy_owner(&hostname_of(52)),
+            Err(ParseNameError::NameTooLong)
+        ));
     }
 
     #[test]
@@ -306,6 +340,72 @@ mod tests {
             read_all(b"\x06EXPEDE\x03wtf\x00"),
             Err(ParseNameError::NotCanonical { .. })
         ));
+    }
+
+    /// A length byte of 64–127 (`0b01xx_xxxx`) is a reserved label
+    /// type and dies at the pointer-mask check — which makes
+    /// `LabelTooLong` UNREACHABLE from `read`: every length > 63 has
+    /// bit 6 or 7 set. This test documents the actual behavior so the
+    /// dead branch is a recorded fact, not a surprise.
+    #[test]
+    fn length_sixty_four_is_a_reserved_label_type_not_a_long_label() {
+        let mut bytes = alloc::vec![64u8];
+        bytes.extend_from_slice(&[b'a'; 64]);
+        bytes.push(0);
+
+        assert!(matches!(
+            read_all(&bytes),
+            Err(ParseNameError::NotCanonical { .. })
+        ));
+    }
+
+    /// The 255-octet wire cap, both directions: labels 63+63+63+61
+    /// wire to exactly 255 and read; 63+63+63+62 wire to 256 and are
+    /// rejected mid-read.
+    #[test]
+    fn the_wire_length_cap_is_exact() {
+        let wire_of = |label_lens: &[u8]| {
+            let mut bytes = Vec::new();
+            for &len in label_lens {
+                bytes.push(len);
+                bytes.extend(core::iter::repeat_n(b'a', usize::from(len)));
+            }
+            bytes.push(0);
+            bytes
+        };
+
+        let at_cap = wire_of(&[63, 63, 63, 61]);
+        assert_eq!(at_cap.len(), 255);
+        let name = read_all(&at_cap).expect("exactly the cap reads");
+        assert_eq!(name.labels().len(), 4);
+
+        let over = wire_of(&[63, 63, 63, 62]);
+        assert_eq!(over.len(), 256);
+        assert!(matches!(read_all(&over), Err(ParseNameError::NameTooLong)));
+    }
+
+    #[test]
+    fn text_parsing_rejects_what_the_wire_would() {
+        assert!(matches!(
+            "a..b".parse::<Name>(),
+            Err(ParseNameError::LabelTooLong { len: 0 })
+        ));
+        assert!(matches!(
+            "EXPEDE.wtf".parse::<Name>(),
+            Err(ParseNameError::NotCanonical { .. })
+        ));
+        assert!(matches!(
+            alloc::format!("{}.com", "a".repeat(64)).parse::<Name>(),
+            Err(ParseNameError::LabelTooLong { len: 64 })
+        ));
+    }
+
+    /// Non-printable label bytes render as RFC 1035 `\DDD` escapes —
+    /// diagnostics never smuggle raw control bytes into logs.
+    #[test]
+    fn display_escapes_non_printable_bytes() {
+        let name = Name::from_labels(alloc::vec![alloc::vec![0x07, b'a', b'.']]);
+        assert_eq!(format!("{name}"), "\\007a\\046");
     }
 
     #[test]
@@ -359,6 +459,51 @@ mod tests {
                     assert_eq!(rewritten, bytes[..consumed], "one spelling per name");
                 }
             });
+        }
+
+        /// `onomancy_owner` composes names that survive their own
+        /// wire trip whenever it composes at all; hostnames past 243
+        /// octets (255-octet cap minus the ten-octet service label)
+        /// are refused at construction rather than written as bytes
+        /// `read` would reject.
+        #[test]
+        fn owner_names_roundtrip_for_hostnames_that_fit() {
+            bolero::check!()
+                .with_type::<Vec<Vec<u8>>>()
+                .for_each(|label_seeds| {
+                    let labels: Vec<String> = label_seeds
+                        .iter()
+                        .take(4)
+                        .map(|seed| {
+                            seed.iter()
+                                .take(40)
+                                .map(|b| char::from(b'a' + (b % 26)))
+                                .collect::<String>()
+                        })
+                        .filter(|l| !l.is_empty())
+                        .collect();
+
+                    if labels.len() < 2 {
+                        return;
+                    }
+
+                    let Ok(hostname) = DnsName::parse(&labels.join(".")) else {
+                        return;
+                    };
+
+                    match Name::onomancy_owner(&hostname) {
+                        Ok(owner) => {
+                            let mut wire = Vec::new();
+                            owner.write(&mut wire);
+                            assert!(wire.len() <= MAX_WIRE_LEN, "constructed over cap");
+                            assert_eq!(read_all(&wire).expect("own encoding"), owner);
+                        }
+                        Err(refusal) => {
+                            assert_eq!(refusal, ParseNameError::NameTooLong);
+                            assert!(hostname.as_str().len() > 243, "refused a fitting name");
+                        }
+                    }
+                });
         }
 
         /// Canonical ordering is a total order consistent with

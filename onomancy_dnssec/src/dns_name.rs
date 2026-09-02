@@ -273,7 +273,10 @@ mod tests {
     /// the rule is about the whole label, not its first byte.
     #[test]
     fn accepts_a_tld_with_digits_and_letters() {
-        assert!(DnsName::parse("example.4d").is_ok());
+        assert_eq!(
+            DnsName::parse("example.4d").expect("valid").as_str(),
+            "example.4d"
+        );
     }
 
     #[test]
@@ -286,7 +289,12 @@ mod tests {
 
     #[test]
     fn accepts_punycode_a_labels() {
-        assert!(DnsName::parse("xn--80ak6aa92e.com").is_ok());
+        assert_eq!(
+            DnsName::parse("xn--80ak6aa92e.com")
+                .expect("valid")
+                .as_str(),
+            "xn--80ak6aa92e.com"
+        );
     }
 
     #[test]
@@ -295,6 +303,149 @@ mod tests {
             DnsName::parse("expede.wtf.."),
             Err(ParseDnsNameError::EmptyLabel)
         );
+    }
+
+    #[test]
+    fn hyphens_at_label_edges_are_rejected() {
+        assert_eq!(
+            DnsName::parse("-foo.com"),
+            Err(ParseDnsNameError::HyphenAtLabelEdge)
+        );
+        assert_eq!(
+            DnsName::parse("foo-.com"),
+            Err(ParseDnsNameError::HyphenAtLabelEdge)
+        );
+        assert_eq!(
+            DnsName::parse("foo.-com"),
+            Err(ParseDnsNameError::HyphenAtLabelEdge)
+        );
+
+        // Interior hyphens are ordinary LDH.
+        assert!(DnsName::parse("f-oo.com").is_ok());
+    }
+
+    #[test]
+    fn dotless_and_empty_names_do_not_exist() {
+        assert_eq!(DnsName::parse("localhost"), Err(ParseDnsNameError::Dotless));
+        assert_eq!(DnsName::parse(""), Err(ParseDnsNameError::EmptyLabel));
+    }
+
+    /// A name of exactly `target` octets: fill labels ahead of `com`.
+    fn name_of_len(target: usize) -> String {
+        let mut labels = alloc::vec![String::from("com")];
+        let mut remaining = target - 3;
+
+        while remaining > 0 {
+            let label_len = MAX_LABEL_LEN.min(remaining - 1);
+            labels.insert(0, "a".repeat(label_len));
+            remaining -= label_len + 1;
+        }
+
+        let name = labels.join(".");
+        assert_eq!(name.len(), target, "helper builds exact lengths");
+        name
+    }
+
+    /// The 63/64 and 253/254 boundaries, both directions — classic
+    /// `>` vs `>=` territory.
+    #[test]
+    fn length_limits_are_exact() {
+        let max_label = alloc::format!("{}.com", "a".repeat(MAX_LABEL_LEN));
+        assert!(DnsName::parse(&max_label).is_ok(), "63-octet label");
+        assert_eq!(
+            DnsName::parse(&alloc::format!("{}.com", "a".repeat(MAX_LABEL_LEN + 1))),
+            Err(ParseDnsNameError::LabelTooLong)
+        );
+
+        assert!(DnsName::parse(&name_of_len(MAX_NAME_LEN)).is_ok(), "253");
+        assert_eq!(
+            DnsName::parse(&name_of_len(MAX_NAME_LEN + 1)),
+            Err(ParseDnsNameError::NameTooLong)
+        );
+
+        // A 254-char INPUT whose trailing dot strips to 253 parses:
+        // the limit applies after normalization.
+        let dotted = alloc::format!("{}.", name_of_len(MAX_NAME_LEN));
+        assert_eq!(
+            DnsName::parse(&dotted)
+                .expect("strips to the limit")
+                .as_str()
+                .len(),
+            MAX_NAME_LEN
+        );
+    }
+
+    /// `from_canonical` guards wire decode: it accepts exactly the
+    /// canonical spelling and refuses to normalize.
+    #[test]
+    fn from_canonical_accepts_only_the_canonical_spelling() {
+        let dns = DnsName::from_canonical(b"expede.wtf").expect("canonical");
+        assert_eq!(dns.as_str(), "expede.wtf");
+
+        assert_eq!(
+            DnsName::from_canonical(b"ExPeDe.wtf"),
+            Err(CanonicalDnsNameError::NotCanonical)
+        );
+        assert_eq!(
+            DnsName::from_canonical(b"expede.wtf."),
+            Err(CanonicalDnsNameError::NotCanonical)
+        );
+        assert_eq!(
+            DnsName::from_canonical(&[0xFF, 0xFE]),
+            Err(CanonicalDnsNameError::NotUtf8)
+        );
+        assert!(matches!(
+            DnsName::from_canonical(b"localhost"),
+            Err(CanonicalDnsNameError::Parse(ParseDnsNameError::Dotless))
+        ));
+    }
+
+    /// The `@` spelling family: `Name<DnsName>` parses, roundtrips,
+    /// and each `ParseDnsAnchoredNameError` variant has its input.
+    mod anchored {
+        use super::*;
+        use onomancy_core::name::{Name, ParseSegmentsError};
+
+        #[test]
+        fn dns_anchored_names_parse_and_roundtrip() {
+            let name = Name::<DnsName>::parse("@expede.wtf/pics/best").expect("valid");
+            assert_eq!(name.anchor().as_str(), "expede.wtf");
+            assert_eq!(name.segments().len(), 2);
+            assert_eq!(name.to_string(), "@expede.wtf/pics/best");
+
+            let bare = Name::<DnsName>::parse("@expede.wtf").expect("anchor-only");
+            assert!(bare.segments().is_empty());
+        }
+
+        #[test]
+        fn the_sigil_is_mandatory() {
+            assert!(matches!(
+                Name::<DnsName>::parse("expede.wtf/pics"),
+                Err(ParseDnsAnchoredNameError::MissingSigil)
+            ));
+        }
+
+        /// `@` means DNS and nothing else: a dotless `@` name is a
+        /// flat parse error, never a petname fallback.
+        #[test]
+        fn dotless_at_names_are_flat_errors() {
+            assert!(matches!(
+                Name::<DnsName>::parse("@bob"),
+                Err(ParseDnsAnchoredNameError::Anchor(
+                    ParseDnsNameError::Dotless
+                ))
+            ));
+        }
+
+        #[test]
+        fn malformed_paths_surface_as_segment_errors() {
+            assert!(matches!(
+                Name::<DnsName>::parse("@expede.wtf//x"),
+                Err(ParseDnsAnchoredNameError::Segments(
+                    ParseSegmentsError::Segment(_)
+                ))
+            ));
+        }
     }
 
     #[cfg(feature = "idna")]
@@ -362,6 +513,65 @@ mod tests {
                             DnsName::parse(dns.as_str()).expect("already normalized");
                         assert_eq!(dns, renormalized);
                         assert_eq!(dns.to_string(), renormalized.to_string());
+                    }
+                });
+        }
+
+        /// Structured traffic for the accept branch: arbitrary
+        /// strings almost never form valid names, so this generator
+        /// builds LDH labels from seeds — every built name must parse
+        /// to itself.
+        #[test]
+        fn built_ldh_names_parse_verbatim() {
+            bolero::check!()
+                .with_type::<Vec<Vec<u8>>>()
+                .for_each(|label_seeds| {
+                    let labels: Vec<String> = label_seeds
+                        .iter()
+                        .take(4)
+                        .map(|seed| {
+                            seed.iter()
+                                .take(8)
+                                .map(|b| char::from(b'a' + (b % 26)))
+                                .collect::<String>()
+                        })
+                        .filter(|l| !l.is_empty())
+                        .collect();
+
+                    if labels.len() < 2 {
+                        return;
+                    }
+
+                    let raw = labels.join(".");
+                    let parsed = DnsName::parse(&raw).expect("LDH names parse");
+                    assert_eq!(parsed.as_str(), raw, "already canonical");
+                });
+        }
+
+        /// `from_canonical` accepts exactly the fixed points of
+        /// `parse`: the parser's output always re-enters, and inputs
+        /// the parser had to normalize are refused.
+        #[test]
+        fn from_canonical_accepts_exactly_parse_fixed_points() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    let Ok(parsed) = DnsName::parse(raw) else {
+                        return;
+                    };
+
+                    assert_eq!(
+                        DnsName::from_canonical(parsed.as_str().as_bytes()),
+                        Ok(parsed.clone()),
+                        "parse output is canonical"
+                    );
+
+                    if raw != parsed.as_str() {
+                        assert_eq!(
+                            DnsName::from_canonical(raw.as_bytes()),
+                            Err(CanonicalDnsNameError::NotCanonical),
+                            "normalized inputs are not canonical spellings"
+                        );
                     }
                 });
         }

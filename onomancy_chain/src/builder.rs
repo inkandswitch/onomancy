@@ -468,7 +468,7 @@ pub enum BuildError {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::indexing_slicing)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use std::collections::HashMap;
 
@@ -847,5 +847,144 @@ mod tests {
     #[test]
     fn hop_bound_matches_the_validator() {
         assert_eq!(MAX_CNAME_HOPS, VALIDATOR_MAX_CNAME_HOPS);
+    }
+
+    /// A leaf answer with `hops` legitimate in-zone CNAME hops ending
+    /// in a TXT.
+    fn hopping_transport(hops: usize) -> HashMap<(Name, RecordType), Vec<Record>> {
+        let names: Vec<Name> = std::iter::once(owner())
+            .chain((0..hops).map(|index| {
+                Name::from_ascii(format!("hop{index}.example.com.")).expect("valid name")
+            }))
+            .collect();
+
+        let mut answers = Vec::new();
+        for pair in names.windows(2) {
+            answers.push(cname_record(&pair[0], &pair[1]));
+            answers.push(rrsig_record(&pair[0], RecordType::CNAME));
+        }
+        let last = names.last().expect("at least the owner");
+        answers.push(txt_record(last));
+        answers.push(rrsig_record(last, RecordType::TXT));
+
+        transport(vec![((owner(), RecordType::TXT), answers)])
+    }
+
+    /// The hop bound is exact: `MAX_CNAME_HOPS` legitimate hops frame,
+    /// one more does not. The loop test covers the pathological case;
+    /// this covers the off-by-one a `remaining` refactor would land.
+    #[test]
+    fn the_hop_bound_admits_exactly_max_hops() -> TestResult {
+        for hops in 0..=MAX_CNAME_HOPS {
+            let chain = drive(&hopping_transport(hops), &hostname()?)?;
+            assert_eq!(
+                chain.links().len(),
+                1 + hops + 1,
+                "root keys, {hops} CNAME hops, one TXT leaf"
+            );
+        }
+
+        assert!(matches!(
+            drive(&hopping_transport(MAX_CNAME_HOPS + 1), &hostname()?),
+            Err(BuildError::TooManyCnames)
+        ));
+        Ok(())
+    }
+
+    /// The error-path twin of `missing_signatures_are_unframeable`,
+    /// through the full machine: a mid-descent DNSKEY answer without
+    /// its covering RRSIG is unframeable at that owner.
+    #[test]
+    fn an_unsigned_cut_answer_is_unframeable_mid_descent() -> TestResult {
+        let zone = Name::from_ascii("example.com.").expect("valid name");
+        let map = transport(vec![
+            (
+                (zone.clone(), RecordType::DS),
+                vec![ds_record(&zone), rrsig_record(&zone, RecordType::DS)],
+            ),
+            // The DNSKEY answer arrives WITHOUT its RRSIG.
+            (
+                (zone.clone(), RecordType::DNSKEY),
+                vec![dnskey_record(&zone)],
+            ),
+        ]);
+
+        assert!(matches!(
+            drive(&map, &hostname()?),
+            Err(BuildError::MissingRrset { owner, rtype: RecordType::DNSKEY })
+                if owner == zone.to_ascii()
+        ));
+        Ok(())
+    }
+
+    /// `UnrepresentableName` is live, not dead code: `DnsName` caps
+    /// hostnames at 253 octets, and `_onomancy.` adds ten more — a
+    /// near-cap hostname overflows the wire name and `start` refuses.
+    #[test]
+    fn near_cap_hostnames_are_unrepresentable_under_the_service_label() -> TestResult {
+        // Four 61-char labels + dots = 247 chars: a valid DnsName
+        // whose `_onomancy.` owner exceeds the 255-octet wire cap.
+        let long = ["a", "b", "c", "d"].map(|c| c.repeat(61)).join(".");
+        let hostname = DnsName::parse(&long)?;
+
+        assert!(matches!(
+            ChainBuilder::start(&hostname),
+            Err(BuildError::UnrepresentableName(_))
+        ));
+        Ok(())
+    }
+
+    /// The unit cap is exact: a chain totalling `MAX_UNIT_BYTES`
+    /// frames; one more byte does not. Pins `>` against an `>=`
+    /// regression.
+    #[test]
+    fn the_unit_cap_boundary_is_exact() {
+        let mut links = Links::default();
+        assert!(
+            links
+                .push(ChainLink::from(vec![0u8; MAX_UNIT_BYTES]))
+                .is_ok(),
+            "exactly the cap frames"
+        );
+
+        let mut links = Links::default();
+        links
+            .push(ChainLink::from(vec![0u8; MAX_UNIT_BYTES - 1]))
+            .expect("under the cap");
+        assert!(matches!(
+            links.push(ChainLink::from(vec![0u8; 2])),
+            Err(BuildError::OversizeChain { bytes }) if bytes == MAX_UNIT_BYTES + 1
+        ));
+    }
+
+    mod props {
+        use super::*;
+
+        /// The cap as a property: pushing errs exactly when the
+        /// running byte total exceeds `MAX_UNIT_BYTES`, never before.
+        #[test]
+        fn pushing_errs_exactly_past_the_cap() {
+            bolero::check!().with_type::<Vec<u16>>().for_each(|sizes| {
+                let mut links = Links::default();
+                let mut total = 0usize;
+
+                for size in sizes {
+                    // Scale so random vectors actually reach the
+                    // 1 MiB cap within a few links.
+                    let bytes = usize::from(*size) * 64;
+                    total += bytes;
+
+                    match links.push(ChainLink::from(vec![0u8; bytes])) {
+                        Ok(()) => assert!(total <= MAX_UNIT_BYTES),
+                        Err(BuildError::OversizeChain { bytes }) => {
+                            assert!(total > MAX_UNIT_BYTES);
+                            assert_eq!(bytes, total);
+                            return; // the machine is spent
+                        }
+                        Err(other) => panic!("unexpected error: {other}"),
+                    }
+                }
+            });
+        }
     }
 }

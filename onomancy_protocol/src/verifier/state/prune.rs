@@ -238,6 +238,12 @@ mod tests {
         let (store, validator) = setup(&[&early, &late], vec![]);
         let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
+        let kept: Set<_> = pruned.items().iter().map(Item::content_hash).collect();
+        assert!(
+            kept.contains(&early.cert.digest().erase())
+                && kept.contains(&late.cert.digest().erase()),
+            "BOTH incomparable records survive — by identity, not count"
+        );
         assert_eq!(pruned.items().len(), 2);
         Ok(())
     }
@@ -263,12 +269,23 @@ mod tests {
             ..Decisions::default()
         };
 
-        let (store, validator) = setup(
-            &[&weak, &strong],
-            vec![Item::Rotation(rotation(1, 40, 41)?)],
-        );
+        let statement = rotation(1, 40, 41)?;
+        let (store, validator) = setup(&[&weak, &strong], vec![Item::Rotation(statement.clone())]);
         let pruned = assert_prune_invariant(&store, &validator, &decisions);
 
+        let kept: Set<_> = pruned.items().iter().map(Item::content_hash).collect();
+        assert!(
+            kept.contains(&weak.cert.digest().erase()),
+            "the cited receipt survives"
+        );
+        assert!(
+            kept.contains(&strong.cert.digest().erase()),
+            "the dominating record survives"
+        );
+        assert!(
+            kept.contains(&Item::Rotation(statement).content_hash()),
+            "the statement survives"
+        );
         assert_eq!(
             pruned.items().len(),
             3,
@@ -306,6 +323,92 @@ mod tests {
         let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         assert_eq!(pruned.items().len(), 1, "past the horizon: dropped");
+        Ok(())
+    }
+
+    #[test]
+    fn the_horizon_boundary_is_closed_at_exactly_one_year() -> TestResult {
+        // The `<=` vs `<` mutation: a serial at EXACTLY `now·1000 +
+        // horizon` is within bounds and survives beside a covering
+        // sibling; one past it drops (the previous test's case).
+        let at_horizon = binding(
+            1,
+            11,
+            1,
+            NOW * 1000 + DEFERRAL_HORIZON_MS,
+            (NOW - 1_000, NOW + 1_000),
+            10,
+        )?;
+        let anchor_record = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 20)?;
+
+        let (store, validator) = setup(&[&at_horizon, &anchor_record], vec![]);
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
+
+        let kept: Set<_> = pruned.items().iter().map(Item::content_hash).collect();
+        assert!(
+            kept.contains(&at_horizon.cert.digest().erase()),
+            "exactly at the horizon is within bounds"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_chain_refresh_never_prunes_a_certificate() -> TestResult {
+        // The `attestation_allows` guard: a bare refresh row
+        // component-wise better than the document's certificate —
+        // wider window, higher serial, and (with the certificate
+        // issued at 0) an equal issued_at — must NOT prune it:
+        // candidacy is certificate-attested, and a store holding only
+        // the zone's word cannot derive the binding at all.
+        let cert = binding(1, 11, 1, 50, (NOW - 4_000, NOW - 2_000), 0)?;
+        let refresh = binding(1, 11, 2, 100, (NOW - 5_000, NOW + 1_000), 0)?;
+
+        let (mut store, mut validator) = setup(&[&cert], vec![]);
+        validator = validator.with(host(), &refresh.chain, refresh.proof.clone());
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
+
+        let kept: Set<_> = pruned.items().iter().map(Item::content_hash).collect();
+        assert!(
+            kept.contains(&cert.cert.digest().erase()),
+            "the zone's word alone never evicts the document's own \
+             direction"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_certificate_may_prune_a_chain_refresh() -> TestResult {
+        // The reverse direction carries no such hazard: a certificate
+        // strictly better in every component drops the refresh row
+        // (refresh issued_at is 0 by construction, so any certificate
+        // issuance is at least as good).
+        let refresh = binding(1, 11, 2, 50, (NOW - 4_000, NOW - 2_000), 0)?;
+        let cert = binding(1, 11, 1, 100, (NOW - 5_000, NOW + 1_000), 20)?;
+
+        let (mut store, mut validator) = setup(&[&cert], vec![]);
+        validator = validator.with(host(), &refresh.chain, refresh.proof.clone());
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let refresh_item = Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        };
+        let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
+
+        let kept: Set<_> = pruned.items().iter().map(Item::content_hash).collect();
+        assert!(
+            !kept.contains(&refresh_item.content_hash()),
+            "the dominated refresh row is reclaimed"
+        );
+        assert!(kept.contains(&cert.cert.digest().erase()));
         Ok(())
     }
 
@@ -362,5 +465,185 @@ mod tests {
             "equal-component classes are kept whole"
         );
         Ok(())
+    }
+
+    mod props {
+        use super::*;
+        use crate::{
+            test_utils::window,
+            verifier::state::{Attestation, store::item::Item},
+        };
+        use onomancy_dnssec::{txt::serial::Serial, zone_state_key::ZoneStateKey};
+
+        /// Build one `BindingEvidence` row from compact seeds — the
+        /// direct-domination-law fixture.
+        fn arb_record(tag: u8, seed: (u8, u64, u64, u64, u64)) -> BindingEvidence {
+            let (doc_seed, from, span, serial, issued_at) = seed;
+            let from = from % 1_000;
+
+            BindingEvidence {
+                attestation: if tag.is_multiple_of(2) {
+                    Attestation::Certificate
+                } else {
+                    Attestation::ChainOnly
+                },
+                document: crate::test_utils::doc(doc_seed % 2),
+                generation: crate::test_utils::generation((doc_seed % 2) + 10),
+                hash: Digest::hash(&[tag, doc_seed]),
+                hostname: host(),
+                key: ZoneStateKey {
+                    window_end: UnixSeconds::from(from + (span % 1_000)),
+                    serial: Serial::from(serial % 64),
+                    issued_at: UnixSeconds::from(issued_at % 64),
+                },
+                generation_on_path: true,
+                window: window(from, from + (span % 1_000)),
+            }
+        }
+
+        /// `dominates` is irreflexive and antisymmetric — the
+        /// strictness clause, as a law rather than one example.
+        #[test]
+        fn dominates_is_irreflexive_and_antisymmetric() {
+            bolero::check!()
+                .with_type::<((u8, u64, u64, u64, u64), (u8, u64, u64, u64, u64))>()
+                .for_each(|(a_seed, b_seed)| {
+                    let a = arb_record(0, *a_seed);
+                    let b = arb_record(2, *b_seed);
+
+                    assert!(!dominates(&a, &a), "irreflexive");
+                    assert!(
+                        !(dominates(&a, &b) && dominates(&b, &a)),
+                        "antisymmetric: mutual domination would drop \
+                         both off the frontier"
+                    );
+                });
+        }
+
+        /// The generated-store pool the frontier and preservation
+        /// properties share: up to six records over two documents,
+        /// serials bounded far under the horizon.
+        fn build_store(specs: &[(bool, u64, u64, u64, u64)]) -> (Store, MemoryValidator) {
+            let mut store = Store::default();
+            let mut validator = MemoryValidator::default();
+
+            for (i, (second_doc, serial, from, span, issued_at)) in specs.iter().take(6).enumerate()
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                let tag = i as u8;
+                let doc_seed = u8::from(*second_doc) + 1;
+                let from = NOW - 10_000 + (from % 9_000);
+
+                let Ok(b) = binding(
+                    doc_seed,
+                    doc_seed + 10,
+                    tag,
+                    serial % 1_000,
+                    (from, from + (span % 2_000)),
+                    issued_at % 100,
+                ) else {
+                    continue;
+                };
+                store.insert(Item::Record(b.cert.clone()));
+                validator = validator.with(host(), &b.chain, b.proof.clone());
+            }
+
+            (store, validator)
+        }
+
+        /// The frontier, both directions: every dropped record is
+        /// dominated by a kept one, and a kept-but-dominated record
+        /// is only ever the tenure endpoint (its group's earliest
+        /// inception).
+        #[test]
+        fn prune_keeps_exactly_the_frontier() {
+            bolero::check!()
+                .with_type::<Vec<(bool, u64, u64, u64, u64)>>()
+                .for_each(|specs| {
+                    let (store, validator) = build_store(specs);
+                    let authority = MemoryAuthority::default();
+                    let now = UnixSeconds::from(NOW);
+
+                    let before = validate_and_extract(&store, &validator, &authority);
+                    let pruned = prune(&store, now, &Decisions::default(), &validator, &authority);
+                    let after = validate_and_extract(&pruned, &validator, &authority);
+
+                    let kept: Vec<&BindingEvidence> = after.records.iter().collect();
+
+                    for record in &before.records {
+                        let was_kept = kept.iter().any(|k| k.hash == record.hash);
+
+                        if was_kept {
+                            // A kept record dominated by another KEPT
+                            // record must be its group's tenure
+                            // endpoint.
+                            if kept.iter().any(|k| dominates(k, record)) {
+                                let group_min = before
+                                    .records
+                                    .iter()
+                                    .filter(|r| r.document == record.document)
+                                    .map(|r| r.window.inception())
+                                    .min();
+                                assert_eq!(
+                                    Some(record.window.inception()),
+                                    group_min,
+                                    "a dominated survivor must be the \
+                                     tenure endpoint"
+                                );
+                            }
+                        } else {
+                            // Every dropped record is dominated by a
+                            // kept one (no horizon drops: serials are
+                            // bounded small by construction).
+                            assert!(
+                                kept.iter().any(|k| dominates(k, record)),
+                                "a dropped record must be dominated by \
+                                 a kept one"
+                            );
+                        }
+                    }
+                });
+        }
+
+        /// The invariant, generatively: `derive(prune(s)) ==
+        /// derive(s)` at `now` and later clocks within the horizon —
+        /// and pruning is idempotent.
+        #[test]
+        fn prune_never_changes_the_derivation_and_is_idempotent() {
+            bolero::check!()
+                .with_type::<Vec<(bool, u64, u64, u64, u64)>>()
+                .for_each(|specs| {
+                    let (store, validator) = build_store(specs);
+                    let authority = MemoryAuthority::default();
+                    let decisions = Decisions::default();
+                    let pins = Map::default();
+                    let now = UnixSeconds::from(NOW);
+
+                    let pruned = prune(&store, now, &decisions, &validator, &authority);
+
+                    // One hour and thirty days out — both far inside
+                    // the one-year horizon.
+                    for later in [NOW, NOW + 3_600, NOW + 30 * 24 * 3_600] {
+                        let at = UnixSeconds::from(later);
+                        assert_eq!(
+                            VerifierState::compute(
+                                &store, at, &decisions, &pins, &validator, &authority
+                            ),
+                            VerifierState::compute(
+                                &pruned, at, &decisions, &pins, &validator, &authority
+                            ),
+                            "pruning changed the derivation at now + {}",
+                            later - NOW
+                        );
+                    }
+
+                    let twice = prune(&pruned, now, &decisions, &validator, &authority);
+                    assert_eq!(
+                        pruned.items().len(),
+                        twice.items().len(),
+                        "pruning is idempotent"
+                    );
+                });
+        }
     }
 }

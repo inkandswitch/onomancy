@@ -295,6 +295,10 @@ pub const fn validation_reason(error: &onomancy_dnssec::validator::WalkError) ->
         // DNS answered; nothing was proven.
         WalkError::Empty | WalkError::MissingLeaf => RefusalReason::NoBinding,
 
+        // The hostname cannot be spelled under the service label:
+        // the caller's input, not a security signal.
+        WalkError::UnrepresentableName(_) => RefusalReason::InvalidHostname,
+
         // Records arrived and failed to hold up: a security signal.
         WalkError::DsMismatch
         | WalkError::EmptyWindow
@@ -440,11 +444,30 @@ mod tests {
         }
     }
 
-    /// A grade must stay out of the refusal union: publishing it
-    /// would make consumers handle a case only a bug could produce.
+    /// The two authority rejections keep their own codes — the zone
+    /// is fine in both, and merging either into `chain-rejected`
+    /// sends someone to debug DNSSEC over a key or document problem.
+    /// No end-to-end fixture can stage them (that needs a sound chain
+    /// plus a wrong signer or document), so the mapping is pinned
+    /// here, at the arm a refactor would wildcard.
     #[test]
-    fn a_grade_is_not_a_declared_refusal() {
-        assert!(!declared_union().contains(&RefusalReason::NotARefusal.as_str()));
+    fn authority_rejections_keep_their_own_codes() {
+        assert_eq!(
+            reason(&Rejection::SignerNotAuthorized),
+            RefusalReason::SignerNotAuthorized
+        );
+        assert_eq!(
+            reason(&Rejection::DocumentNotAttested),
+            RefusalReason::DocumentNotAttested
+        );
+        assert_ne!(
+            reason(&Rejection::SignerNotAuthorized),
+            RefusalReason::ChainRejected
+        );
+        assert_ne!(
+            reason(&Rejection::DocumentNotAttested),
+            RefusalReason::ChainRejected
+        );
     }
 
     /// The members of the published union, by quoted string only —

@@ -42,7 +42,13 @@ use crate::{
     link::{Link, ParseLinkError},
     trust_anchor::TrustAnchor,
     wire::{
-        cname::Cname, dnskey::Dnskey, ds::Ds, name::Name, rr_type::RrType, rrsig::Rrsig, txt::Txt,
+        cname::Cname,
+        dnskey::Dnskey,
+        ds::Ds,
+        name::{Name, ParseNameError},
+        rr_type::RrType,
+        rrsig::Rrsig,
+        txt::Txt,
     },
 };
 
@@ -97,7 +103,7 @@ impl Validator {
 
         // Link 0: a DNSKEY RRset, self-signed and anchor-matched.
         let mut walk = WalkState::enter_anchored(&self.anchors, &root_link)?;
-        let mut target = Name::onomancy_owner(hostname);
+        let mut target = Name::onomancy_owner(hostname).map_err(WalkError::UnrepresentableName)?;
         let mut pending_ds: Option<(Name, Vec<Ds>)> = None;
         let mut cname_hops = 0usize;
 
@@ -455,6 +461,12 @@ pub enum WalkError {
         /// Whether a DS was pending its child DNSKEY.
         awaiting_child_keys: bool,
     },
+
+    /// The hostname cannot be spelled under the `_onomancy.` service
+    /// label within the 255-octet wire cap (hostnames past 243
+    /// presentation octets).
+    #[error("hostname does not fit under the service label")]
+    UnrepresentableName(#[source] ParseNameError),
 
     /// A signature-level failure (bad signature, unsupported
     /// algorithm, non-zone key, …).

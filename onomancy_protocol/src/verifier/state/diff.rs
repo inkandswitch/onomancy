@@ -298,10 +298,134 @@ mod tests {
         )));
     }
 
+    /// FIXME №6: entering contested-mask double-reports — the
+    /// prompt-class `BindingChanged { Some → None }` rides alongside
+    /// the badge-class `ContestedEntered`, though surfacing doctrine
+    /// says the mask transition should not prompt. This test pins
+    /// CURRENT behavior so the fix flips a visible assertion instead
+    /// of changing silent behavior.
     #[test]
-    fn identical_derivations_produce_no_events() {
-        let derivation = derivation(accepted(1, 100, BindingGrade::Provisional));
-        assert!(derivation.diff(&derivation).is_empty());
+    fn entering_contested_mask_double_reports_pinning_fixme_6() {
+        let before = derivation(accepted(1, 100, BindingGrade::Confirmed));
+        let masked = derivation(BindingState {
+            contested: true,
+            ..BindingState::default()
+        });
+
+        let events = masked.diff(&before);
+
+        assert!(
+            events
+                .iter()
+                .any(|event| event.kind == EventKind::ContestedEntered),
+            "the badge is the intended surfacing"
+        );
+        // FIXME №6: should NOT be emitted on a pure mask transition.
+        assert!(
+            events.iter().any(|event| event.kind
+                == EventKind::BindingChanged {
+                    from: Some(doc(1)),
+                    to: None,
+                }
+                && event.kind.may_prompt()),
+            "FIXME №6 current behavior: the mask co-emits a \
+             prompt-class binding change"
+        );
+    }
+
+    #[test]
+    fn serials_moving_up_or_across_documents_never_regress() {
+        // Upward move, same document: routine ratchet progress —
+        // silence.
+        let before = derivation(accepted(1, 100, BindingGrade::Confirmed));
+        let up = derivation(accepted(1, 200, BindingGrade::Confirmed));
+        assert!(
+            up.diff(&before).is_empty(),
+            "serials moving up are not events"
+        );
+
+        // Document move with a numerically lower serial: the ratchet
+        // is per-document, so this is a binding change and nothing
+        // else — a regression event across documents would misread
+        // unrelated serial spaces as a rollback.
+        let moved = derivation(accepted(2, 7, BindingGrade::Confirmed));
+        let events = moved.diff(&before);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].kind, EventKind::BindingChanged { .. }));
+    }
+
+    #[test]
+    fn contested_clearing_is_a_badge() {
+        let contested = derivation(BindingState {
+            contested: true,
+            ..BindingState::default()
+        });
+        let settled = derivation(BindingState::default());
+
+        let events = settled.diff(&contested);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::ContestedCleared);
+        assert!(!events[0].kind.may_prompt());
+    }
+
+    #[test]
+    fn pending_transitions_are_badges_both_ways() {
+        let quiet = derivation(BindingState::default());
+        let pending = derivation(BindingState {
+            pending: vec![doc(3)],
+            ..BindingState::default()
+        });
+
+        let surfaced = pending.diff(&quiet);
+        assert_eq!(surfaced.len(), 1);
+        assert_eq!(surfaced[0].kind, EventKind::PendingSurfaced(doc(3)));
+        assert!(!surfaced[0].kind.may_prompt());
+
+        let cleared = quiet.diff(&pending);
+        assert_eq!(cleared.len(), 1);
+        assert_eq!(cleared[0].kind, EventKind::PendingCleared(doc(3)));
+        assert!(!cleared[0].kind.may_prompt());
+    }
+
+    #[test]
+    fn succession_forks_fire_once_like_lineage_forks() {
+        let fork = SuccessionFork {
+            predecessor: doc(1),
+            successors: vec![doc(2), doc(3)],
+        };
+        let with_fork = derivation(BindingState {
+            succession_forks: vec![fork.clone()],
+            ..BindingState::default()
+        });
+
+        let events = with_fork.diff(&derivation(BindingState::default()));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, EventKind::SuccessionForkSurfaced(fork));
+        assert!(events[0].kind.may_prompt(), "forks are event-class");
+        assert!(with_fork.diff(&with_fork).is_empty(), "old news");
+    }
+
+    #[test]
+    fn divergence_transitions_are_badges_both_ways() {
+        let divergence = Divergence {
+            alleged: doc(9),
+            source: super::super::binding_state::DivergenceSource::Pin,
+        };
+        let quiet = derivation(accepted(1, 100, BindingGrade::Confirmed));
+        let diverged = derivation(BindingState {
+            divergence: vec![divergence],
+            ..accepted(1, 100, BindingGrade::Confirmed)
+        });
+
+        let surfaced = diverged.diff(&quiet);
+        assert_eq!(surfaced.len(), 1);
+        assert_eq!(surfaced[0].kind, EventKind::DivergenceSurfaced(divergence));
+        assert!(!surfaced[0].kind.may_prompt());
+
+        let cleared = quiet.diff(&diverged);
+        assert_eq!(cleared.len(), 1);
+        assert_eq!(cleared[0].kind, EventKind::DivergenceCleared(divergence));
+        assert!(!cleared[0].kind.may_prompt());
     }
 
     #[test]
@@ -320,5 +444,159 @@ mod tests {
             1
         );
         assert!(with_fork.diff(&with_fork).is_empty(), "old news");
+    }
+
+    mod props {
+        use super::*;
+        use crate::verifier::state::binding_state::DivergenceSource;
+
+        /// The compact seed tuple behind [`arb_state`]: accepted
+        /// binding, contested flag, (pending, losing, divergence)
+        /// counts, fork seed.
+        type StateSeed = (Option<(u8, u64, bool)>, bool, (u8, u8, u8), u8);
+
+        /// One arbitrary `BindingState` from compact seeds — every
+        /// field populated so the properties range over the whole
+        /// event vocabulary.
+        fn arb_state(seed: &StateSeed) -> BindingState {
+            let (accepted_seed, contested, (pending_n, losing_n, divergence_n), fork_seed) = seed;
+
+            let accepted_binding = accepted_seed.map(|(doc_seed, serial, confirmed)| {
+                accepted(
+                    doc_seed % 4,
+                    serial % 64,
+                    if confirmed {
+                        BindingGrade::Confirmed
+                    } else {
+                        BindingGrade::Provisional
+                    },
+                )
+            });
+
+            BindingState {
+                accepted: accepted_binding.as_ref().and_then(|s| s.accepted),
+                contested: *contested,
+                divergence: (0..divergence_n % 3)
+                    .map(|i| Divergence {
+                        alleged: doc(20 + i),
+                        source: if i % 2 == 0 {
+                            DivergenceSource::Claim
+                        } else {
+                            DivergenceSource::Pin
+                        },
+                    })
+                    .collect(),
+                effective_serial: accepted_binding.and_then(|s| s.effective_serial),
+                forks: (0..fork_seed % 3)
+                    .map(|i| Fork {
+                        document: doc(i % 2),
+                        at: generation(30 + i),
+                    })
+                    .collect(),
+                losing_acceptances: (0..losing_n % 3).map(|i| doc(10 + i)).collect(),
+                pending: (0..pending_n % 3).map(|i| doc(5 + i)).collect(),
+                succession_forks: if fork_seed % 5 == 0 {
+                    vec![SuccessionFork {
+                        predecessor: doc(1),
+                        successors: vec![doc(2), doc(3)],
+                    }]
+                } else {
+                    vec![]
+                },
+                tenure: None,
+            }
+        }
+
+        /// `diff(a, a) == []` for EVERY state, not one example: a
+        /// derivation compared with itself surfaces nothing.
+        #[test]
+        fn diff_of_identical_states_is_empty() {
+            bolero::check!().with_type::<StateSeed>().for_each(|seed| {
+                let state = derivation(arb_state(seed));
+                assert!(state.diff(&state).is_empty());
+            });
+        }
+
+        /// Reversing a diff produces the duals: badges surface ⇄
+        /// clear, binding changes and grade moves flip their
+        /// endpoints — while fork surfacing and serial regressions
+        /// are one-directional (fork removal and serial progress are
+        /// silent).
+        #[test]
+        fn diff_reversal_produces_event_duals() {
+            bolero::check!()
+                .with_type::<(StateSeed, StateSeed)>()
+                .for_each(|(before_seed, after_seed)| {
+                    let before = derivation(arb_state(before_seed));
+                    let after = derivation(arb_state(after_seed));
+
+                    let forward: Vec<EventKind> =
+                        after.diff(&before).into_iter().map(|e| e.kind).collect();
+                    let backward: Vec<EventKind> =
+                        before.diff(&after).into_iter().map(|e| e.kind).collect();
+
+                    for kind in &forward {
+                        match kind {
+                            EventKind::BindingChanged { from, to } => assert!(
+                                backward.contains(&EventKind::BindingChanged {
+                                    from: *to,
+                                    to: *from,
+                                }),
+                                "binding changes reverse"
+                            ),
+                            EventKind::GradeChanged { from, to } => assert!(
+                                backward.contains(&EventKind::GradeChanged {
+                                    from: *to,
+                                    to: *from,
+                                }),
+                                "grade moves reverse"
+                            ),
+                            EventKind::ContestedEntered => {
+                                assert!(backward.contains(&EventKind::ContestedCleared));
+                            }
+                            EventKind::ContestedCleared => {
+                                assert!(backward.contains(&EventKind::ContestedEntered));
+                            }
+                            EventKind::PendingSurfaced(d) => {
+                                assert!(backward.contains(&EventKind::PendingCleared(*d)));
+                            }
+                            EventKind::PendingCleared(d) => {
+                                assert!(backward.contains(&EventKind::PendingSurfaced(*d)));
+                            }
+                            EventKind::LosingAcceptanceSurfaced(d) => {
+                                assert!(backward.contains(&EventKind::LosingAcceptanceCleared(*d)));
+                            }
+                            EventKind::LosingAcceptanceCleared(d) => {
+                                assert!(
+                                    backward.contains(&EventKind::LosingAcceptanceSurfaced(*d))
+                                );
+                            }
+                            EventKind::DivergenceSurfaced(d) => {
+                                assert!(backward.contains(&EventKind::DivergenceCleared(*d)));
+                            }
+                            EventKind::DivergenceCleared(d) => {
+                                assert!(backward.contains(&EventKind::DivergenceSurfaced(*d)));
+                            }
+                            // One-directional kinds: their removal /
+                            // reversal is silent, never an event.
+                            EventKind::LineageForkSurfaced(fork) => assert!(
+                                !backward.contains(&EventKind::LineageForkSurfaced(*fork)),
+                                "fork removal is silent"
+                            ),
+                            EventKind::SuccessionForkSurfaced(fork) => assert!(
+                                !backward
+                                    .contains(&EventKind::SuccessionForkSurfaced(fork.clone())),
+                                "fork removal is silent"
+                            ),
+                            EventKind::SerialRegression { .. } => assert!(
+                                !backward
+                                    .iter()
+                                    .any(|k| matches!(k, EventKind::SerialRegression { .. })),
+                                "serial progress is silent"
+                            ),
+                        }
+                    }
+                });
+        }
     }
 }

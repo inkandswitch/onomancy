@@ -68,6 +68,17 @@ mod tests {
         assert!(key(1, 1, 2) > key(1, 1, 1));
     }
 
+    /// The equivocation projection really excludes `issued_at`: two
+    /// keys differing only there are zone-vouched equals.
+    #[test]
+    fn zone_vouched_projects_away_the_signer_claimed_field() {
+        assert_eq!(
+            key(7, 3, 100).zone_vouched(),
+            (UnixSeconds::from(7), Serial::from(3))
+        );
+        assert_eq!(key(7, 3, 100).zone_vouched(), key(7, 3, 999).zone_vouched());
+    }
+
     mod props {
         use super::*;
 

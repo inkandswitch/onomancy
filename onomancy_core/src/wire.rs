@@ -224,7 +224,7 @@ pub enum WireError {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use alloc::vec;
@@ -260,6 +260,45 @@ mod tests {
         ));
     }
 
+    /// Both sides of the 1 MiB boundary, on both the decoder's gate
+    /// and the encoder-side contract every `sign` path leans on.
+    #[test]
+    fn the_unit_cap_boundary_is_exact() {
+        let at_cap = vec![0u8; MAX_UNIT_BYTES];
+        assert!(Reader::new(&at_cap).is_ok(), "exactly the cap decodes");
+
+        assert_eq!(check_unit_len(MAX_UNIT_BYTES), Ok(()));
+        assert_eq!(
+            check_unit_len(MAX_UNIT_BYTES + 1),
+            Err(OversizeUnit {
+                len: MAX_UNIT_BYTES + 1
+            })
+        );
+    }
+
+    #[test]
+    fn short_reads_report_need_and_have() {
+        let unit = vec![0u8; 3];
+        let mut reader = Reader::new(&unit).expect("under cap");
+        assert_eq!(
+            reader.take(5),
+            Err(WireError::Truncated { need: 5, have: 3 })
+        );
+        assert!(matches!(
+            reader.take_array::<4>(),
+            Err(WireError::Truncated { need: 4, have: 3 })
+        ));
+
+        // Failed reads consume nothing.
+        assert_eq!(reader.take(3).expect("in bounds"), &[0, 0, 0]);
+    }
+
+    #[test]
+    fn truncated_varints_are_rejected() {
+        let mut empty = Reader::new(&[]).expect("under cap");
+        assert!(matches!(empty.varint(), Err(WireError::Varint(_))));
+    }
+
     mod props {
         use super::*;
 
@@ -275,6 +314,67 @@ mod tests {
                 assert_eq!(reader.varint(), Ok(*value));
                 assert_eq!(reader.finish(), Ok(()));
             });
+        }
+
+        /// `bounded_len` admits a count iff `count × width` fits the
+        /// remaining input — including the `checked_mul` overflow arm
+        /// that `read_heads` (width 32) and `read_lineage` (width
+        /// 166) rely on. Never allocates, never panics.
+        #[test]
+        fn bounded_len_admits_exactly_what_the_input_backs() {
+            bolero::check!()
+                .with_type::<(u64, u8, u16)>()
+                .for_each(|(declared, width, have)| {
+                    let width = usize::from(*width).max(1);
+                    let mut unit = Vec::new();
+                    put_varint(&mut unit, *declared);
+                    unit.extend(core::iter::repeat_n(0u8, usize::from(*have)));
+
+                    let mut reader = Reader::new(&unit).expect("under cap");
+                    let fits = usize::try_from(*declared)
+                        .ok()
+                        .and_then(|n| n.checked_mul(width))
+                        .is_some_and(|total| total <= usize::from(*have));
+
+                    match reader.bounded_len(width) {
+                        Ok(count) => {
+                            assert!(fits, "admitted a count the input cannot back");
+                            assert_eq!(count as u64, *declared);
+                        }
+                        Err(WireError::LengthOverrun { declared: got, .. }) => {
+                            assert!(!fits, "rejected a count the input backs");
+                            assert_eq!(got, *declared);
+                        }
+                        Err(other) => panic!("unexpected error: {other:?}"),
+                    }
+                });
+        }
+
+        /// `take` succeeds iff enough bytes remain, and consumes
+        /// exactly what it returns.
+        #[test]
+        fn take_consumes_exactly_its_need() {
+            bolero::check!()
+                .with_type::<(Vec<u8>, u16)>()
+                .for_each(|(bytes, need)| {
+                    let need = usize::from(*need);
+                    let mut reader = Reader::new(bytes).expect("under cap");
+                    let before = reader.remaining();
+
+                    match reader.take(need) {
+                        Ok(taken) => {
+                            assert!(need <= before);
+                            assert_eq!(taken.len(), need);
+                            assert_eq!(reader.remaining(), before - need);
+                        }
+                        Err(WireError::Truncated { need: n, have }) => {
+                            assert!(need > before);
+                            assert_eq!((n, have), (need, before));
+                            assert_eq!(reader.remaining(), before, "failed reads consume nothing");
+                        }
+                        Err(other) => panic!("unexpected error: {other:?}"),
+                    }
+                });
         }
     }
 }

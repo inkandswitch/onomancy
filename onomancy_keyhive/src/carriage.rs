@@ -119,6 +119,7 @@ pub enum ParseCarriageError {
 pub struct EncodeCarriageError(#[from] bincode::Error);
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -132,6 +133,25 @@ mod tests {
         ));
     }
 
+    /// The reported index is the ENTRY's position, not always zero:
+    /// a valid first entry followed by a bad second names index 1.
+    #[test]
+    fn rejection_indices_name_the_offending_entry() -> testresult::TestResult {
+        let minted = crate::mint::generation_carriage(
+            &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
+            &ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
+        )?;
+        let mut entries = minted.entries().to_vec();
+        entries.truncate(1); // one valid entry
+        entries.push(SignedDelegationBytes::from(b"zz9garbage".to_vec()));
+
+        assert!(matches!(
+            Carriage::parse(&DelegationChain::from(entries)),
+            Err(ParseCarriageError::UnknownEnvelope { index: 1, .. })
+        ));
+        Ok(())
+    }
+
     #[test]
     fn tagged_garbage_is_rejected_not_skipped() {
         let entry = SignedDelegationBytes::from(b"kh0garbage".to_vec());
@@ -142,11 +162,69 @@ mod tests {
         ));
     }
 
+    /// The envelope roundtrips through REAL events — tag prepended
+    /// and stripped, bincode both ways — not just the empty vector.
     #[test]
-    fn empty_carriage_roundtrips() -> testresult::TestResult {
-        let carriage = Carriage::new(Vec::new());
-        let entries = carriage.to_delegation_bytes()?;
-        assert_eq!(Carriage::parse(&entries)?, carriage);
+    fn minted_carriages_roundtrip() -> testresult::TestResult {
+        let minted = crate::mint::generation_carriage(
+            &ed25519_dalek::SigningKey::from_bytes(&[1; 32]),
+            &ed25519_dalek::SigningKey::from_bytes(&[2; 32]),
+        )?;
+
+        let parsed = Carriage::parse(&minted)?;
+        assert_eq!(parsed.events().len(), 2, "introduction + delegation");
+        assert_eq!(
+            parsed.to_delegation_bytes()?,
+            minted,
+            "re-encoding reproduces the attached bytes verbatim"
+        );
+
+        // The empty carriage is the degenerate case of the same law.
+        let empty = Carriage::new(Vec::new());
+        assert_eq!(Carriage::parse(&empty.to_delegation_bytes()?)?, empty);
         Ok(())
+    }
+
+    mod props {
+        use super::*;
+
+        /// `parse ∘ to_delegation_bytes = id` over minted carriages
+        /// for arbitrary key pairs — and byte-noise entries never
+        /// panic the parser, erring with the offending index instead.
+        #[test]
+        fn envelope_roundtrip_and_total_parse() {
+            bolero::check!()
+                .with_type::<([u8; 32], [u8; 32], Vec<u8>)>()
+                .for_each(|(doc_seed, generation_seed, noise)| {
+                    if doc_seed == generation_seed {
+                        return; // a document cannot delegate to itself
+                    }
+
+                    let minted = crate::mint::generation_carriage(
+                        &ed25519_dalek::SigningKey::from_bytes(doc_seed),
+                        &ed25519_dalek::SigningKey::from_bytes(generation_seed),
+                    )
+                    .expect("mintable");
+
+                    let parsed = Carriage::parse(&minted).expect("own bytes parse");
+                    assert_eq!(parsed.to_delegation_bytes().expect("encodable"), minted);
+
+                    // Noise appended after valid entries: total, and
+                    // the error names the noise entry's index.
+                    let mut entries = minted.entries().to_vec();
+                    entries.push(SignedDelegationBytes::from(noise.clone()));
+                    match Carriage::parse(&DelegationChain::from(entries)) {
+                        Err(
+                            ParseCarriageError::UnknownEnvelope { index, .. }
+                            | ParseCarriageError::UndecodableEvent { index, .. },
+                        ) => assert_eq!(index, 2, "the error names the noise entry"),
+                        Ok(_) => {
+                            // Vanishingly unlikely (noise must spell
+                            // `kh0` + a valid bincode event), but not
+                            // impossible — and not a parser defect.
+                        }
+                    }
+                });
+        }
     }
 }

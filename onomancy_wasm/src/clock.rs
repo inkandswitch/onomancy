@@ -105,50 +105,65 @@ pub enum ClockError {
 mod tests {
     use super::*;
 
-    #[allow(clippy::expect_used)]
-    fn seconds(value: f64) -> u64 {
-        u64::from(resolve(Some(value)).expect("a plausible clock is accepted"))
-    }
-
-    /// The property the original bug violated: seconds in, same
-    /// seconds out, with no scaling in either direction.
-    #[test]
-    fn a_supplied_clock_round_trips() {
-        assert_eq!(seconds(1_788_100_000.0), 1_788_100_000);
-    }
-
-    /// Milliseconds are REFUSED, not accepted and not clamped.
-    ///
-    /// This is the security case. Taken as seconds, `Date.now()`
-    /// lands in the far future where every chain is expired, and a
-    /// stale chain downgrades an off-path generation from a refusal
-    /// to `provisional` — so the units slip turned a revoked key into
-    /// an accepted one. Observed before this guard existed.
-    #[test]
-    fn milliseconds_are_refused_rather_than_silently_accepted() {
-        assert!(resolve(Some(1_788_100_000_000.0)).is_err());
-    }
-
     /// The boundary, both sides, so the bound cannot drift untested.
+    /// Kept as an explicit example: generators do not reliably hit
+    /// exact constants.
     #[test]
     fn the_plausibility_bound_is_where_it_claims_to_be() {
         assert!(resolve(Some(IMPLAUSIBLE_SECONDS - 1.0)).is_ok());
         assert!(resolve(Some(IMPLAUSIBLE_SECONDS)).is_err());
     }
 
-    /// A negative clock is a caller bug and says so, rather than
-    /// becoming 1970 and grading everything `Deferred`.
+    /// A fractional in-range clock truncates — the sub-second part is
+    /// dropped, never rounded up into the future.
     #[test]
-    fn a_negative_clock_is_refused() {
-        assert!(resolve(Some(-1.0)).is_err());
+    #[allow(clippy::expect_used)]
+    fn fractional_seconds_truncate() {
+        assert_eq!(
+            u64::from(resolve(Some(1.9)).expect("in range")),
+            1,
+            "truncation, not rounding"
+        );
     }
 
-    /// `f64` admits values no integer conversion can represent; the
-    /// cast would otherwise saturate and grade against nonsense.
-    #[test]
-    fn non_finite_clocks_are_refused() {
-        assert!(resolve(Some(f64::NAN)).is_err());
-        assert!(resolve(Some(f64::INFINITY)).is_err());
-        assert!(resolve(Some(f64::NEG_INFINITY)).is_err());
+    #[cfg(not(target_arch = "wasm32"))]
+    mod props {
+        use super::*;
+
+        /// The whole classification, as one law over every `f64`:
+        /// accepted exactly when finite, non-negative, and below the
+        /// bound — and then truncated, never scaled. The two refusals
+        /// partition the rest by which rule they broke.
+        ///
+        /// The millisecond arm is the security case: taken as
+        /// seconds, `Date.now()` lands in the far future where every
+        /// chain is stale, and a stale chain downgrades an off-path
+        /// generation from a refusal to `provisional` — the units
+        /// slip turned a revoked key into an accepted one. Observed
+        /// before this guard existed.
+        #[test]
+        fn resolve_classifies_exactly_by_the_bound() {
+            bolero::check!().with_type::<f64>().for_each(|&supplied| {
+                match resolve(Some(supplied)) {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // bounded
+                    Ok(instant) => {
+                        assert!(
+                            supplied.is_finite() && (0.0..IMPLAUSIBLE_SECONDS).contains(&supplied)
+                        );
+                        assert_eq!(
+                            u64::from(instant),
+                            supplied as u64,
+                            "truncation, no scaling"
+                        );
+                    }
+                    Err(ClockError::NotSeconds { .. }) => {
+                        assert!(!supplied.is_finite() || supplied < 0.0);
+                    }
+                    Err(ClockError::LooksLikeMilliseconds { .. }) => {
+                        assert!(supplied >= IMPLAUSIBLE_SECONDS);
+                    }
+                }
+            });
+        }
     }
 }

@@ -141,5 +141,22 @@ mod tests {
                 assert_eq!(Serial::parse(&rendered), Ok(serial));
             });
         }
+
+        /// The converse: anything accepted re-renders to exactly its
+        /// input — one serial, one spelling.
+        #[test]
+        fn accepted_spellings_are_canonical() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    if let Ok(serial) = Serial::parse(raw) {
+                        assert_eq!(
+                            &alloc::string::ToString::to_string(&serial),
+                            raw,
+                            "parse must only accept the canonical spelling"
+                        );
+                    }
+                });
+        }
     }
 }

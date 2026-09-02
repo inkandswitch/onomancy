@@ -15,8 +15,16 @@ test("resolves a two-hop walk across held documents", async ({ page }) => {
     return { john, outcome };
   });
 
-  expect(verdict.outcome.status).toBe("resolved");
-  expect(verdict.outcome.document).toBe(verdict.john);
+  // `toMatchObject` rather than field access: the published
+  // `WalkOutcome` is a union, and these assertions must typecheck
+  // without narrowing. Authority is the dev bridge's grade, and the
+  // warning says what the grade does not establish.
+  expect(verdict.outcome).toMatchObject({
+    status: "resolved",
+    document: verdict.john,
+    authority: "trusted-substrate",
+    warning: expect.stringContaining(""),
+  });
 });
 
 test("reports a partial walk instead of failing", async ({ page }) => {
@@ -26,6 +34,12 @@ test("reports a partial walk instead of failing", async ({ page }) => {
     return await held.resolve("~/nowhere", root);
   });
 
-  expect(outcome.status).toBe("partial");
-  expect(outcome.total).toBe(1);
+  // WHERE it stopped and WHY — the declared `WalkOutcome` fields, and
+  // the only e2e assertion of the dangling-vs-unsynced distinction.
+  expect(outcome).toMatchObject({
+    status: "partial",
+    total: 1,
+    consumed: 0,
+    reason: "dangling segment",
+  });
 });

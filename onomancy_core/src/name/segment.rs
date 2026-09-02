@@ -120,4 +120,31 @@ mod tests {
         assert!(Segment::parse("bmann.ca").is_ok());
         assert!(Segment::parse("blog.old").is_ok());
     }
+
+    mod props {
+        use super::*;
+
+        /// Acceptance is EXACTLY the documented predicate — no
+        /// narrower (weakened control-character check) and no wider
+        /// — and accepted segments are stored verbatim.
+        #[test]
+        fn acceptance_is_the_documented_predicate() {
+            bolero::check!().with_type::<String>().for_each(|raw| {
+                let should_accept = !raw.is_empty()
+                    && raw != "."
+                    && raw != ".."
+                    && !raw.contains('/')
+                    && !raw.contains('#')
+                    && !raw.chars().any(char::is_control);
+
+                match Segment::parse(raw) {
+                    Ok(segment) => {
+                        assert!(should_accept, "accepted outside the predicate: {raw:?}");
+                        assert_eq!(segment.as_str(), raw, "segments are identity wrappers");
+                    }
+                    Err(_) => assert!(!should_accept, "rejected inside the predicate: {raw:?}"),
+                }
+            });
+        }
+    }
 }

@@ -191,6 +191,21 @@
           '';
         };
 
+        # Mutation testing (cargo-mutants; config in .cargo/mutants.toml).
+        # Not in the `ci` aggregate: a full-workspace run is hours, not
+        # minutes. Hosted CI scopes it to the PR's changed code with
+        # `--in-diff`; run it bare for the deliberate full sweep.
+        ci-mutants = pkgs.writeShellApplication {
+          name = "onomancy-ci-mutants";
+          runtimeInputs = [ rust-toolchain pkgs.cargo-mutants ];
+          text = ''
+            set -x
+            # No args: full workspace (slow, deliberate).
+            # CI: onomancy-ci-mutants --in-diff pr.diff
+            cargo mutants "$@"
+          '';
+        };
+
         # Playwright tests against the built npm package: real
         # Chromium + Firefox driving the wasm-bodge build.
         ci-e2e = pkgs.writeShellApplication {
@@ -250,9 +265,11 @@
             # green board without this notice reads as full coverage
             # while the wasm suites went unexecuted.
             echo
-            echo "NOT RUN (hosted CI runs both): ci-browser, ci-e2e"
+            echo "NOT RUN (hosted CI runs all three): ci-browser, ci-e2e, ci-mutants"
             echo "  nix run .#ci-browser   # executes the wasm test suites"
             echo "  nix run .#ci-e2e       # Playwright against the npm build"
+            echo "  nix run .#ci-mutants   # full-workspace mutation testing (slow;"
+            echo "                         # CI runs it scoped to the PR diff)"
           '';
         };
 
@@ -377,6 +394,7 @@
             ci = ci-all;
             ci-browser = ci-browser;
             ci-e2e = ci-e2e;
+            ci-mutants = ci-mutants;
             inherit demo;
           });
 

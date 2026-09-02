@@ -373,6 +373,94 @@ mod tests {
         assert_eq!(DecisionsView::new(&doc).decisions(), Decisions::default());
     }
 
+    /// Every spelling of `v` beyond the canonical `Int(0)`:
+    /// `Uint(0)` is accepted (a JS writer plausibly produces it);
+    /// negative, non-scalar, and missing `v` all read nothing. Each
+    /// document plants a well-formed claim so acceptance is provable
+    /// and rejection is non-vacuous.
+    #[test]
+    fn version_shapes_gate_the_whole_read() -> TestResult {
+        let claim = |doc: &mut Automerge| push_claim(doc, "bob.example", &anchor_bytes(1), None);
+
+        // Uint(0): accepted.
+        let mut doc = skeleton(0)?;
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            let (_, root) = tx.get(automerge::ROOT, DECISIONS_KEY)?.expect("reserved");
+            tx.put(&root, "v", ScalarValue::Uint(0))?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        claim(&mut doc)?;
+        assert_eq!(
+            DecisionsView::new(&doc).decisions().claims.len(),
+            1,
+            "Uint(0) is version 0"
+        );
+
+        // Negative Int: refused (u64::try_from fails).
+        let mut doc = skeleton(-1)?;
+        claim(&mut doc)?;
+        assert_eq!(DecisionsView::new(&doc).decisions(), Decisions::default());
+
+        // Non-scalar v: refused.
+        let mut doc = skeleton(0)?;
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            let (_, root) = tx.get(automerge::ROOT, DECISIONS_KEY)?.expect("reserved");
+            tx.put_object(&root, "v", ObjType::Map)?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        claim(&mut doc)?;
+        assert_eq!(DecisionsView::new(&doc).decisions(), Decisions::default());
+
+        // Missing v: refused.
+        let mut doc = skeleton(0)?;
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            let (_, root) = tx.get(automerge::ROOT, DECISIONS_KEY)?.expect("reserved");
+            tx.delete(&root, "v")?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        claim(&mut doc)?;
+        assert_eq!(DecisionsView::new(&doc).decisions(), Decisions::default());
+        Ok(())
+    }
+
+    /// A single malformed element voids the WHOLE reset entry — the
+    /// derivation never guesses which hashes the user meant. Same for
+    /// a reset filed under a non-canonical hostname.
+    #[test]
+    fn a_malformed_reset_element_voids_the_whole_entry() -> TestResult {
+        let mut doc = skeleton(0)?;
+        let resets = schema_object(&doc, "resets");
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            // One good hash + one 3-byte element: the entry is void.
+            let list = tx.put_object(&resets, "mallory.example", ObjType::List)?;
+            tx.insert(&list, 0, vec![9u8; 32])?;
+            tx.insert(&list, 1, vec![1u8, 2, 3])?;
+            // A well-formed list under a NON-canonical hostname key:
+            // the reader never normalizes.
+            let list = tx.put_object(&resets, "Eve.Example", ObjType::List)?;
+            tx.insert(&list, 0, vec![8u8; 32])?;
+            // And one good entry, so the read provably ran.
+            let list = tx.put_object(&resets, "good.example", ObjType::List)?;
+            tx.insert(&list, 0, vec![7u8; 32])?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+
+        let decisions = DecisionsView::new(&doc).decisions();
+        assert_eq!(decisions.resets.len(), 1, "only the well-formed entry");
+        assert!(
+            decisions
+                .resets
+                .get(&hostname("good.example"))
+                .expect("good entry")
+                .contains(&Digest::from_bytes([7; 32]))
+        );
+        Ok(())
+    }
+
     #[test]
     fn malformed_entries_contribute_nothing() -> TestResult {
         let mut doc = skeleton(0)?;
@@ -390,11 +478,32 @@ mod tests {
         push_claim(&mut doc, "short.example", &[1, 2, 3], None)?;
         // Empty receipts: acceptances cite non-emptily by contract.
         put_acceptance(&mut doc, "bob.example", &anchor_bytes(1), &[])?;
-        // One good claim so the read provably ran.
+        // An acceptance VALUE that is not a map.
+        let acceptances = schema_object(&doc, "acceptances");
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.put(&acceptances, "carol.example", "not a map")?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        // One good claim so the read provably ran — with a NON-STRING
+        // note, which reads as no note rather than voiding the claim.
         push_claim(&mut doc, "bob.example", &anchor_bytes(1), None)?;
+        let claims = schema_object(&doc, "claims");
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            let (_, entry) = tx
+                .get(&claims, tx.length(&claims) - 1)?
+                .expect("just pushed");
+            tx.put(&entry, "note", 7)?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
 
         let decisions = DecisionsView::new(&doc).decisions();
         assert_eq!(decisions.claims.len(), 1, "only the well-formed claim");
+        assert_eq!(
+            decisions.claims[0].note, None,
+            "a non-string note reads as no note"
+        );
         assert!(decisions.acceptances.is_empty(), "empty receipts are inert");
         Ok(())
     }
@@ -422,5 +531,59 @@ mod tests {
         assert!(documents.contains(&anchor(1)));
         assert!(documents.contains(&anchor(2)));
         Ok(())
+    }
+
+    mod props {
+        use super::*;
+
+        /// Parse-don't-validate soundness of the reader, fuzzed: for
+        /// ANY shapes written into the schema, the read never panics,
+        /// and everything it returns already passed its gates —
+        /// canonical hostnames, curve-point documents, non-empty
+        /// receipts and resets.
+        #[test]
+        fn reads_are_total_and_everything_returned_passed_the_gates() {
+            bolero::check!()
+                .with_type::<Vec<(String, Vec<u8>, u8)>>()
+                .for_each(|claim_shapes| {
+                    let mut doc = skeleton(0).expect("skeleton");
+
+                    for (host, document, note_shape) in claim_shapes {
+                        let note = match note_shape % 3 {
+                            0 => None,
+                            1 => Some("note"),
+                            _ => Some(host.as_str()), // arbitrary text
+                        };
+                        push_claim(&mut doc, host, document, note).expect("write");
+                        // Reuse the raw host string as an acceptance
+                        // key and a reset key too.
+                        put_acceptance(&mut doc, host, document, &[[7; 32]]).expect("write");
+                        let resets = schema_object(&doc, "resets");
+                        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+                            let list = tx.put_object(&resets, host.as_str(), ObjType::List)?;
+                            tx.insert(&list, 0, document.clone())?;
+                            Ok(())
+                        })
+                        .expect("write");
+                    }
+
+                    // Total: never panics, whatever was written.
+                    let decisions = DecisionsView::new(&doc).decisions();
+
+                    for claim in &decisions.claims {
+                        assert_eq!(
+                            DnsName::from_canonical(claim.hostname.as_str().as_bytes()).ok(),
+                            Some(claim.hostname.clone()),
+                            "returned hostnames are canonical"
+                        );
+                    }
+                    for entries in decisions.acceptances.values() {
+                        assert!(entries.iter().all(|entry| !entry.cited.is_empty()));
+                    }
+                    for excluded in decisions.resets.values() {
+                        assert!(!excluded.is_empty());
+                    }
+                });
+        }
     }
 }

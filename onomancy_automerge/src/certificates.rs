@@ -346,7 +346,84 @@ mod tests {
         put(&mut doc, &one)?;
         put(&mut doc, &two)?;
 
-        assert_eq!(inline(&doc)?.len(), 2);
+        assert_eq!(
+            inline(&doc)?,
+            vec![one.encode(), two.encode()],
+            "both certificates, byte-exact, in insertion order"
+        );
+        Ok(())
+    }
+
+    /// The write path's refusal mirror of `a_second_hop_is_refused`:
+    /// a document that delegates its list takes no writes — the
+    /// certificate belongs in the referenced document. This is the
+    /// variant a real ceremony hits first when a user's certificates
+    /// live elsewhere.
+    #[test]
+    fn putting_onto_a_reference_is_refused() {
+        let holder = anchor(2);
+        let mut doc = document_with(|tx, reserved| {
+            tx.put(reserved, CERTIFICATES_KEY, format!("automerge:{holder}"))
+                .expect("reference");
+        });
+
+        assert!(matches!(
+            put(&mut doc, &certificate(1, "example.com")),
+            Err(WriteError::StoredElsewhere(target)) if *target == holder
+        ));
+    }
+
+    /// `inline` reads ONE document: a reference is somebody else's
+    /// list, so it reads as empty here — never followed, never an
+    /// error.
+    #[test]
+    fn inline_never_follows_a_reference() -> TestResult {
+        let doc = document_with(|tx, reserved| {
+            tx.put(
+                reserved,
+                CERTIFICATES_KEY,
+                format!("automerge:{}", anchor(2)),
+            )
+            .expect("reference");
+        });
+
+        assert_eq!(inline(&doc)?, Vec::<Vec<u8>>::new());
+        Ok(())
+    }
+
+    /// The replacement search skips entries that do not decode:
+    /// undecodable bytes are never "the same certificate", so a put
+    /// appends beside them and a refresh replaces only its own entry.
+    #[test]
+    fn undecodable_siblings_are_left_alone_by_replacement() -> TestResult {
+        let garbage = vec![0xFFu8; 16];
+        let mut doc = document_with(|tx, reserved| {
+            let list = tx
+                .put_object(reserved, CERTIFICATES_KEY, ObjType::List)
+                .expect("list");
+            tx.insert(&list, 0, ScalarValue::Bytes(vec![0xFFu8; 16]))
+                .expect("insert");
+        });
+
+        let cert = certificate(1, "example.com");
+        put(&mut doc, &cert)?;
+        assert_eq!(
+            inline(&doc)?,
+            vec![garbage.clone(), cert.encode()],
+            "the put appends beside the undecodable entry"
+        );
+
+        let refreshed = cert.with_attachments(
+            DelegationChain::default(),
+            Vec::new(),
+            DnssecChain::read_framed(&[1, 3, 0xAA, 0xBB, 0xCC])?,
+        )?;
+        put(&mut doc, &refreshed)?;
+        assert_eq!(
+            inline(&doc)?,
+            vec![garbage, refreshed.encode()],
+            "the refresh replaces its own entry, never the garbage"
+        );
         Ok(())
     }
 

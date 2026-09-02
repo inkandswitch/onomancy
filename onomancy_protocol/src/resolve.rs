@@ -298,7 +298,7 @@ mod tests {
 
         let replicas = MemoryReplicas::default()
             .with(alice, alice_store)
-            .with(bob, bob_store.clone());
+            .with(bob, bob_store);
 
         // Three segments, three hops: root's `alice` edge, alice's
         // `bob` edge, bob's `alice` edge — landing back in alice's
@@ -312,7 +312,6 @@ mod tests {
                 authority: Authority::TrustedSubstrate
             }
         );
-        drop(bob_store);
     }
 
     mod props {

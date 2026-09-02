@@ -16,7 +16,9 @@ use onomancy_core::anchor::doc::DocAnchor;
 
 use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
 use crate::{
+    crypto::VerifyError,
     trust_anchor::TrustAnchor,
+    validator::WalkError,
     wire::{
         name::Name,
         record::{CLASS_IN, Record},
@@ -36,9 +38,13 @@ pub enum Expectation {
     /// Validates to a proof carrying [`FIXTURE_SERIAL`].
     Binding,
 
-    /// MUST fail validation (mutation vectors — including denial-only
-    /// and wildcard chains, since negative proofs are out at v0).
-    Invalid,
+    /// MUST fail validation with EXACTLY this error (mutation vectors
+    /// — including denial-only and wildcard chains, since negative
+    /// proofs are out at v0). Pinning the variant keeps each
+    /// adversarial fixture tied to the rejection branch it was built
+    /// to exercise: a chain failing for the WRONG reason is a masked
+    /// dead branch, not a pass.
+    Invalid(WalkError),
 }
 
 /// The root zone every fixture chains from.
@@ -88,18 +94,49 @@ pub fn fixture_txt_text() -> String {
 pub fn all_fixtures() -> Vec<(&'static str, DnssecChain, Expectation)> {
     vec![
         ("valid_binding", valid_binding(), Expectation::Binding),
-        ("denial_only", denial_only(), Expectation::Invalid),
-        ("tampered_leaf", tampered_leaf(), Expectation::Invalid),
-        ("disjoint_windows", disjoint_windows(), Expectation::Invalid),
-        ("ds_mismatch", ds_mismatch(), Expectation::Invalid),
-        ("missing_leaf", missing_leaf(), Expectation::Invalid),
-        ("wildcard", wildcard(), Expectation::Invalid),
+        (
+            "denial_only",
+            denial_only(),
+            Expectation::Invalid(WalkError::MissingLeaf),
+        ),
+        (
+            "tampered_leaf",
+            tampered_leaf(),
+            Expectation::Invalid(WalkError::Verify(VerifyError::BadSignature)),
+        ),
+        (
+            "disjoint_windows",
+            disjoint_windows(),
+            Expectation::Invalid(WalkError::EmptyWindow),
+        ),
+        (
+            "ds_mismatch",
+            ds_mismatch(),
+            Expectation::Invalid(WalkError::DsMismatch),
+        ),
+        (
+            "missing_leaf",
+            missing_leaf(),
+            Expectation::Invalid(WalkError::MissingLeaf),
+        ),
+        (
+            "wildcard",
+            wildcard(),
+            Expectation::Invalid(WalkError::WildcardExpansion),
+        ),
         (
             "wildcard_with_denial",
             wildcard_with_denial(),
-            Expectation::Invalid,
+            Expectation::Invalid(WalkError::WildcardExpansion),
         ),
-        ("misordered_links", misordered_links(), Expectation::Invalid),
+        (
+            "misordered_links",
+            misordered_links(),
+            Expectation::Invalid(WalkError::UnexpectedLink {
+                rtype: RrType::DNSKEY,
+                awaiting_child_keys: false,
+            }),
+        ),
     ]
 }
 

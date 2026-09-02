@@ -55,6 +55,29 @@ fn real_binding(
     window: (u32, u32),
     issued_at: u64,
 ) -> TestResult<RealBinding> {
+    real_binding_with_windows(
+        doc_seed,
+        gen_seed,
+        serial,
+        ChainWindows::uniform(window),
+        window,
+        issued_at,
+    )
+}
+
+/// [`real_binding`] with PER-LINK windows: `declared` must be the
+/// hand-computed ∩ — which the real walk has to reproduce for the
+/// fake/real derivations to agree, making the differential bite on
+/// the window arithmetic rather than trivially echoing a uniform
+/// window.
+fn real_binding_with_windows(
+    doc_seed: u8,
+    gen_seed: u8,
+    serial: u64,
+    windows: ChainWindows,
+    declared: (u32, u32),
+    issued_at: u64,
+) -> TestResult<RealBinding> {
     let hostname = proto_utils::host();
     let record = TxtRecord::new(
         Serial::from(serial),
@@ -66,7 +89,7 @@ fn real_binding(
         &fixtures::fixture_root(),
         &fixtures::fixture_child(),
         txt_record(&hostname, &record.to_string()),
-        ChainWindows::uniform(window),
+        windows,
     );
 
     let cert = Certificate::sign(
@@ -86,8 +109,8 @@ fn real_binding(
     let proof = ChainProof {
         records: vec![record],
         window: ValidityWindow::new(
-            UnixSeconds::from(u64::from(window.0)),
-            UnixSeconds::from(u64::from(window.1)),
+            UnixSeconds::from(u64::from(declared.0)),
+            UnixSeconds::from(u64::from(declared.1)),
         )?,
     };
 
@@ -151,6 +174,39 @@ fn accept(binding: &RealBinding) -> Decisions {
 fn fresh_binding_derives_identically() -> TestResult {
     // Window covers NOW: fresh, confirmed.
     let binding = real_binding(1, 11, 100, (1_754_000_000, 1_756_000_000), 50)?;
+
+    let derivation = derive_both_ways(&[&binding], &Decisions::default(), vec![]);
+    let state = derivation
+        .bindings
+        .get(&proto_utils::host())
+        .cloned()
+        .unwrap_or_default();
+
+    let accepted = state.accepted.ok_or("expected an accepted binding")?;
+    assert_eq!(accepted.document, proto_utils::doc(1));
+    assert_eq!(state.effective_serial, Some(Serial::from(100)));
+    Ok(())
+}
+
+#[test]
+fn non_uniform_windows_derive_identically() -> TestResult {
+    // Distinct per-link windows: the declared proof carries the
+    // HAND-computed ∩ (max inception 1_754_900_000, min expiration
+    // 1_755_800_000, both from different links), so fake/real equality
+    // holds only if the real walk's window arithmetic reproduces it.
+    let binding = real_binding_with_windows(
+        1,
+        11,
+        100,
+        ChainWindows {
+            root: (1_754_000_000, 1_756_000_000),
+            delegation: (1_754_500_000, 1_755_800_000),
+            child: (1_754_200_000, 1_756_500_000),
+            leaf: (1_754_900_000, 1_756_200_000),
+        },
+        (1_754_900_000, 1_755_800_000),
+        50,
+    )?;
 
     let derivation = derive_both_ways(&[&binding], &Decisions::default(), vec![]);
     let state = derivation

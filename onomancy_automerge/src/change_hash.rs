@@ -25,12 +25,18 @@ pub fn from_change_hash(hash: &ChangeHash) -> Head {
 mod tests {
     use super::*;
 
+    /// Both directions, over every 32-byte value: the conversions
+    /// are byte-identity — no reordering, no truncation — which is
+    /// the whole seam contract.
     #[test]
     fn conversions_roundtrip() {
-        let head = Head::from([7u8; 32]);
-        assert_eq!(from_change_hash(&to_change_hash(&head)), head);
+        bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
+            let head = Head::from(*bytes);
+            assert_eq!(from_change_hash(&to_change_hash(&head)), head);
 
-        let hash = ChangeHash([9u8; 32]);
-        assert_eq!(to_change_hash(&from_change_hash(&hash)), hash);
+            let hash = ChangeHash(*bytes);
+            assert_eq!(to_change_hash(&from_change_hash(&hash)), hash);
+            assert_eq!(to_change_hash(&head).0, *bytes, "byte-identity, verbatim");
+        });
     }
 }

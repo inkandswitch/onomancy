@@ -1,5 +1,5 @@
 //! A real production chain, frozen: `_onomancy.brooklynzelenka.com`
-//! as fetched from live DNS on 2026-08-20, captured with:
+//! as fetched from live DNS on 2026-08-20 (the first Onomancy-bound
 //! name), captured with:
 //!
 //! ```sh

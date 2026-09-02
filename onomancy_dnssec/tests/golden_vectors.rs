@@ -6,7 +6,7 @@
 //! deliberately with:
 //!
 //! ```sh
-//! cargo run -p onomancy_core --example generate_vectors
+//! cargo run -p onomancy_dnssec --example generate_vectors
 //! ```
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
@@ -22,7 +22,10 @@ use onomancy_core::{
 };
 use onomancy_dnssec::{
     certificate::{Certificate, DecodeCertificateError},
-    statement::{rotation::RotationStatement, successor::SuccessorStatement},
+    statement::{
+        rotation::{DecodeRotationError, RotationStatement},
+        successor::{DecodeSuccessorError, SuccessorStatement},
+    },
 };
 use testresult::TestResult;
 use vectors_catalog::{Expect, Vector, from_hex, to_hex, vectors};
@@ -119,7 +122,10 @@ fn reject_vectors_fail_at_decode() {
                 "{}: expected a hostname canonicality error, got {result:?}",
                 vector.name
             ),
-            other => assert!(result.is_err(), "{other}: reject vector decoded"),
+            // Force every future reject vector to pin its variant
+            // here — an unnamed vector asserting only is_err() could
+            // fail for the wrong reason without anyone noticing.
+            other => panic!("reject vector {other} has no variant assertion — add one"),
         }
     }
 }
@@ -140,6 +146,8 @@ fn cross_tag_confusion_fails_on_the_tag() {
     let rotation = by_name("rotation_valid");
     let successor = by_name("successor_valid");
 
+    // All six pairings fail ON THE TAG — not on some incidental later
+    // field — so type confusion is caught at the front door.
     assert!(matches!(
         Certificate::decode(&rotation),
         Err(DecodeCertificateError::Malformed(
@@ -152,20 +160,40 @@ fn cross_tag_confusion_fails_on_the_tag() {
             Malformed::WrongTag { .. }
         ))
     ));
-    assert!(RotationStatement::decode(&cert).is_err());
-    assert!(RotationStatement::decode(&successor).is_err());
-    assert!(SuccessorStatement::decode(&cert).is_err());
-    assert!(SuccessorStatement::decode(&rotation).is_err());
+    assert!(matches!(
+        RotationStatement::decode(&cert),
+        Err(DecodeRotationError::Malformed(Malformed::WrongTag { .. }))
+    ));
+    assert!(matches!(
+        RotationStatement::decode(&successor),
+        Err(DecodeRotationError::Malformed(Malformed::WrongTag { .. }))
+    ));
+    assert!(matches!(
+        SuccessorStatement::decode(&cert),
+        Err(DecodeSuccessorError::Malformed(Malformed::WrongTag { .. }))
+    ));
+    assert!(matches!(
+        SuccessorStatement::decode(&rotation),
+        Err(DecodeSuccessorError::Malformed(Malformed::WrongTag { .. }))
+    ));
 }
 
 /// The re-attach pair: one certificate identity (same signed region),
-/// two content hashes (the attached region is hashed too).
+/// two content hashes (the attached region is hashed too). Decoded
+/// from the CHECKED-IN bytes, so the semantic claim is pinned to the
+/// committed files, not just the in-process catalog.
 #[test]
 fn reattach_pair_shares_identity_but_not_hash() -> TestResult {
-    let (a, b) = vectors_catalog::reattach_pair();
+    let by_name = |name: &str| -> Vec<u8> {
+        let vector = vectors()
+            .into_iter()
+            .find(|v| v.name == name)
+            .expect("vector in catalog");
+        checked_in(&vector)
+    };
 
-    let a = Certificate::decode(&a.encode())?;
-    let b = Certificate::decode(&b.encode())?;
+    let a = Certificate::decode(&by_name("cert_reattach_a"))?;
+    let b = Certificate::decode(&by_name("cert_reattach_b"))?;
 
     assert!(a.same_certificate(&b), "same signed region");
     assert_ne!(

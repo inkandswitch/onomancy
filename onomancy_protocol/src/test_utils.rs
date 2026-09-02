@@ -39,6 +39,18 @@ pub fn host() -> DnsName {
     DnsName::parse("expede.wtf").expect("valid hostname literal")
 }
 
+/// A second, unrelated test hostname — the cross-hostname fixtures'
+/// other name (B8 rotation-exclusion scope, per-host isolation).
+///
+/// # Panics
+///
+/// Never: the literal is valid.
+#[must_use]
+#[allow(clippy::expect_used)]
+pub fn host2() -> DnsName {
+    DnsName::parse("example.org").expect("valid hostname literal")
+}
+
 /// A document anchor derived from seed bytes `[seed; 32]`.
 #[must_use]
 pub fn doc(seed: u8) -> DocAnchor {
@@ -113,6 +125,34 @@ pub fn binding(
     )
 }
 
+/// A binding record for an arbitrary hostname — the multi-hostname
+/// fixtures' factory. [`binding`] is this at [`host`].
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
+#[allow(clippy::too_many_arguments)]
+pub fn binding_at(
+    hostname: DnsName,
+    doc_seed: u8,
+    gen_seed: u8,
+    chain_tag: u8,
+    serial: u64,
+    window_span: (u64, u64),
+    issued_at: u64,
+) -> Result<Binding, OversizeUnit> {
+    binding_carrying_at(
+        hostname,
+        doc_seed,
+        gen_seed,
+        chain_tag,
+        serial,
+        window_span,
+        issued_at,
+        vec![],
+    )
+}
+
 /// A binding record whose certificate carries lineage statements —
 /// the extraction-closure input.
 ///
@@ -128,12 +168,40 @@ pub fn binding_carrying(
     issued_at: u64,
     lineage: Vec<RotationStatement>,
 ) -> Result<Binding, OversizeUnit> {
+    binding_carrying_at(
+        host(),
+        doc_seed,
+        gen_seed,
+        chain_tag,
+        serial,
+        window_span,
+        issued_at,
+        lineage,
+    )
+}
+
+/// A statement-carrying binding record for an arbitrary hostname.
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
+#[allow(clippy::too_many_arguments)]
+pub fn binding_carrying_at(
+    hostname: DnsName,
+    doc_seed: u8,
+    gen_seed: u8,
+    chain_tag: u8,
+    serial: u64,
+    window_span: (u64, u64),
+    issued_at: u64,
+    lineage: Vec<RotationStatement>,
+) -> Result<Binding, OversizeUnit> {
     let chain = chain(chain_tag);
     let cert = Certificate::sign(
         CertificateParams {
             root_doc: doc(doc_seed),
             issued_at: UnixSeconds::from(issued_at),
-            hostname: host(),
+            hostname,
             heads: vec![],
             predecessor: None,
             delegation_chain: DelegationChain::default(),
@@ -187,10 +255,26 @@ pub fn succession(
     successor_seed: u8,
     signer_seed: u8,
 ) -> Result<SuccessorStatement, OversizeUnit> {
+    succession_at(&host(), predecessor_seed, successor_seed, signer_seed)
+}
+
+/// A successor statement under an arbitrary hostname — the hostname
+/// is inside the signature, so cross-hostname scenarios need their
+/// own statements.
+///
+/// # Errors
+///
+/// Returns [`OversizeUnit`] when the unit would exceed the cap.
+pub fn succession_at(
+    hostname: &DnsName,
+    predecessor_seed: u8,
+    successor_seed: u8,
+    signer_seed: u8,
+) -> Result<SuccessorStatement, OversizeUnit> {
     SuccessorStatement::sign(
         &doc(predecessor_seed),
         &doc(successor_seed),
-        &host(),
+        hostname,
         &signer(signer_seed),
         DelegationChain::default(),
     )

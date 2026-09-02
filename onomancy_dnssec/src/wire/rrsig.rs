@@ -340,10 +340,24 @@ mod tests {
         assert!(rrsig.window().is_err(), "never had joint validity");
     }
 
+    /// Every truncation point inside the preamble is rejected, and
+    /// the preamble alone parses (an empty signature is a frame-level
+    /// fact; verification rejects it later). Exhaustive over the
+    /// whole boundary, not one hardcoded cut.
     #[test]
-    fn truncation_is_rejected() {
+    fn every_preamble_truncation_is_rejected() {
         let rdata = sample_rdata();
-        assert!(Rrsig::parse(&rdata[..10]).is_err());
+        let preamble_len = rdata.len() - 64;
+
+        for cut in 0..preamble_len {
+            assert!(
+                Rrsig::parse(&rdata[..cut]).is_err(),
+                "cut at {cut} of {preamble_len} must not parse"
+            );
+        }
+
+        let headless = Rrsig::parse(&rdata[..preamble_len]).expect("preamble alone parses");
+        assert!(headless.signature().is_empty());
     }
 
     mod props {
@@ -501,6 +515,54 @@ mod tests {
             forged.verify(&link, &key),
             Err(VerifyError::LabelCount { .. })
         ));
+    }
+
+    /// A key claiming a different algorithm than the RRSIG is a
+    /// mismatch, checked before any crypto — the guard against
+    /// verifying an Ed25519 signature with an RSA key blob.
+    #[test]
+    fn mismatched_key_algorithms_are_rejected_before_crypto() {
+        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 3);
+
+        let mut rdata = key.rdata().to_vec();
+        rdata[3] = Algorithm::ECDSA_P256_SHA256.code();
+        let reflagged = Dnskey::parse(&rdata).expect("parses");
+
+        assert_eq!(
+            link.signatures()[0].verify(&link, &reflagged),
+            Err(VerifyError::AlgorithmMismatch {
+                key: Algorithm::ECDSA_P256_SHA256,
+                signature: Algorithm::ED25519
+            })
+        );
+    }
+
+    /// RFC 4034 §6.3: duplicates are dropped from the canonical
+    /// `RRset`. A link framing the same RDATA twice must verify against
+    /// a signature computed over the deduped set — deleting the
+    /// `dedup()` in `signed_data` fails this.
+    #[test]
+    fn duplicate_rdatas_are_dropped_from_the_signed_data() {
+        let (link, key) = signed_link(
+            &[b"\x04test", b"\x04test", b"\x02aa"],
+            "_onomancy.expede.wtf",
+            3,
+        );
+        assert_eq!(link.rrset().len(), 3, "the frame carries all three");
+
+        link.signatures()[0]
+            .verify(&link, &key)
+            .expect("duplicates drop before signing");
+    }
+
+    /// The wildcard reconstruction edge where zero labels were
+    /// signed: the source is `*` at the root.
+    #[test]
+    fn a_zero_label_signature_reconstructs_the_root_wildcard() {
+        let (link, key) = signed_link(&[b"\x04test"], "_onomancy.expede.wtf", 0);
+        link.signatures()[0]
+            .verify(&link, &key)
+            .expect("root wildcard reconstruction");
     }
 
     #[test]

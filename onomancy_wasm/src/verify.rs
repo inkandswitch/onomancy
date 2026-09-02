@@ -35,7 +35,7 @@ use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::verdict::{
     self, DeferredEvidence, GenerationCheck, Rejection, Verdict,
 };
-use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
 
 // Reading a certificate OUT OF a document needs the document
 // substrate; verifying bytes does not. Only the former is gated.
@@ -44,6 +44,7 @@ use {
     crate::held::JsHeldDocuments,
     onomancy_automerge::{certificates, namestore::HeldDocuments},
     onomancy_core::anchor::doc::DocAnchor,
+    wasm_bindgen::JsError,
 };
 
 /// Verify one certificate against `hostname` at `now_seconds`
@@ -372,6 +373,7 @@ fn grade_object(
 /// instant (their serials and windows never line up), so the claim is
 /// untestable end-to-end. Here it is testable directly, by the code
 /// production actually calls.
+#[cfg(any(feature = "names", test))]
 const fn freshness_rank(freshness: Option<Freshness>) -> u8 {
     match freshness {
         Some(Freshness::Fresh) => 2,

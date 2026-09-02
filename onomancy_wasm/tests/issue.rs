@@ -92,14 +92,16 @@ fn an_externally_signed_certificate_assembles_and_decodes() {
 }
 
 /// A signature over the wrong bytes is refused at assembly rather
-/// than producing a unit that fails later somewhere else.
+/// than producing a unit that fails later somewhere else — and with
+/// the code the contract promises: `invalid-signature`, because the
+/// signature is well-formed and does not cover these fields.
 #[wasm_bindgen_test]
 fn a_signature_over_different_fields_is_refused() {
     let offered = signable_bytes(&anchor(), &signer_bytes(), ISSUED_AT, &host(HOST))
         .expect("the fields are well formed");
 
     // Signed for one hostname, assembled for another.
-    let assembled = encode_certificate(
+    let Err(refused) = encode_certificate(
         &anchor(),
         &signer_bytes(),
         ISSUED_AT,
@@ -107,60 +109,11 @@ fn a_signature_over_different_fields_is_refused() {
         &sign_externally(&offered),
         vec![],
         &[0x00],
-    );
+    ) else {
+        panic!("a signature that does not cover the assembled fields must be refused");
+    };
 
-    assert!(
-        assembled.is_err(),
-        "a signature that does not cover the assembled fields must be refused"
-    );
-}
-
-/// A different key's signature is refused, so the `signer` argument
-/// cannot be a decoration the module ignores.
-#[wasm_bindgen_test]
-fn another_keys_signature_is_refused() {
-    let offered = signable_bytes(&anchor(), &signer_bytes(), ISSUED_AT, &host(HOST))
-        .expect("the fields are well formed");
-
-    let impostor = SigningKey::from_bytes(&[9u8; 32]);
-    let signature = impostor.sign(&offered.to_vec()).to_bytes().to_vec();
-
-    assert!(
-        encode_certificate(
-            &anchor(),
-            &signer_bytes(),
-            ISSUED_AT,
-            &host(HOST),
-            &signature,
-            vec![],
-            &[0x00],
-        )
-        .is_err(),
-        "a signature by a key other than `signer` must be refused"
-    );
-}
-
-/// `Date.now()` is milliseconds and is the obvious thing to reach
-/// for. Accepted, it would date the certificate in year 58000 — on
-/// the one field a verifier cannot cross-check against anything.
-#[wasm_bindgen_test]
-fn a_millisecond_timestamp_is_refused() {
-    assert!(
-        signable_bytes(&anchor(), &signer_bytes(), 1_788_100_000_000.0, &host(HOST)).is_err(),
-        "milliseconds must be refused rather than silently dating the unit"
-    );
-}
-
-/// `f64` admits values no clock produces; a silent cast would date
-/// the certificate 1970 and grade everything against it.
-#[wasm_bindgen_test]
-fn a_nonsense_timestamp_is_refused() {
-    for bad in [f64::NAN, f64::INFINITY, -1.0] {
-        assert!(
-            signable_bytes(&anchor(), &signer_bytes(), bad, &host(HOST)).is_err(),
-            "{bad} must be refused as a timestamp"
-        );
-    }
+    assert_eq!(reason_string(&refused), "invalid-signature");
 }
 
 /// The seam this file stops at, pinned so the stopping point is a
@@ -205,10 +158,7 @@ fn issuance_refusals_carry_reason_codes() {
         let Err(refusal) = result else {
             panic!("expected a refusal");
         };
-        js_sys::Reflect::get(&refusal, &JsValue::from_str("reason"))
-            .ok()
-            .and_then(|value| value.as_string())
-            .expect("a substantive refusal carries a reason")
+        reason_string(&refusal)
     };
 
     // End-user-visible inputs keep their specific codes…
@@ -218,6 +168,20 @@ fn issuance_refusals_carry_reason_codes() {
             &signer_bytes(),
             1_788_100_000_000.0, // Date.now(): milliseconds
             &host(HOST),
+        )),
+        "invalid-timestamp"
+    );
+
+    // …including values no clock produces: a silent cast would date
+    // the certificate 1970 and grade everything against it. One case
+    // suffices to prove the boundary routes through `clock::seconds`,
+    // whose classification is property-tested on the host.
+    assert_eq!(
+        reason_of(signable_bytes(
+            &anchor(),
+            &signer_bytes(),
+            f64::NAN,
+            &host(HOST)
         )),
         "invalid-timestamp"
     );
@@ -235,7 +199,9 @@ fn issuance_refusals_carry_reason_codes() {
     );
 
     // A signature that does not cover the fields is its own thing:
-    // not a malformed argument, a signature that fails.
+    // not a malformed argument, a signature that fails. The impostor
+    // key also pins that `signer` is not a decoration the module
+    // ignores.
     let offered = signable_bytes(&anchor(), &signer_bytes(), ISSUED_AT, &host(HOST))
         .expect("the fields are well formed");
     let impostor = SigningKey::from_bytes(&[9u8; 32]);
@@ -253,4 +219,39 @@ fn issuance_refusals_carry_reason_codes() {
         )),
         "invalid-signature"
     );
+}
+
+/// The 1 MiB cap bites at `encodeCertificate` — after the external
+/// signature was spent, which is why the code matters: the caller
+/// must learn it is `invalid-argument` (the carriage is too big),
+/// not a signature problem worth re-signing over.
+#[wasm_bindgen_test]
+fn an_oversize_carriage_is_refused_as_an_argument_problem() {
+    let offered = signable_bytes(&anchor(), &signer_bytes(), ISSUED_AT, &host(HOST))
+        .expect("the fields are well formed");
+
+    // Past the unit cap on its own: the fields and chain are tiny.
+    let fat = Uint8Array::new_with_length(1_100_000);
+
+    let Err(refused) = encode_certificate(
+        &anchor(),
+        &signer_bytes(),
+        ISSUED_AT,
+        &host(HOST),
+        &sign_externally(&offered),
+        vec![fat],
+        &[0x00],
+    ) else {
+        panic!("a unit over the cap must be refused at assembly");
+    };
+
+    assert_eq!(reason_string(&refused), "invalid-argument");
+}
+
+/// The machine-readable code on a refusal.
+fn reason_string(refusal: &JsValue) -> String {
+    js_sys::Reflect::get(refusal, &JsValue::from_str("reason"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .expect("a substantive refusal carries a reason")
 }

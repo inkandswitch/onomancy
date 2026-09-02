@@ -280,4 +280,80 @@ mod tests {
             Err(ParseLinkError::MixedRrset)
         ));
     }
+
+    /// The other arm of the one-RRset check: same type, two owners.
+    #[test]
+    fn mixed_owners_are_rejected_too() {
+        let mut elsewhere = txt_record(vec![1, b'x']);
+        elsewhere.owner = "_onomancy.example.com".parse().expect("parses");
+
+        assert!(matches!(
+            Link::parse(&frame(&[
+                txt_record(vec![1, b'y']),
+                elsewhere,
+                rrsig_record(RrType::TXT, &owner()),
+            ])),
+            Err(ParseLinkError::MixedRrset)
+        ));
+    }
+
+    /// Another name's signature record cannot be attached to this
+    /// `RRset` — the shape this layer exists to reject.
+    #[test]
+    fn signatures_at_another_owner_are_rejected() {
+        let elsewhere: Name = "_onomancy.example.com".parse().expect("parses");
+
+        assert!(matches!(
+            Link::parse(&frame(&[
+                txt_record(vec![1, b'x']),
+                rrsig_record(RrType::TXT, &elsewhere),
+            ])),
+            Err(ParseLinkError::SignatureOwnerMismatch)
+        ));
+    }
+
+    /// Onomancy records exist only in IN; a CH-class record is
+    /// rejected with the class it carried.
+    #[test]
+    fn non_in_classes_are_rejected() {
+        let mut chaos = txt_record(vec![1, b'x']);
+        chaos.class = 3;
+
+        assert!(matches!(
+            Link::parse(&frame(&[chaos, rrsig_record(RrType::TXT, &owner())])),
+            Err(ParseLinkError::WrongClass { got: 3 })
+        ));
+    }
+
+    /// A record posing as an RRSIG with undecodable RDATA surfaces
+    /// through the `Rrsig` variant — the `#[from]` wiring, pinned.
+    #[test]
+    fn undecodable_rrsig_rdata_surfaces_as_rrsig_errors() {
+        let stub = Record {
+            owner: owner(),
+            rtype: RrType::RRSIG,
+            class: CLASS_IN,
+            ttl: 900,
+            rdata: vec![0x00, 0x10, 15], // truncated mid-header
+        };
+
+        assert!(matches!(
+            Link::parse(&frame(&[txt_record(vec![1, b'x']), stub])),
+            Err(ParseLinkError::Rrsig(_))
+        ));
+    }
+
+    /// Multiple covering RRSIGs are the normal key-rollover shape and
+    /// all of them are retained.
+    #[test]
+    fn rollover_links_keep_every_signature() {
+        let link = Link::parse(&frame(&[
+            txt_record(vec![1, b'x']),
+            rrsig_record(RrType::TXT, &owner()),
+            rrsig_record(RrType::TXT, &owner()),
+        ]))
+        .expect("parses");
+
+        assert_eq!(link.signatures().len(), 2);
+    }
 }

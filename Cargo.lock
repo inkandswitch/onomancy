@@ -1475,6 +1475,7 @@ name = "onomancy_automerge"
 version = "0.2.0"
 dependencies = [
  "automerge",
+ "bolero",
  "ed25519-dalek",
  "onomancy_core",
  "onomancy_dnssec",
@@ -1488,6 +1489,7 @@ dependencies = [
 name = "onomancy_chain"
 version = "0.2.0"
 dependencies = [
+ "bolero",
  "hickory-proto",
  "onomancy_core",
  "onomancy_dnssec",
@@ -1508,6 +1510,7 @@ dependencies = [
  "ed25519-dalek",
  "onomancy_core",
  "serde",
+ "serde_json",
  "testresult",
  "thiserror 2.0.20",
  "tracing",
@@ -1551,6 +1554,7 @@ name = "onomancy_keyhive"
 version = "0.2.0"
 dependencies = [
  "bincode",
+ "bolero",
  "ed25519-dalek",
  "future_form",
  "futures",
@@ -1597,6 +1601,7 @@ name = "onomancy_wasm"
 version = "0.2.0"
 dependencies = [
  "automerge",
+ "bolero",
  "console_error_panic_hook",
  "ed25519-dalek",
  "getrandom 0.2.17",

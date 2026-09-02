@@ -70,6 +70,53 @@ export interface Resolution {
   checkedAt: UnixSeconds;
 }
 
+/** How far a resolution walk got. */
+export type WalkStatus = "resolved" | "partial";
+
+/**
+ * Why a walk stopped short. A partial walk is the designed norm
+ * under partition, not an error:
+ *
+ * - `"dangling segment"` — a segment named no edge in the document
+ *   it reached. Retrying cannot help; the name goes nowhere from
+ *   here.
+ * - `"unsynced target"` — the next hop's document is not held.
+ *   `target` names it: hold a replica (`holdAt`) and retry.
+ */
+export type PartialWalkReason = "dangling segment" | "unsynced target";
+
+/**
+ * The outcome of `HeldDocuments.resolve`.
+ *
+ * `anchorAuthority: "zone-only"` appears on resolved walks whose root
+ * came from a live DNS anchor: the DNSSEC walk proves what the zone
+ * published — one direction — and this walk roots on it without the
+ * certificate direction (`verifyBinding` is that check). A caller
+ * reading `status: "resolved"` must be able to see that the anchor
+ * itself is unauthenticated.
+ */
+export type WalkOutcome =
+  | {
+      status: "resolved";
+      /** The terminal document, as an `automerge:` anchor. */
+      document: string;
+      /** The weakest authority grade along the realized path. */
+      authority: string;
+      /** What the grade does NOT establish, in prose. */
+      warning: string;
+      anchorAuthority?: "zone-only";
+    }
+  | {
+      status: "partial";
+      /** Segments consumed before the walk stopped. */
+      consumed: number;
+      /** Segments in the name. */
+      total: number;
+      reason: PartialWalkReason;
+      /** The unheld document, when the reason is an unsynced target. */
+      target?: string;
+    };
+
 /**
  * Why an operation was refused.
  *

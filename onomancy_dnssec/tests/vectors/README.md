@@ -1,6 +1,6 @@
 # Golden Vectors
 
-Checked-in wire-format vectors mandated by [specs/serialization.md § Test Vectors](../../../specs/serialization.md#test-vectors). Each `{name}.hex` file holds one unit's canonical bytes (lowercase hex); `digests.txt` records the content hash of every unit that decodes. The catalog — the single source of truth — lives in [`tests/vectors_catalog.rs`](../vectors_catalog.rs), and [`tests/golden_vectors.rs`](../golden_vectors.rs) replays everything on every test run.
+Checked-in wire-format vectors mandated by [specs/serialization.md § Test Vectors](../../../specs/serialization.md#test-vectors). Each `{name}.hex` file holds one unit's canonical bytes (lowercase hex); `digests.txt` records the content hash of every unit that decodes. The catalog — the single source of truth — lives in [`tests/support/vectors_catalog.rs`](../support/vectors_catalog.rs), and [`tests/golden_vectors.rs`](../golden_vectors.rs) replays everything on every test run.
 
 > [!WARNING]
 > Byte drift here is a wire-format break, not a refactor. Canonical
@@ -11,7 +11,7 @@ Checked-in wire-format vectors mandated by [specs/serialization.md § Test Vecto
 Regenerate with:
 
 ```sh
-cargo run -p onomancy_core --example generate_vectors
+cargo run -p onomancy_dnssec --example generate_vectors
 ```
 
 ## Status
