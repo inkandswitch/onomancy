@@ -149,8 +149,20 @@ pub fn verify_binding(
         documents = documents.with(*held_anchor, doc.clone());
     }
 
-    let stored = certificates::certificates(&documents, &anchor)
-        .map_err(|malformed| JsValue::from(JsError::new(&malformed.to_string())))?;
+    // A stable fact, not a security signal and not a wiring bug: the
+    // certificate entry is well-formed at every step a reader can
+    // check, and simply does not lead to a list. The likely cause is
+    // an ordinary `bind` at that path — legal, success-reporting, and
+    // possibly by a collaborator who thought they were naming
+    // something. Reporting it as `malformed` would tell a user their
+    // certificate is corrupt and to re-mint it, which is wrong twice:
+    // the certificate is fine, and re-minting does not move a pointer.
+    let stored = certificates::certificates(&documents, &anchor).map_err(|malformed| {
+        refusal::error(
+            &malformed.to_string(),
+            refusal::RefusalReason::BrokenIndirection,
+        )
+    })?;
 
     if stored.is_empty() {
         // Unavailable from this source is never proof of no binding:
@@ -367,6 +379,8 @@ fn rejection_message(rejection: &Rejection) -> String {
         ),
         // The rest already say what they mean.
         other @ (Rejection::ChainRejected
+        | Rejection::SignerNotAuthorized
+        | Rejection::DocumentNotAttested
         | Rejection::Decode(_)
         | Rejection::HostnameMismatch { .. }) => other.to_string(),
     }

@@ -87,11 +87,22 @@ export interface Resolution {
  * can act on — and the grouping below is the grouping, not a
  * commentary on one.
  *
- * Note `malformed` and `invalid-signature` are deliberately separate.
- * The first means the bytes were never a certificate, which is a
- * wiring bug; the second means they are one and someone altered it.
- * Reporting a mistyped buffer as a possible forgery, or a forgery as
- * a typo, are the two halves of the same mistake.
+ * Several of these are deliberately kept apart rather than merged,
+ * because each distinction sends a caller somewhere different:
+ *
+ * - `malformed` vs `invalid-signature` — the bytes were never a
+ *   certificate (a wiring bug), versus they are one and someone
+ *   altered it.
+ * - `chain-rejected` vs `signer-not-authorized` vs
+ *   `document-not-attested` — the zone's DNSSEC failed; versus the
+ *   zone is fine and the signing key is not delegated by that
+ *   document; versus both are fine and the zone names a *different*
+ *   document. Only the first is a reason to go and look at DNS.
+ * - `broken-indirection` vs `malformed` — a well-formed reference
+ *   that does not lead to a list, versus bytes that were never a
+ *   certificate. The first is a pointer problem and is grouped with
+ *   the stable facts: nothing was forged, and re-minting will not
+ *   help. Repointing or populating the target will.
  */
 export type RefusalReason =
   // Retrying may help. This one only.
@@ -100,6 +111,7 @@ export type RefusalReason =
   // evidence is never evidence against a binding.
   | "no-binding"
   | "no-certificate-held"
+  | "broken-indirection"
   // The caller can see and fix these.
   | "invalid-hostname"
   | "malformed"
@@ -107,6 +119,8 @@ export type RefusalReason =
   | "invalid-signature"
   | "hostname-mismatch"
   | "chain-rejected"
+  | "signer-not-authorized"
+  | "document-not-attested"
   | "generation-off-path";
 
 /** An error carrying why the evidence was refused. */

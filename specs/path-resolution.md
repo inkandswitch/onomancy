@@ -89,6 +89,15 @@ The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, 
 
 A value that is not a reference under any encoding the profile defines is not an edge: it is absent from matching ([E8][Error Conditions]) and carries no resolution meaning. Namestores MAY therefore hold non-reference data — see the `.well-known/` convention in [Namestore Layout] — without that data participating in the walk.
 
+> [!WARNING]
+> **A reference is an immutable value, and MUST be stored as one.**
+>
+> A CRDT substrate typically offers two ways to hold text: an immutable scalar, and a *mutable* collaborative string that merges character-by-character edits. Only the first is a reference. The second is a small document in its own right — two writers could concurrently edit a target's identifier and merge into a third identifier neither wrote, which is a way to redirect a name that no signature covers. Where a substrate offers both, a profile MUST say which is the reference; the other is a non-reference value, absent from matching however much it resembles a string.
+>
+> The failure is silent by construction. The writer's own reader sees a string and reports success, so nothing local disagrees; it is caught only by a *conforming resolver*, which is usually somebody else's, later. Implementers SHOULD surface non-reference values under [E8][Error Conditions] rather than merely skipping them, because that report is the only signal a writer will get.
+>
+> **Automerge**, as the worked example: a reference is a **scalar string**, never a `Text` object. The hazard is that JavaScript's binding does *not* preserve the distinction that the assignment appears to make — `doc[name] = "automerge:…"` stores a `Text`, and `typeof` still reports `"string"` when read back. The scalar spelling is `RawString`. A namestore written the obvious way in JavaScript therefore resolves nowhere while looking correct from inside the application that wrote it.
+
 > [!IMPORTANT]
 > **No symlinks.** A reference MUST NOT contain a name (of any anchor family) that would be re-parsed and re-resolved. Namestore values hold namestore references only. This invariant is what makes [Termination] structural rather than policed by a hop limit.
 

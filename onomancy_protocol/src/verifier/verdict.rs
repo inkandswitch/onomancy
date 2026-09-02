@@ -134,7 +134,11 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
         validator,
         authority,
     )
-    .ok_or(Rejection::ChainRejected)?;
+    .map_err(|rejected| match rejected {
+        state::RecordRejected::Chain => Rejection::ChainRejected,
+        state::RecordRejected::Signer => Rejection::SignerNotAuthorized,
+        state::RecordRejected::Unattested => Rejection::DocumentNotAttested,
+    })?;
 
     // Deferral precedes everything, including freshness.
     if state::is_deferred(&evidence, now) {
@@ -173,10 +177,28 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
 /// The certificate did not verify.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Rejection {
-    /// The chain never validated from the trust anchor, or the proven
-    /// `RRset` does not attest the certificate's own document.
-    #[error("chain rejected or does not attest the certificate's document")]
+    /// The chain never validated from the trust anchors.
+    #[error("the DNSSEC chain did not validate from the trust anchors")]
     ChainRejected,
+
+    /// The chain is sound, but the certificate's signer is not
+    /// authorized by the document it claims to bind.
+    ///
+    /// Separate from [`Self::ChainRejected`] because the remedy is
+    /// different in kind: the zone is fine and the signing key is
+    /// wrong. Merged, this sends someone to debug DNSSEC over what is
+    /// really "you signed with a key that document does not delegate
+    /// to".
+    #[error(
+        "the signer is not authorized by the document this certificate binds \
+         — the chain is sound; the signing key is not delegated by that document"
+    )]
+    SignerNotAuthorized,
+
+    /// The chain is sound and the signer authorized, but no proven
+    /// TXT record names this certificate's document.
+    #[error("the zone's proven records do not name this certificate's document")]
+    DocumentNotAttested,
 
     /// The unit was not a canonical, validly signed `ONC\x00` unit.
     #[error("decode: {0}")]
@@ -347,8 +369,14 @@ mod tests {
         Ok(())
     }
 
+    /// A sound chain that names someone else's document is its own
+    /// refusal, not a chain failure.
+    ///
+    /// The distinction is the whole point: `ChainRejected` sends a
+    /// caller to their zone's DNSSEC, which here is perfectly fine.
+    /// What is wrong is *which document* the zone names.
     #[test]
-    fn document_cross_check_rejects_mismatches() -> TestResult {
+    fn a_chain_naming_another_document_is_not_a_chain_failure() -> TestResult {
         // The chain proves a TXT attesting doc(2); the cert claims
         // doc(1).
         let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
@@ -363,7 +391,7 @@ mod tests {
                 &validator,
                 &MemoryAuthority::default(),
             ),
-            Err(Rejection::ChainRejected)
+            Err(Rejection::DocumentNotAttested)
         );
         Ok(())
     }

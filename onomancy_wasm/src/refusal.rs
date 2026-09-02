@@ -90,6 +90,18 @@ refusal_reasons! {
             /// empty.
             NoCertificateHeld => "no-certificate-held",
 
+            /// The certificate entry is a reference that does not
+            /// lead to a list — it chains a second hop, or holds
+            /// something that is neither.
+            ///
+            /// Not `Malformed`: the bytes at the location are a
+            /// perfectly well-formed reference, which is the spec's
+            /// own sanctioned indirection. What is wrong is where it
+            /// points. Naming it `Malformed` would send a user to
+            /// re-mint a certificate that is fine, and re-minting
+            /// does not move a pointer.
+            BrokenIndirection => "broken-indirection",
+
             /// The hostname is not a DNS name, or cannot sit under
             /// `_onomancy`. The caller can see and fix this.
             InvalidHostname => "invalid-hostname",
@@ -114,6 +126,17 @@ refusal_reasons! {
             /// Records arrived and failed validation from the trust
             /// anchors.
             ChainRejected => "chain-rejected",
+
+            /// The chain is sound; the certificate's signer is not
+            /// delegated by the document it binds. Kept apart from
+            /// `ChainRejected` because the zone is fine and the
+            /// signing key is wrong — merged, it sends someone to
+            /// debug DNSSEC over a key problem.
+            SignerNotAuthorized => "signer-not-authorized",
+
+            /// The chain is sound and the signer authorized, but the
+            /// zone's proven records name a different document.
+            DocumentNotAttested => "document-not-attested",
 
             /// A fresh chain whose delegation path lacks the
             /// zone-attested generation key: revocation working as
@@ -160,6 +183,8 @@ pub fn error(message: &str, reason: RefusalReason) -> JsValue {
 pub const fn reason(rejection: &Rejection) -> RefusalReason {
     match rejection {
         Rejection::ChainRejected => RefusalReason::ChainRejected,
+        Rejection::SignerNotAuthorized => RefusalReason::SignerNotAuthorized,
+        Rejection::DocumentNotAttested => RefusalReason::DocumentNotAttested,
         Rejection::GenerationOffPath => RefusalReason::GenerationOffPath,
         Rejection::HostnameMismatch { .. } => RefusalReason::HostnameMismatch,
 

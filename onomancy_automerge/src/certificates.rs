@@ -464,8 +464,8 @@ mod tests {
             .collect();
 
         assert_eq!(
-            path_key(&segments),
-            CERTIFICATES_KEY,
+            path_key(&segments).as_deref(),
+            Some(CERTIFICATES_KEY),
             "the key IS spellable as a path"
         );
         assert_eq!(

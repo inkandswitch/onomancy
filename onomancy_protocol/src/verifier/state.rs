@@ -463,7 +463,7 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                     );
                 }
 
-                if let Some(binding) = validate_record(certificate, hash, validator, authority) {
+                if let Ok(binding) = validate_record(certificate, hash, validator, authority) {
                     validated_carriages.push((
                         binding.hostname.clone(),
                         binding.document,
@@ -559,6 +559,27 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
     evidence
 }
 
+/// Why a certificate did not become a binding record.
+///
+/// Three conditions, kept apart because they send a caller to three
+/// different places: the zone's DNSSEC, the signing key, and which
+/// document the zone actually names. Collapsing them into one
+/// "rejected" sends someone to debug their zone when the answer is
+/// that they signed with the wrong key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordRejected {
+    /// The DNSSEC chain did not validate from the trust anchors.
+    Chain,
+
+    /// The chain is sound, but the signer is not authorized by the
+    /// document it claims to bind.
+    Signer,
+
+    /// The chain is sound and the signer authorized, but no proven
+    /// TXT record names this certificate's document.
+    Unattested,
+}
+
 /// Validate one certificate item into a binding record: chain proof,
 /// TXT cross-check, generation-path input.
 pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
@@ -566,11 +587,11 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     hash: Digest<Blake3, [u8]>,
     validator: &V,
     authority: &A,
-) -> Option<BindingEvidence> {
+) -> Result<BindingEvidence, RecordRejected> {
     let Ok(ChainProof { records, window }) =
         validator.validate(certificate.hostname(), certificate.dnssec_chain())
     else {
-        return None;
+        return Err(RecordRejected::Chain);
     };
 
     // Seam parity with statements: a certificate whose signer is
@@ -582,7 +603,7 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
         certificate.signer(),
         certificate.delegation_chain(),
     ) {
-        return None;
+        return Err(RecordRejected::Signer);
     }
 
     // Cross-check: the chain-proven RRset must attest the
@@ -592,11 +613,12 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     let record = records
         .iter()
         .filter(|record| record.document() == certificate.root_doc())
-        .max_by_key(|record| record.serial())?;
+        .max_by_key(|record| record.serial())
+        .ok_or(RecordRejected::Unattested)?;
 
     let generation_on_path = authority.on_path(certificate.delegation_chain(), record.generation());
 
-    Some(BindingEvidence {
+    Ok(BindingEvidence {
         attestation: Attestation::Certificate,
         document: *certificate.root_doc(),
         generation: *record.generation(),

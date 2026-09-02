@@ -77,31 +77,92 @@ impl DocumentNamestore {
     /// absent from matching (path-resolution spec, Error Conditions).
     #[must_use]
     pub fn edges(&self) -> Vec<(String, DocAnchor)> {
-        self.doc
-            .keys(automerge::ROOT)
-            .filter_map(|key| {
-                // Both halves, or this is not the view `reference`
-                // has. That function can only be asked about
-                // already-valid segments, so a malformed key is
-                // unreachable through it; enumeration has to exclude
-                // such keys explicitly, or it reports as an edge
-                // something no name could ever match (spec E6).
-                if !is_path_key(&key) {
-                    return None;
-                }
-
-                let (value, _) = self.doc.get(automerge::ROOT, key.as_str()).ok()??;
-                let target = parse_bare_reference(&value)?;
-
-                Some((key, target))
-            })
-            .collect()
+        self.read().edges
     }
+
+    /// Every edge, plus everything skipped and why.
+    ///
+    /// The spec's error conditions are two clauses each: a MUST that
+    /// says to ignore something, and a SHOULD that says to surface it
+    /// anyway. [`Self::edges`] satisfies the first. This satisfies
+    /// the second, and exists because "ignored" and "absent" look
+    /// identical to a caller that can only see the edge list — a
+    /// mistyped key and a key that was never written are the same
+    /// silence, and only one of them is worth telling a user about.
+    #[must_use]
+    pub fn read(&self) -> NamestoreRead {
+        let mut read = NamestoreRead::default();
+
+        for key in self.doc.keys(automerge::ROOT) {
+            // `reference` can only be asked about already-valid
+            // segments, so a malformed key is unreachable through it.
+            // Enumeration has no such protection and must exclude
+            // them explicitly (E6).
+            if !is_path_key(&key) {
+                read.malformed_keys.push(key);
+                continue;
+            }
+
+            // All values, not just the winner: a merge can leave
+            // several, and the losers are worth surfacing even though
+            // the winner is the one that resolves (E7).
+            let Ok(conflicting) = self.doc.get_all(automerge::ROOT, key.as_str()) else {
+                continue;
+            };
+
+            let mut targets = conflicting
+                .into_iter()
+                .map(|(value, _)| parse_bare_reference(&value));
+
+            let Some(winner) = targets.next() else {
+                continue;
+            };
+
+            for loser in targets.flatten() {
+                read.conflicts.push((key.clone(), loser));
+            }
+
+            match winner {
+                Some(target) => read.edges.push((key, target)),
+                // A well-formed key whose value is not a reference:
+                // absent from matching by shape, which is what lets
+                // protocol entries share this map (E8).
+                None => read.non_references.push(key),
+            }
+        }
+
+        read
+    }
+}
+
+/// One pass over a namestore: what resolves, and what was skipped.
+///
+/// Each non-edge list is a SHOULD in the spec's error table. Nothing
+/// here changes what resolves — [`DocumentNamestore::edges`] and
+/// [`Namestore::reference`] see exactly the `edges` field — it only
+/// makes the skipping visible.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct NamestoreRead {
+    /// Well-formed keys with reference values: the resolvable edges.
+    pub edges: Vec<(String, DocAnchor)>,
+
+    /// Keys no name could match: empty, `.`/`..` segments, `#`,
+    /// leading or trailing `/` (E6).
+    pub malformed_keys: Vec<String>,
+
+    /// Well-formed keys whose value is not a bare reference (E8).
+    /// Protocol entries land here by design, so this is not on its
+    /// own an error — it is the list a caller filters to find one.
+    pub non_references: Vec<String>,
+
+    /// Losing values from a merge conflict, per key (E7). The winner
+    /// is in `edges`; these are what it won against.
+    pub conflicts: Vec<(String, DocAnchor)>,
 }
 
 impl Namestore for DocumentNamestore {
     fn reference(&self, path: &[Segment]) -> Option<DocAnchor> {
-        let (value, _) = self.doc.get(automerge::ROOT, path_key(path)).ok()??;
+        let (value, _) = self.doc.get(automerge::ROOT, path_key(path)?).ok()??;
         parse_bare_reference(&value)
     }
 }
@@ -119,7 +180,17 @@ fn is_path_key(key: &str) -> bool {
 
 /// The flat-map key for a segment path: segments joined by `/` — the
 /// only spelling of that path (Namestore Layout).
-pub(crate) fn path_key(path: &[Segment]) -> String {
+///
+/// `None` for an empty path. Keys MUST be one or more segments
+/// (Namestore Layout), so there is no key for "no segments": writing
+/// one would put an empty key in the map, and looking one up would
+/// ask whether the empty key is bound. Returning an `Option` makes
+/// both callers say what they mean instead of silently using `""`.
+pub(crate) fn path_key(path: &[Segment]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+
     let mut joined = String::new();
     for (index, segment) in path.iter().enumerate() {
         if index > 0 {
@@ -127,13 +198,27 @@ pub(crate) fn path_key(path: &[Segment]) -> String {
         }
         joined.push_str(segment.as_str());
     }
-    joined
+
+    Some(joined)
 }
 
 /// A bare reference and nothing else: the `automerge:` scheme plus a
 /// bs58check document ID. `DocAnchor::parse` rejects anything
 /// carrying segments or heads (`/`, `#` are outside the bs58
 /// alphabet), non-key IDs, and checksum failures.
+///
+/// A **scalar** string, never a `Text` object. A reference is an
+/// immutable value; a `Text` is a collaborative document, and two
+/// writers editing one concurrently could merge into a target neither
+/// wrote — a redirect no signature covers.
+///
+/// Worth knowing when reading documents a JavaScript client wrote:
+/// `doc[name] = "automerge:…"` stores a `Text` there, and reads back
+/// as a string, so such a namestore resolves nowhere while looking
+/// correct to the application that wrote it. The scalar spelling in
+/// that binding is `RawString`. Such entries are reported by
+/// [`DocumentNamestore::read`] under `non_references`, which is the
+/// only signal the writer gets.
 pub(crate) fn parse_bare_reference(value: &Value<'_>) -> Option<DocAnchor> {
     let Value::Scalar(scalar) = value else {
         return None;
@@ -292,6 +377,46 @@ mod tests {
         assert_eq!(store.reference(&segments(&["anything"])), None);
     }
 
+    /// The SHOULD half of E6/E7/E8: skipped entries are reported,
+    /// not merely skipped.
+    ///
+    /// Without this a caller cannot distinguish "you mistyped the
+    /// key" from "nothing is bound there" — both are silence — and
+    /// only one of them is worth telling a user about.
+    #[test]
+    fn a_read_surfaces_what_it_skipped() -> TestResult {
+        let reference = format!("automerge:{}", anchor(1));
+        let read = DocumentNamestore::new(namestore_doc(&[
+            ("ok", reference.as_str()),
+            ("has#hash", reference.as_str()),
+            (".well-known/onomancy/certificates", "not-a-reference"),
+        ])?)
+        .read();
+
+        assert_eq!(
+            read.edges.into_iter().map(|(k, _)| k).collect::<Vec<_>>(),
+            vec!["ok"]
+        );
+        assert_eq!(read.malformed_keys, vec!["has#hash"], "E6 surfaced");
+        assert_eq!(
+            read.non_references,
+            vec![".well-known/onomancy/certificates"],
+            "E8 surfaced"
+        );
+        Ok(())
+    }
+
+    /// A path with no segments has no key, so neither reading nor
+    /// writing may invent one. `""` would be a key no name can match:
+    /// a write that appears to succeed and can never be read back.
+    #[test]
+    fn an_empty_path_has_no_key() {
+        assert_eq!(path_key(&[]), None);
+        assert_eq!(
+            DocumentNamestore::new(Automerge::new()).reference(&[]),
+            None
+        );
+    }
     #[test]
     fn held_documents_answer_only_what_they_hold() -> TestResult {
         let target = anchor(1);
@@ -342,6 +467,41 @@ mod tests {
         let found: Vec<String> = store.edges().into_iter().map(|(key, _)| key).collect();
 
         assert_eq!(found, vec!["ok"]);
+        Ok(())
+    }
+
+    /// A `Text` object is not a scalar string, and so is not a
+    /// reference.
+    ///
+    /// This is a live interop hazard rather than a hypothetical:
+    /// Automerge's **JavaScript** binding stores a plain string in a
+    /// map as a `Text` object, so a JS writer that assigns
+    /// `doc[name] = "automerge:…"` produces an entry no conforming
+    /// resolver can match, while its own reader sees a string and
+    /// reports success. `RawString` is the JS spelling that produces
+    /// a scalar.
+    ///
+    /// The value is surfaced rather than merely skipped, because
+    /// silence here is indistinguishable from an unwritten name and
+    /// the writer has no other signal.
+    #[test]
+    fn a_text_object_is_not_a_reference_and_says_so() -> TestResult {
+        let mut doc = Automerge::new();
+        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+            let text = tx.put_object(automerge::ROOT, "written-by-js", automerge::ObjType::Text)?;
+            tx.splice_text(&text, 0, 0, &format!("automerge:{}", anchor(1)))?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+
+        let read = DocumentNamestore::new(doc).read();
+
+        assert!(read.edges.is_empty(), "a Text object cannot be an edge");
+        assert_eq!(
+            read.non_references,
+            vec!["written-by-js"],
+            "and the writer is told which key it was"
+        );
         Ok(())
     }
 }
