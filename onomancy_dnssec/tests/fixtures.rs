@@ -1,9 +1,10 @@
 //! The checked-in fixtures still mean what the catalog says they
-#![allow(clippy::panic, clippy::indexing_slicing)]
 //! mean: every `tests/fixtures/*.chain` file is read back and
 //! validated, and its outcome must match its declared
 //! [`Expectation`]. Also pins byte-stability: regenerating the
 //! catalog in-process must reproduce the committed bytes exactly.
+
+#![allow(clippy::panic, clippy::indexing_slicing)]
 
 use std::{fs, path::PathBuf};
 
@@ -63,8 +64,15 @@ fn every_fixture_produces_its_declared_outcome() -> TestResult {
                 );
             }
 
-            Expectation::Invalid => {
-                assert!(outcome.is_err(), "{name}: mutation vector MUST fail");
+            Expectation::Invalid(expected) => {
+                // The EXACT variant: an adversarial fixture failing
+                // for the wrong reason means the rejection branch it
+                // was built to exercise has gone dead.
+                assert_eq!(
+                    outcome,
+                    Err(expected),
+                    "{name}: mutation vector MUST fail with its declared error"
+                );
             }
         }
     }

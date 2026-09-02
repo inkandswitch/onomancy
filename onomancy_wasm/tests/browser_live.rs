@@ -19,6 +19,24 @@ async fn the_first_bound_name_resolves_fresh_in_the_browser() -> Result<(), JsVa
     let freshness = Reflect::get(&verdict, &JsValue::from_str("freshness"))?;
 
     assert_eq!(freshness.as_string().as_deref(), Some("fresh"));
+
+    // Not just the label: the proof carried records and links, and
+    // the chain bytes are present — the field browser minting
+    // actually depends on (`encodeCertificate` embeds them).
+    let records = Reflect::get(&verdict, &JsValue::from_str("records"))?;
+    assert!(
+        js_sys::Array::from(&records).length() > 0,
+        "a fresh verdict proves at least one record"
+    );
+
+    let links = Reflect::get(&verdict, &JsValue::from_str("links"))?;
+    assert!(links.as_f64().unwrap_or_default() > 0.0, "links counted");
+
+    let chain = Reflect::get(&verdict, &JsValue::from_str("chain"))?;
+    assert!(
+        js_sys::Uint8Array::new(&chain).length() > 0,
+        "the validated chain rides along for minting"
+    );
     Ok(())
 }
 

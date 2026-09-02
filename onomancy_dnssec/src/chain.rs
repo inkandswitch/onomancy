@@ -108,6 +108,22 @@ impl From<Vec<u8>> for ChainLink {
 mod tests {
     use super::*;
 
+    /// A count the input cannot back fails before any link
+    /// allocation.
+    #[test]
+    fn hostile_counts_are_rejected_before_allocation() {
+        let mut bytes = Vec::new();
+        wire::put_varint(&mut bytes, 7); // declares 7 links, provides 0
+
+        assert!(matches!(
+            DnssecChain::read_framed(&bytes),
+            Err(WireError::LengthOverrun {
+                declared: 7,
+                have: 0
+            })
+        ));
+    }
+
     mod props {
         use super::*;
 
@@ -132,6 +148,34 @@ mod tests {
                     reader.finish().expect("fully consumed");
 
                     assert_eq!(chain, decoded);
+                });
+        }
+
+        /// The framed (fixture/store-item) entry point roundtrips,
+        /// and the one behavior it adds over `read` — trailing bytes
+        /// are rejected — holds for every chain.
+        #[test]
+        fn framed_roundtrip_rejects_trailing_bytes() {
+            bolero::check!()
+                .with_type::<Vec<Vec<u8>>>()
+                .for_each(|blobs| {
+                    let chain = DnssecChain::from(
+                        blobs
+                            .iter()
+                            .cloned()
+                            .map(ChainLink::from)
+                            .collect::<Vec<_>>(),
+                    );
+
+                    let mut buf = Vec::new();
+                    chain.write_framed(&mut buf);
+                    assert_eq!(DnssecChain::read_framed(&buf), Ok(chain));
+
+                    buf.push(0);
+                    assert_eq!(
+                        DnssecChain::read_framed(&buf),
+                        Err(WireError::TrailingBytes { extra: 1 })
+                    );
                 });
         }
     }

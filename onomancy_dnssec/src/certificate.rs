@@ -822,6 +822,153 @@ mod tests {
         ));
     }
 
+    /// The lineage count is bounds-checked at the TRUE minimum entry
+    /// width (166 bytes), not at one byte: a declared count the input
+    /// cannot back at that width dies as `LengthOverrun` BEFORE any
+    /// entry decode runs. A weakened `MIN_LINEAGE_ENTRY` (say 1)
+    /// would wander into entry parsing and fail differently.
+    #[test]
+    fn lineage_counts_are_bounded_at_the_true_entry_width() {
+        let mut params = sample_params();
+        params.lineage = vec![];
+        params.chain = DnssecChain::default();
+        params.delegation_chain = DelegationChain::default();
+        let mut bytes = Certificate::sign(params, &SigningKey::from_bytes(&[2; 32]))
+            .expect("under the unit cap")
+            .encode();
+
+        // The attached region of this certificate is three zero
+        // varints: delegation count, lineage count, chain count.
+        let mut zero = Vec::new();
+        wire::put_varint(&mut zero, 0);
+        assert_eq!(
+            bytes[bytes.len() - 3 * zero.len()..],
+            [zero.clone(), zero.clone(), zero.clone()].concat(),
+            "fixture sanity: empty attached region"
+        );
+
+        // Declare 2 lineage entries backed by 200 junk bytes: enough
+        // for 2 one-byte entries, nowhere near 2 × 166.
+        bytes.truncate(bytes.len() - 2 * zero.len());
+        wire::put_varint(&mut bytes, 2);
+        bytes.extend_from_slice(&[0u8; 200]);
+
+        assert!(matches!(
+            Certificate::decode(&bytes),
+            Err(DecodeCertificateError::Wire(WireError::LengthOverrun {
+                declared: 2,
+                have: 200
+            }))
+        ));
+    }
+
+    /// A non-point in the root-doc field is named as such — and the
+    /// grammar check fires before the signature check.
+    #[test]
+    fn non_curve_points_name_their_field() {
+        let non_point: [u8; 32] = (0u8..=255)
+            .map(|b| [b; 32])
+            .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+            .expect("some constant fill fails decompression");
+
+        for (position, field) in [(0, FieldName::RootDoc), (1, FieldName::Signer)] {
+            let mut bytes = sample().encode();
+            let at = 4 + position * 32;
+            bytes[at..at + 32].copy_from_slice(&non_point);
+
+            assert!(
+                matches!(
+                    Certificate::decode(&bytes),
+                    Err(DecodeCertificateError::NotACurvePoint { field: got }) if got == field
+                ),
+                "field {field:?}"
+            );
+        }
+    }
+
+    /// A corrupt lineage entry surfaces with its zero-based index.
+    #[test]
+    fn corrupt_lineage_entries_carry_their_index() {
+        let cert = sample();
+        let mut bytes = cert.encode();
+
+        // The one lineage entry is an embedded ONR unit in the
+        // attached region; break its tag.
+        let onr_at = bytes
+            .windows(4)
+            .rposition(|w| w == b"ONR\x00")
+            .expect("lineage unit present");
+        bytes[onr_at..onr_at + 4].copy_from_slice(b"JUNK");
+
+        assert!(matches!(
+            Certificate::decode(&bytes),
+            Err(DecodeCertificateError::Lineage { index: 0, .. })
+        ));
+    }
+
+    /// Equal adjacent heads are as non-canonical as unsorted ones —
+    /// the `>=` in `read_heads`, both halves.
+    #[test]
+    fn duplicate_heads_are_not_canonical() {
+        let cert = sample();
+        let mut bytes = cert.encode();
+
+        // Overwrite the second head with the first: equal adjacent.
+        let heads_at = bytes
+            .windows(32)
+            .position(|w| w == [3u8; 32])
+            .expect("first head present");
+        let first: [u8; 32] = bytes[heads_at..heads_at + 32].try_into().expect("32 bytes");
+        bytes[heads_at + 32..heads_at + 64].copy_from_slice(&first);
+
+        assert!(matches!(
+            Certificate::decode(&bytes),
+            Err(DecodeCertificateError::HeadsNotCanonical)
+        ));
+    }
+
+    /// A non-canonical hostname on the wire is the certificate's own
+    /// `Hostname` error, before the signature check.
+    #[test]
+    fn non_canonical_hostnames_are_rejected_not_normalized() {
+        let mut bytes = sample().encode();
+
+        // The hostname appears twice (the embedded predecessor
+        // statement carries its own copy, later in the wire); the
+        // certificate's field 5 is the FIRST occurrence.
+        let needle = b"expede.wtf";
+        let at = bytes
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .expect("hostname present");
+        bytes[at] = b'E';
+
+        assert!(matches!(
+            Certificate::decode(&bytes),
+            Err(DecodeCertificateError::Hostname(
+                CanonicalDnsNameError::NotCanonical
+            ))
+        ));
+    }
+
+    /// A corrupt embedded predecessor unit is the certificate's own
+    /// `Predecessor` error, carrying the nested failure.
+    #[test]
+    fn corrupt_predecessors_surface_as_their_own_error() {
+        let mut bytes = sample().encode();
+
+        let ons_at = bytes
+            .windows(4)
+            .position(|w| w == b"ONS\x00")
+            .expect("predecessor unit present");
+        bytes[ons_at..ons_at + 4].copy_from_slice(b"JUNK");
+
+        assert!(matches!(
+            Certificate::decode(&bytes),
+            Err(DecodeCertificateError::Predecessor(_))
+        ));
+    }
+
     mod props {
         use super::*;
 
@@ -856,6 +1003,34 @@ mod tests {
                     assert_eq!(cert, decoded);
                     assert_eq!(bytes, decoded.encode(), "byte identity");
                     assert_eq!(cert.digest(), decoded.digest());
+                });
+        }
+
+        /// The attached region's counterpart: a flip after the
+        /// signature either breaks framing (an error) or yields the
+        /// SAME certificate as a DIFFERENT store item — never a
+        /// different certificate.
+        #[test]
+        fn attached_region_tampering_never_changes_the_certificate() {
+            bolero::check!()
+                .with_type::<(usize, u8)>()
+                .for_each(|(at, mask)| {
+                    let cert = sample();
+                    let mut bytes = cert.encode();
+                    let attached_start = cert.signed_bytes().len() + 64;
+                    let attached_len = bytes.len() - attached_start;
+                    let at = attached_start + (at % attached_len);
+                    let mask = if *mask == 0 { 1 } else { *mask };
+
+                    bytes[at] ^= mask;
+
+                    if let Ok(reread) = Certificate::decode(&bytes) {
+                        assert!(
+                            cert.same_certificate(&reread),
+                            "attached flips never alter the signed unit"
+                        );
+                        assert_ne!(cert.digest(), reread.digest(), "but the item changed");
+                    }
                 });
         }
 

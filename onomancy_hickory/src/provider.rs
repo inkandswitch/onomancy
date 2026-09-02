@@ -45,7 +45,17 @@ impl HickoryProvider {
     /// exists or none of its entries parse.
     #[must_use]
     pub fn system() -> Self {
-        let mut discovered = resolv_conf_upstreams().into_iter().map(StubResolver::new);
+        let text = fs::read_to_string("/etc/resolv.conf").unwrap_or_default();
+        Self::with_fallback(resolv_conf(&text))
+    }
+
+    /// Discovered upstreams in order, with [`FALLBACK_UPSTREAM`]
+    /// appended as the last resort — or alone when discovery yields
+    /// nothing. The composition [`Self::system`] applies to what it
+    /// reads, split out so it is testable without a filesystem.
+    #[must_use]
+    pub fn with_fallback(discovered: Vec<SocketAddr>) -> Self {
+        let mut discovered = discovered.into_iter().map(StubResolver::new);
         let fallback = StubResolver::new(FALLBACK_UPSTREAM);
 
         match discovered.next() {
@@ -65,6 +75,14 @@ impl HickoryProvider {
     pub fn or(mut self, server: SocketAddr) -> Self {
         self.rest.push(StubResolver::new(server));
         self
+    }
+
+    /// Every upstream, in the order tried.
+    #[must_use]
+    pub fn upstreams(&self) -> Vec<SocketAddr> {
+        core::iter::once(self.first.server())
+            .chain(self.rest.iter().map(StubResolver::server))
+            .collect()
     }
 
     /// A provider over one pre-configured stub.
@@ -154,14 +172,14 @@ async fn drive(
     }
 }
 
-/// The `nameserver` entries of `/etc/resolv.conf`, in file order.
-/// Unreadable files and unparsable entries (e.g. scoped IPv6) yield
-/// nothing — discovery degrades, never errors.
-fn resolv_conf_upstreams() -> Vec<SocketAddr> {
-    let Ok(text) = fs::read_to_string("/etc/resolv.conf") else {
-        return Vec::new();
-    };
-
+/// The `nameserver` entries of resolv.conf text, in file order, each
+/// on port 53. Unparsable entries (e.g. scoped IPv6) yield nothing —
+/// discovery degrades, never errors.
+///
+/// Pure over its input so the parsing is testable; the filesystem
+/// read lives in [`HickoryProvider::system`].
+#[must_use]
+pub fn resolv_conf(text: &str) -> Vec<SocketAddr> {
     text.lines()
         .filter_map(|line| line.strip_prefix("nameserver"))
         .filter(|rest| rest.starts_with(char::is_whitespace))

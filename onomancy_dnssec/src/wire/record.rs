@@ -145,10 +145,22 @@ mod tests {
         ));
     }
 
+    /// Oversized RDATA on write is a caller bug: the length clamps to
+    /// `u16::MAX` and the frame no longer roundtrips. Pinned so the
+    /// documented behavior is a recorded fact (unreachable via `read`,
+    /// which is u16-framed — the roundtrip property cannot see this).
     #[test]
-    fn type_display_names_the_seven() {
-        assert_eq!(alloc::format!("{}", RrType::DNSKEY), "DNSKEY");
-        assert_eq!(alloc::format!("{}", RrType::new(65280)), "TYPE65280");
+    fn oversized_rdata_writes_a_clamped_corrupt_frame() {
+        let mut record = sample();
+        record.rdata = vec![0xAB; usize::from(u16::MAX) + 5];
+
+        let mut buf = Vec::new();
+        record.write(&mut buf);
+
+        let mut reader = Reader::new(&buf).expect("under cap");
+        let reread = Record::read(&mut reader).expect("frame parses");
+        assert_eq!(reread.rdata.len(), usize::from(u16::MAX), "clamped");
+        assert_eq!(reader.remaining(), 5, "the tail is orphaned");
     }
 
     mod props {

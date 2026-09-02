@@ -619,6 +619,70 @@ mod tests {
             Ok(())
         }
 
+        /// 44 unpadded base64 chars decode to 33 bytes: right encoded
+        /// length, wrong key length — its own error, after base64.
+        #[test]
+        fn wrong_key_lengths_are_distinguished_from_bad_base64() {
+            let good = vector(3, 7, 9).to_string();
+            let g_value = good
+                .split(';')
+                .nth(3)
+                .and_then(|f| f.strip_prefix("g="))
+                .expect("well-formed vector")
+                .to_string();
+
+            let thirty_three_bytes = "A".repeat(44);
+            let swapped = good.replace(&g_value, &thirty_three_bytes);
+            assert_eq!(
+                TxtRecord::parse(&swapped),
+                Err(ParseTxtRecordError::WrongKeyLength {
+                    field: FieldName::GenerationKey,
+                    got: 33
+                })
+            );
+        }
+
+        /// Canonical base64 of 32 bytes that decompress to no curve
+        /// point: every earlier check passes, the point check names
+        /// its field.
+        #[test]
+        fn non_curve_points_name_their_field() {
+            let non_point: [u8; 32] = (0u8..=255)
+                .map(|b| [b; 32])
+                .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+                .expect("some constant fill fails decompression");
+
+            let good = vector(3, 7, 9).to_string();
+            let p_value = good
+                .split(';')
+                .nth(4)
+                .and_then(|f| f.strip_prefix("p="))
+                .expect("well-formed vector")
+                .to_string();
+
+            let swapped = good.replace(&p_value, &BASE64.encode(non_point));
+            assert_eq!(
+                TxtRecord::parse(&swapped),
+                Err(ParseTxtRecordError::NotACurvePoint {
+                    field: FieldName::DocumentId
+                })
+            );
+        }
+
+        /// The classify-vs-parse difference: dispositions become
+        /// errors under `parse`, where anything but a binding is one.
+        #[test]
+        fn parse_turns_dispositions_into_errors() {
+            assert_eq!(
+                TxtRecord::parse("v=spf1 include:_spf.example.com ~all"),
+                Err(ParseTxtRecordError::UnknownRecord)
+            );
+            assert_eq!(
+                TxtRecord::parse("v=ONO1;k=ed25519;n=1;g=x;p=y"),
+                Err(ParseTxtRecordError::UnknownVersion)
+            );
+        }
+
         #[test]
         fn oversized_records_are_rejected_before_field_work() {
             let long = alloc::format!("v=ONO0;{}", "a".repeat(MAX_RECORD_LEN));

@@ -188,7 +188,12 @@ mod tests {
             Name::<DocAnchor>::parse(&alloc::format!("automerge:{DOC}#")),
             Err(doc::ParseDocNameError::ReservedFragment)
         );
-        assert!(Name::<Local>::parse("~/bob#pin").is_err());
+        assert_eq!(
+            Name::<Local>::parse("~/bob#pin"),
+            Err(local::ParseLocalNameError::Segments(
+                ParseSegmentsError::Segment(ParseSegmentError::ReservedHash)
+            ))
+        );
     }
 
     #[test]
@@ -229,13 +234,84 @@ mod tests {
 
     #[test]
     fn empty_and_dot_segments_are_rejected() {
-        for bad in ["//a", "/a/", "/./a", "/../a"] {
-            assert!(Name::<Local>::parse(&alloc::format!("~{bad}")).is_err());
+        // Exact variants: rejecting for the WRONG reason (everything
+        // collapsing into one bucket) would be a different parser.
+        for (bad, expected) in [
+            ("//a", ParseSegmentError::Empty),
+            ("/a/", ParseSegmentError::Empty),
+            ("/./a", ParseSegmentError::DotSegment),
+            ("/../a", ParseSegmentError::DotSegment),
+        ] {
+            assert_eq!(
+                Name::<Local>::parse(&alloc::format!("~{bad}")),
+                Err(local::ParseLocalNameError::Segments(
+                    ParseSegmentsError::Segment(expected)
+                )),
+                "~{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn anchor_splitting_handles_slashless_and_empty_input() {
+        assert_eq!(split_anchor("anchor/a/b"), ("anchor", "/a/b"));
+        assert_eq!(split_anchor("anchor"), ("anchor", ""));
+        assert_eq!(split_anchor(""), ("", ""));
+
+        assert_eq!(parse_segments(""), Ok(Vec::new()));
+        assert_eq!(
+            parse_segments("no-slash"),
+            Err(ParseSegmentsError::ExpectedSlashAfterAnchor)
+        );
+    }
+
+    /// The serde forms are the display string, exactly.
+    #[cfg(feature = "serde")]
+    mod serde_roundtrip {
+        use super::*;
+
+        #[test]
+        fn json_roundtrips_and_rejects_malformed_names() {
+            let local = Name::<Local>::parse("~/bob/pics").expect("valid");
+            let json = serde_json::to_string(&local).expect("serializes");
+            assert_eq!(json, "\"~/bob/pics\"");
+            assert_eq!(
+                serde_json::from_str::<Name<Local>>(&json).expect("deserializes"),
+                local
+            );
+
+            let doc =
+                Name::<DocAnchor>::parse(&alloc::format!("automerge:{DOC}/blog")).expect("valid");
+            let json = serde_json::to_string(&doc).expect("serializes");
+            assert_eq!(
+                serde_json::from_str::<Name<DocAnchor>>(&json).expect("deserializes"),
+                doc
+            );
+
+            assert!(serde_json::from_str::<Name<Local>>("\"~bob\"").is_err());
+            assert!(serde_json::from_str::<Name<DocAnchor>>("\"~/bob\"").is_err());
+        }
+
+        /// forall valid names: deserialize ∘ serialize = id.
+        #[test]
+        fn props_serde_roundtrip() {
+            bolero::check!()
+                .with_type::<alloc::string::String>()
+                .for_each(|raw| {
+                    if let Ok(name) = Name::<Local>::parse(raw) {
+                        let json = serde_json::to_string(&name).expect("serializes");
+                        assert_eq!(
+                            serde_json::from_str::<Name<Local>>(&json).expect("deserializes"),
+                            name
+                        );
+                    }
+                });
         }
     }
 
     mod props {
         use super::*;
+        use ed25519_dalek::{SigningKey, VerifyingKey};
 
         #[test]
         fn parse_never_panics_and_roundtrips() {
@@ -256,6 +332,46 @@ mod tests {
                         assert!(!raw.contains('#'), "`#` never parses");
                     }
                 });
+        }
+
+        /// Structured doc-anchor roundtrip: arbitrary strings almost
+        /// never pass bs58check, so the doc branch above is nearly
+        /// dead — this generator builds names from raw key bytes and
+        /// segment seeds, giving the roundtrip real traffic.
+        #[test]
+        fn doc_names_built_from_parts_roundtrip() {
+            bolero::check!()
+                .with_type::<([u8; 32], Vec<alloc::string::String>)>()
+                .for_each(|(key_bytes, seg_seeds)| {
+                    let Ok(key) = VerifyingKey::from_bytes(key_bytes) else {
+                        return;
+                    };
+
+                    let segments: Vec<Segment> = seg_seeds
+                        .iter()
+                        .filter_map(|s| Segment::parse(s).ok())
+                        .collect();
+
+                    let name = Name::from_parts(DocAnchor::from(key), segments);
+                    let reparsed =
+                        Name::<DocAnchor>::parse(&name.to_string()).expect("printed names reparse");
+                    assert_eq!(name, reparsed);
+                });
+        }
+
+        /// Signing keys always yield parseable doc anchors — the
+        /// deterministic half of the structured generator.
+        #[test]
+        fn every_signing_keys_anchor_roundtrips() {
+            bolero::check!().with_type::<[u8; 32]>().for_each(|seed| {
+                let key = SigningKey::from_bytes(seed).verifying_key();
+                let name = Name::from_parts(DocAnchor::from(key), Vec::new());
+                assert_eq!(
+                    Name::<DocAnchor>::parse(&name.to_string()),
+                    Ok(name),
+                    "anchors from real keys always roundtrip"
+                );
+            });
         }
     }
 }

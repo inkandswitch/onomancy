@@ -56,3 +56,26 @@ impl fmt::Display for RrType {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// All seven named types plus the RFC 3597 unknown-type fallback
+    /// — log-scrapers key on these strings.
+    #[test]
+    fn display_names_the_seven_and_numbers_the_rest() {
+        for (rtype, expected) in [
+            (RrType::CNAME, "CNAME"),
+            (RrType::DNSKEY, "DNSKEY"),
+            (RrType::DS, "DS"),
+            (RrType::NSEC, "NSEC"),
+            (RrType::NSEC3, "NSEC3"),
+            (RrType::RRSIG, "RRSIG"),
+            (RrType::TXT, "TXT"),
+            (RrType::new(65280), "TYPE65280"),
+        ] {
+            assert_eq!(alloc::format!("{rtype}"), expected);
+        }
+    }
+}

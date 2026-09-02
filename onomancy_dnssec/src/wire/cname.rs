@@ -59,6 +59,27 @@ mod tests {
         let cname = Cname::parse(b"\x03txt\x06expede\x03wtf\x00").expect("parses");
         assert_eq!(alloc::format!("{}", cname.target()), "txt.expede.wtf");
 
-        assert!(Cname::parse(b"\x03txt\x06expede\x03wtf\x00X").is_err());
+        assert!(matches!(
+            Cname::parse(b"\x03txt\x06expede\x03wtf\x00X"),
+            Err(ParseCnameError::Wire(WireError::TrailingBytes { extra: 1 }))
+        ));
+    }
+
+    /// Name-level failures arrive through the `Target` variant — the
+    /// `#[from]` wiring, pinned.
+    #[test]
+    fn non_canonical_targets_surface_as_target_errors() {
+        assert!(matches!(
+            Cname::parse(b"\xC0\x0C"),
+            Err(ParseCnameError::Target(ParseNameError::NotCanonical { .. }))
+        ));
+    }
+
+    /// A CNAME to the root parses (semantically odd, syntactically
+    /// legal DNS) — the walk judges targets, not this frame.
+    #[test]
+    fn a_root_target_is_frame_legal() {
+        let cname = Cname::parse(b"\x00").expect("parses");
+        assert!(cname.target().is_root());
     }
 }

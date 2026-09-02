@@ -163,20 +163,73 @@ mod tests {
     }
 
     #[test]
-    fn key_tag_matches_the_rfc_reference_algorithm() {
-        // Independent reimplementation of Appendix B as the oracle.
-        let key = Dnskey::parse(&sample_rdata()).expect("parses");
-        let rdata = key.rdata();
+    fn flags_are_independent_bits() {
+        let with_flags = |flags: u16| {
+            let mut rdata = sample_rdata();
+            rdata[..2].copy_from_slice(&flags.to_be_bytes());
+            Dnskey::parse(&rdata).expect("parses")
+        };
 
-        let mut oracle: u32 = 0;
-        for pair in rdata.chunks(2) {
-            oracle += u32::from(pair[0]) << 8;
-            if let Some(low) = pair.get(1) {
-                oracle += u32::from(*low);
-            }
+        let neither = with_flags(0);
+        assert!(!neither.is_zone_key());
+        assert!(!neither.is_sep());
+
+        let zone_only = with_flags(0x0100);
+        assert!(zone_only.is_zone_key());
+        assert!(!zone_only.is_sep());
+
+        let sep_only = with_flags(0x0001);
+        assert!(!sep_only.is_zone_key());
+        assert!(sep_only.is_sep());
+    }
+
+    #[test]
+    fn header_only_and_truncated_rdatas_have_their_shapes() {
+        // A header with no key material parses (an empty public key
+        // fails later, at verification).
+        let header_only = Dnskey::parse(&sample_rdata()[..4]).expect("parses");
+        assert!(header_only.public_key().is_empty());
+
+        // Less than a header does not.
+        assert!(matches!(
+            Dnskey::parse(&sample_rdata()[..3]),
+            Err(ParseDnskeyError::Truncated(_))
+        ));
+    }
+
+    mod props {
+        use super::*;
+        use alloc::vec::Vec;
+
+        /// The key tag matches an independently structured Appendix B
+        /// oracle over arbitrary key bodies — including odd lengths,
+        /// where the trailing byte takes the high position. (The
+        /// shipped IANA anchors pin the published-vector tags 20326
+        /// and 38696 in `trust_anchor::tests`.)
+        #[test]
+        fn key_tag_matches_the_rfc_reference_algorithm() {
+            bolero::check!().with_type::<Vec<u8>>().for_each(|body| {
+                let mut rdata = Vec::new();
+                rdata.extend_from_slice(&0x0100u16.to_be_bytes());
+                rdata.push(3);
+                rdata.push(15);
+                rdata.extend_from_slice(body);
+
+                let key = Dnskey::parse(&rdata).expect("valid header parses");
+
+                // Chunk-structured oracle vs the index-parity
+                // production loop.
+                let mut oracle: u32 = 0;
+                for pair in rdata.chunks(2) {
+                    oracle += u32::from(pair[0]) << 8;
+                    if let Some(low) = pair.get(1) {
+                        oracle += u32::from(*low);
+                    }
+                }
+                oracle += (oracle >> 16) & 0xFFFF;
+
+                assert_eq!(u32::from(key.key_tag()), oracle & 0xFFFF);
+            });
         }
-        oracle += (oracle >> 16) & 0xFFFF;
-
-        assert_eq!(u32::from(key.key_tag()), oracle & 0xFFFF);
     }
 }

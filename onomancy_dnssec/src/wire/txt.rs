@@ -104,6 +104,15 @@ mod tests {
         assert!(matches!(Txt::parse(&[]), Err(ParseTxtError::Empty)));
     }
 
+    /// A single zero-length character string is a valid, empty TXT —
+    /// distinct from empty RDATA.
+    #[test]
+    fn a_zero_length_string_is_valid_and_empty() {
+        let txt = Txt::parse(&[0]).expect("parses");
+        assert_eq!(txt.strings(), &[Vec::new()]);
+        assert!(txt.concatenated().is_empty());
+    }
+
     mod props {
         use super::*;
 

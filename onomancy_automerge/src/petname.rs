@@ -82,6 +82,14 @@ impl<'a> PetnameStore<'a> {
     /// detection, because the alleged-name claim lives in the
     /// decision document, not on the edge (P1).
     ///
+    /// A rename to the same label is a no-op: pin-then-unpin on one
+    /// label would delete the edge the pin just rewrote.
+    ///
+    /// Not atomic: the pin at `to` and the unpin at `from` are two
+    /// transactions. If the unpin fails after the pin succeeded, both
+    /// labels hold the edge — a harmless duplicate (both point at the
+    /// same target; the pins join dedups), never a lost pin.
+    ///
     /// # Errors
     ///
     /// Returns [`WriteError::MissingEdge`] when `from` holds no
@@ -89,6 +97,11 @@ impl<'a> PetnameStore<'a> {
     /// substrate rejects the transaction.
     pub fn rename(&mut self, from: &[Segment], to: &[Segment]) -> Result<(), WriteError> {
         let target = self.existing_edge(from)?;
+
+        if from == to {
+            return Ok(());
+        }
+
         self.pin(to, &target)?;
         self.unpin(from)
     }
@@ -158,7 +171,7 @@ pub enum WriteError {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
@@ -203,6 +216,33 @@ mod tests {
             DocumentNamestore::new(doc.clone()).reference(&relabel),
             None
         );
+        Ok(())
+    }
+
+    /// A rename to the SAME label keeps the edge: naive
+    /// pin-then-unpin would delete what the pin just rewrote — and
+    /// with it the divergence join, if this was the target's only
+    /// edge (P1-adjacent).
+    #[test]
+    fn a_rename_to_itself_keeps_the_edge() -> TestResult {
+        let bob = anchor(1);
+        let label = segments(&["bob"]);
+
+        let mut doc = Automerge::new();
+        PetnameStore::new(&mut doc).pin(&label, &bob)?;
+        PetnameStore::new(&mut doc).rename(&label, &label)?;
+
+        assert_eq!(
+            DocumentNamestore::new(doc.clone()).reference(&label),
+            Some(bob),
+            "rename-to-self is a no-op, never a delete"
+        );
+
+        // And on a missing edge it is still MissingEdge, not Ok.
+        assert!(matches!(
+            PetnameStore::new(&mut doc).rename(&segments(&["ghost"]), &segments(&["ghost"])),
+            Err(WriteError::MissingEdge)
+        ));
         Ok(())
     }
 
@@ -253,6 +293,43 @@ mod tests {
         Ok(())
     }
 
+    /// The function's whole purpose: two pinned targets for ONE
+    /// hostname surface together, sorted — the divergence the
+    /// derivation badges. And a target reachable through two claims
+    /// appears once (the dedup branch).
+    #[test]
+    fn divergent_pins_for_one_hostname_all_surface_sorted() -> TestResult {
+        let old = anchor(1);
+        let new = anchor(2);
+
+        let mut doc = Automerge::new();
+        PetnameStore::new(&mut doc).pin(&segments(&["bob"]), &old)?;
+        PetnameStore::new(&mut doc).pin(&segments(&["bob-again"]), &new)?;
+
+        let claim = |document| Claim {
+            hostname: hostname("bob.example"),
+            document,
+            note: None,
+        };
+        let decisions = Decisions {
+            // Two claims for the same hostname naming DIFFERENT
+            // documents, plus a duplicate claim for one of them.
+            claims: vec![claim(old), claim(new), claim(old)],
+            ..Decisions::default()
+        };
+
+        let pins = pins(&DocumentNamestore::new(doc), &decisions);
+        let mut expected = vec![old, new];
+        expected.sort_unstable();
+
+        assert_eq!(
+            pins.get(&hostname("bob.example")),
+            Some(&expected),
+            "both targets surface, sorted, deduped"
+        );
+        Ok(())
+    }
+
     #[test]
     fn renames_never_sever_the_divergence_join() -> TestResult {
         // The spec's P1 condition, end to end: the claim is frozen
@@ -298,5 +375,142 @@ mod tests {
         let read = DocumentNamestore::new(doc).read();
         assert!(read.edges.is_empty());
         assert!(read.malformed_keys.is_empty());
+    }
+
+    /// The empty-path refusal covers every write verb, not just
+    /// `pin`: there is no key for "no segments" anywhere.
+    #[test]
+    fn unpinning_and_renaming_empty_paths_are_refused() -> TestResult {
+        let bob = anchor(1);
+        let label = segments(&["bob"]);
+        let mut doc = Automerge::new();
+        PetnameStore::new(&mut doc).pin(&label, &bob)?;
+
+        let mut store = PetnameStore::new(&mut doc);
+        // `unpin(&[])` refuses at the key (no key for "no segments");
+        // `rename(&[], …)` refuses at the edge lookup — the empty
+        // path holds nothing, by construction.
+        assert!(matches!(store.unpin(&[]), Err(WriteError::EmptyPath)));
+        assert!(matches!(
+            store.rename(&[], &segments(&["x"])),
+            Err(WriteError::MissingEdge)
+        ));
+        // Renaming TO the empty path is refused at the pin, before
+        // the unpin can run — the source edge survives.
+        assert!(matches!(
+            store.rename(&label, &[]),
+            Err(WriteError::EmptyPath)
+        ));
+        assert_eq!(
+            DocumentNamestore::new(doc.clone()).reference(&label),
+            Some(bob),
+            "a refused rename never loses the source edge"
+        );
+        Ok(())
+    }
+
+    mod props {
+        use super::*;
+
+        /// A valid, unique-ish label from a seed byte.
+        fn label(prefix: &str, seed: u8) -> Vec<Segment> {
+            segments(&[&format!("{prefix}{seed}")])
+        }
+
+        /// P1 as a property: renames move labels, never the
+        /// divergence join — for ANY set of pins, claims, and
+        /// rename sequence.
+        #[test]
+        fn renames_never_change_the_pins_join() {
+            bolero::check!()
+                .with_type::<(Vec<(u8, u8)>, Vec<(u8, u8)>, Vec<(u8, u8)>)>()
+                .for_each(|(edges, claims, renames)| {
+                    let mut doc = Automerge::new();
+                    for (label_seed, target_seed) in edges {
+                        PetnameStore::new(&mut doc)
+                            .pin(&label("p", *label_seed), &anchor(*target_seed))
+                            .expect("pin");
+                    }
+
+                    let decisions = Decisions {
+                        claims: claims
+                            .iter()
+                            .map(|(host_seed, doc_seed)| Claim {
+                                hostname: hostname(&format!("h{host_seed}.example")),
+                                document: anchor(*doc_seed),
+                                note: None,
+                            })
+                            .collect(),
+                        ..Decisions::default()
+                    };
+
+                    let before = pins(&DocumentNamestore::new(doc.clone()), &decisions);
+
+                    for (step, (from_seed, to_seed)) in renames.iter().enumerate() {
+                        // A fresh, never-colliding destination label:
+                        // renaming ONTO an existing edge overwrites
+                        // it, which legitimately changes the join.
+                        let to = segments(&[&format!("r{to_seed}-{step}")]);
+                        match PetnameStore::new(&mut doc).rename(&label("p", *from_seed), &to) {
+                            Ok(()) | Err(WriteError::MissingEdge) => {}
+                            Err(other) => panic!("unexpected rename failure: {other}"),
+                        }
+                    }
+
+                    let after = pins(&DocumentNamestore::new(doc.clone()), &decisions);
+                    assert_eq!(before, after, "renames never sever or grow the join");
+                });
+        }
+
+        /// The join is order-insensitive under merge, and every value
+        /// list comes back sorted and deduped.
+        #[test]
+        fn pins_merge_commutes() {
+            bolero::check!()
+                .with_type::<(Vec<(u8, u8)>, Vec<(u8, u8)>, Vec<u8>)>()
+                .for_each(|(left_edges, right_edges, claim_seeds)| {
+                    let mut left = Automerge::new();
+                    let mut right = left.fork();
+
+                    for (label_seed, target_seed) in left_edges {
+                        PetnameStore::new(&mut left)
+                            .pin(&label("l", *label_seed), &anchor(*target_seed))
+                            .expect("pin");
+                    }
+                    for (label_seed, target_seed) in right_edges {
+                        PetnameStore::new(&mut right)
+                            .pin(&label("r", *label_seed), &anchor(*target_seed))
+                            .expect("pin");
+                    }
+
+                    let decisions = Decisions {
+                        claims: claim_seeds
+                            .iter()
+                            .map(|seed| Claim {
+                                hostname: hostname("shared.example"),
+                                document: anchor(*seed),
+                                note: None,
+                            })
+                            .collect(),
+                        ..Decisions::default()
+                    };
+
+                    let mut ab = left.clone();
+                    ab.merge(&mut right.clone()).expect("merge");
+                    let mut ba = right.clone();
+                    ba.merge(&mut left.clone()).expect("merge");
+
+                    let joined_ab = pins(&DocumentNamestore::new(ab), &decisions);
+                    let joined_ba = pins(&DocumentNamestore::new(ba), &decisions);
+
+                    assert_eq!(joined_ab, joined_ba, "the join is merge-order-insensitive");
+                    for targets in joined_ab.values() {
+                        assert!(targets.is_sorted(), "values are sorted");
+                        let mut deduped = targets.clone();
+                        deduped.dedup();
+                        assert_eq!(&deduped, targets, "and deduped");
+                    }
+                });
+        }
     }
 }

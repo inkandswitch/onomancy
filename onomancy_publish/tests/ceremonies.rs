@@ -54,9 +54,76 @@ fn bind_emits_a_verified_plan() -> TestResult {
     assert_eq!(plan.artifacts[0].kind, ArtifactKind::Certificate);
     assert!(plan.postconditions.iter().any(|p| matches!(
         p,
-        Postcondition::VerifiesFresh(fresh) if fresh.document == doc(1)
+        Postcondition::VerifiesFresh(fresh)
+            if fresh.document == doc(1) && fresh.generation == generation(2)
     )));
+    assert!(
+        plan.postconditions.iter().any(|p| matches!(
+            p,
+            Postcondition::EffectiveSerialAtLeast { serial, .. }
+                if *serial == Serial::from(NOW_MS)
+        )),
+        "the ratchet floor is the plan's own serial"
+    );
     Ok(())
+}
+
+/// The module's central claim, refused for real: a plan is a witness
+/// only against the authority its verifiers will run, so a carriage
+/// the authority rejects fails at PLAN time — not at the first
+/// verifier.
+#[test]
+fn a_rejecting_authority_refuses_the_plan() {
+    let bind = Bind {
+        hostname: hostname(),
+        document: doc(1),
+        generation: generation(2),
+        heads: vec![],
+        lineage: vec![],
+        carriage: DelegationChain::default(),
+    };
+
+    // An off-path generation: the derivation D10-rejects the fresh
+    // record, so nothing derives — the same verdict every live
+    // verifier would reach.
+    let off_path = bind.clone().plan(
+        NOW_MS,
+        &signer(1),
+        &MemoryAuthority::default().off_path(&generation(2)),
+    );
+    assert_eq!(off_path.unwrap_err(), CeremonyError::DerivesNothing);
+
+    // A denied certificate signer: the certificate contributes no
+    // candidacy under seam parity, so nothing derives.
+    let denied = bind.plan(
+        NOW_MS,
+        &signer(1),
+        &MemoryAuthority::default().deny(doc(1), &SigningKey::from_bytes(&[1; 32]).verifying_key()),
+    );
+    assert_eq!(denied.unwrap_err(), CeremonyError::DerivesNothing);
+}
+
+/// The encoder cap surfaces as a ceremony error: a carriage too
+/// large to ride the certificate's attached region refuses at
+/// signing, before any simulation.
+#[test]
+fn oversize_carriages_refuse_at_plan_time() {
+    use onomancy_core::delegation_chain::SignedDelegationBytes;
+
+    let oversize = Bind {
+        hostname: hostname(),
+        document: doc(1),
+        generation: generation(2),
+        heads: vec![],
+        lineage: vec![],
+        carriage: DelegationChain::from(vec![SignedDelegationBytes::from(vec![
+            0u8;
+            2 * 1024 * 1024
+        ])]),
+    }
+    .plan(NOW_MS, &signer(1), &MemoryAuthority::default());
+
+    assert!(matches!(oversize, Err(CeremonyError::Oversize(_))));
 }
 
 #[test]
@@ -176,7 +243,13 @@ fn migrate_dual_publishes_and_proves_continuity() -> TestResult {
             .any(|a| a.kind == ArtifactKind::SuccessorStatement)
     );
     // The simulation already asserted the successor wins the
-    // dual-publish derivation via the proof (not zone-state luck).
+    // dual-publish derivation via the proof (not zone-state luck);
+    // the postcondition states the continuity claim explicitly.
+    assert!(plan.postconditions.iter().any(|p| matches!(
+        p,
+        Postcondition::VerifiesFresh(fresh)
+            if fresh.document == doc(5) && fresh.generation == generation(6)
+    )));
     Ok(())
 }
 
@@ -209,6 +282,57 @@ fn refresh_is_keyless_and_zone_untouched() -> TestResult {
 
     assert!(refreshed.dns_ops.is_empty(), "refresh never touches DNS");
     assert_eq!(refreshed.artifacts.len(), 1);
+
+    // The refresh actually happened: the artifact decodes, is the
+    // SAME certificate (untouched signed region), and carries the
+    // new chain rather than the bind's empty one.
+    let original = onomancy_dnssec::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
+    let refreshed_cert =
+        onomancy_dnssec::certificate::Certificate::decode(&refreshed.artifacts[0].bytes)?;
+    assert!(
+        original.same_certificate(&refreshed_cert),
+        "same signed region: no key was involved"
+    );
+    assert_eq!(
+        refreshed_cert.dnssec_chain().links().len(),
+        1,
+        "the fresh chain rode along"
+    );
+    assert!(
+        original.dnssec_chain().links().is_empty(),
+        "which the bind's certificate did not have"
+    );
+    Ok(())
+}
+
+/// The refresh's own pre-simulation refusal: records that prove a
+/// DIFFERENT document cannot refresh this certificate — the error a
+/// user hits when refreshing against the wrong zone fetch.
+#[test]
+fn refreshing_against_another_documents_records_derives_nothing() -> TestResult {
+    let bound = Bind {
+        hostname: hostname(),
+        document: doc(1),
+        generation: generation(2),
+        heads: vec![],
+        lineage: vec![],
+        carriage: DelegationChain::default(),
+    }
+    .plan(NOW_MS, &signer(1), &MemoryAuthority::default())?;
+    let certificate = onomancy_dnssec::certificate::Certificate::decode(&bound.artifacts[0].bytes)?;
+
+    // The zone fetch proves doc(9)'s record, not doc(1)'s.
+    let refused = Refresh {
+        certificate,
+        chain: onomancy_dnssec::chain::DnssecChain::from(vec![vec![0xAB; 8].into()]),
+        records: vec![TxtRecord::new(Serial::from(NOW_MS), generation(2), doc(9))],
+    }
+    .plan(
+        onomancy_core::time::UnixSeconds::from(NOW_MS / 1000),
+        &MemoryAuthority::default(),
+    );
+
+    assert_eq!(refused.unwrap_err(), CeremonyError::DerivesNothing);
     Ok(())
 }
 

@@ -30,9 +30,42 @@ use onomancy_protocol::resolve::{
     resolution::{PartialReason, Resolution},
     resolve,
 };
-use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
 
-use crate::text::{self, Text};
+use crate::{
+    shapes::JsWalkOutcome,
+    text::{self, Text},
+};
+
+/// The `WalkOutcome` literals: one home, so the Rust that emits them
+/// and the TypeScript that declares them (`shapes.d.ts`) can be held
+/// together by the drift test below rather than by habit.
+///
+/// These strings are API. A rewording here is a breaking change to
+/// every `switch` downstream, whatever the `.d.ts` says.
+pub mod walk {
+    /// Every segment consumed; `document` names where the walk landed.
+    pub const RESOLVED: &str = "resolved";
+
+    /// The walk stopped short — the designed norm under partition.
+    pub const PARTIAL: &str = "partial";
+
+    /// A segment named no edge in the document it reached.
+    pub const DANGLING_SEGMENT: &str = "dangling segment";
+
+    /// The next hop's document is not held; `target` names it.
+    pub const UNSYNCED_TARGET: &str = "unsynced target";
+
+    /// A resolved walk whose root is the zone's word alone — the
+    /// certificate direction was not checked.
+    pub const ZONE_ONLY: &str = "zone-only";
+
+    /// The published `WalkStatus` union, for the drift test.
+    pub const STATUSES: &[&str] = &[RESOLVED, PARTIAL];
+
+    /// The published `PartialWalkReason` union, for the drift test.
+    pub const PARTIAL_REASONS: &[&str] = &[DANGLING_SEGMENT, UNSYNCED_TARGET];
+}
 
 /// A browser-held document set: the anchoring and replication
 /// substrate a real agent would sync, reduced to in-memory documents
@@ -197,7 +230,7 @@ impl JsHeldDocuments {
         name: &Text,
         root: Option<Text>,
         doh_url: Option<Text>,
-    ) -> Result<JsValue, JsError> {
+    ) -> Result<JsWalkOutcome, JsError> {
         let name = text::read(name, "a name")?;
         let name = SupportedName::parse(&name).map_err(|error| JsError::new(&error.to_string()))?;
 
@@ -223,21 +256,8 @@ impl JsHeldDocuments {
             held = held.with(*anchor, doc.clone());
         }
         let Some(root_namestore) = held.replica(&root_anchor) else {
-            let verdict = js_sys::Object::new();
-            set(&verdict, "status", &JsValue::from_str("partial"));
-            set(&verdict, "consumed", &JsValue::from_f64(0.0));
-            set(
-                &verdict,
-                "total",
-                &JsValue::from_f64(cast_len(name.segments().len())),
-            );
-            set(&verdict, "reason", &JsValue::from_str("unsynced target"));
-            set(
-                &verdict,
-                "target",
-                &JsValue::from_str(&anchor_string(&root_anchor)),
-            );
-            return Ok(verdict.into());
+            // An unheld ROOT is the same partial as any unsynced hop.
+            return Ok(unsynced_root(name.segments().len(), &root_anchor));
         };
 
         // Track hops so the outcome names where the walk landed.
@@ -249,7 +269,7 @@ impl JsHeldDocuments {
         let verdict = js_sys::Object::new();
         match resolve(root_namestore, name.segments(), &tracking) {
             Resolution::Resolved { authority, .. } => {
-                set(&verdict, "status", &JsValue::from_str("resolved"));
+                set(&verdict, "status", &JsValue::from_str(walk::RESOLVED));
                 set(&verdict, "authority", &JsValue::from_str(authority.label()));
                 // The zone's word is one direction; the certificate
                 // direction is verifyBinding's check. Said on the
@@ -257,7 +277,11 @@ impl JsHeldDocuments {
                 // `status: "resolved"` must be able to see that the
                 // anchor itself is unauthenticated.
                 if zone_anchored {
-                    set(&verdict, "anchorAuthority", &JsValue::from_str("zone-only"));
+                    set(
+                        &verdict,
+                        "anchorAuthority",
+                        &JsValue::from_str(walk::ZONE_ONLY),
+                    );
                 }
                 // The browser has no keyhive route yet: every grade
                 // here is the dev bridge's, and says so.
@@ -280,7 +304,7 @@ impl JsHeldDocuments {
                 }
             }
             Resolution::Partial { consumed, reason } => {
-                set(&verdict, "status", &JsValue::from_str("partial"));
+                set(&verdict, "status", &JsValue::from_str(walk::PARTIAL));
                 set(&verdict, "consumed", &JsValue::from_f64(cast_len(consumed)));
                 set(
                     &verdict,
@@ -289,10 +313,18 @@ impl JsHeldDocuments {
                 );
                 match reason {
                     PartialReason::DanglingSegment => {
-                        set(&verdict, "reason", &JsValue::from_str("dangling segment"));
+                        set(
+                            &verdict,
+                            "reason",
+                            &JsValue::from_str(walk::DANGLING_SEGMENT),
+                        );
                     }
                     PartialReason::UnsyncedTarget { target } => {
-                        set(&verdict, "reason", &JsValue::from_str("unsynced target"));
+                        set(
+                            &verdict,
+                            "reason",
+                            &JsValue::from_str(walk::UNSYNCED_TARGET),
+                        );
                         set(
                             &verdict,
                             "target",
@@ -302,7 +334,7 @@ impl JsHeldDocuments {
                 }
             }
         }
-        Ok(verdict.into())
+        Ok(verdict.unchecked_into())
     }
 }
 
@@ -419,6 +451,26 @@ impl Replicas for Tracking<'_> {
     }
 }
 
+/// The partial outcome for an unheld root: `consumed: 0`, the root
+/// anchor as the unsynced target.
+fn unsynced_root(total: usize, root_anchor: &DocAnchor) -> JsWalkOutcome {
+    let verdict = js_sys::Object::new();
+    set(&verdict, "status", &JsValue::from_str(walk::PARTIAL));
+    set(&verdict, "consumed", &JsValue::from_f64(0.0));
+    set(&verdict, "total", &JsValue::from_f64(cast_len(total)));
+    set(
+        &verdict,
+        "reason",
+        &JsValue::from_str(walk::UNSYNCED_TARGET),
+    );
+    set(
+        &verdict,
+        "target",
+        &JsValue::from_str(&anchor_string(root_anchor)),
+    );
+    verdict.unchecked_into()
+}
+
 /// An anchor in its printed `automerge:…` form.
 fn anchor_string(anchor: &DocAnchor) -> String {
     format!("{}{anchor}", doc::SCHEME_PREFIX)
@@ -457,4 +509,74 @@ const fn cast_len(len: usize) -> f64 {
 /// `Reflect::set` on a fresh plain object cannot fail.
 fn set(object: &js_sys::Object, key: &str, value: &JsValue) {
     drop(Reflect::set(object, &JsValue::from_str(key), value));
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::walk;
+
+    /// Every literal Rust emits must be declared to TypeScript, and
+    /// every declared member must be one Rust emits — the same
+    /// bidirectional drift test the refusal codes have, because these
+    /// strings are the same kind of load-bearing API: `browser.rs`
+    /// and the Playwright specs both `switch` on them.
+    #[test]
+    fn the_declared_walk_unions_match_the_emitted_literals() {
+        for (name, emitted) in [
+            ("WalkStatus", walk::STATUSES),
+            ("PartialWalkReason", walk::PARTIAL_REASONS),
+        ] {
+            let declared = declared_union(name);
+
+            for literal in emitted {
+                assert!(
+                    declared.contains(literal),
+                    "`{literal}` is emitted by Rust but absent from {name}"
+                );
+            }
+
+            for member in &declared {
+                assert!(
+                    emitted.contains(member),
+                    "`{member}` is declared in {name} but no Rust path emits it"
+                );
+            }
+        }
+    }
+
+    /// The `zone-only` marker is declared where it is emitted: on the
+    /// resolved arm of `WalkOutcome`, verbatim.
+    #[test]
+    fn the_zone_only_marker_is_declared() {
+        assert!(
+            crate::shapes::TYPES.contains(&format!("\"{}\"", walk::ZONE_ONLY)),
+            "`{}` is emitted but not declared in shapes.d.ts",
+            walk::ZONE_ONLY
+        );
+    }
+
+    /// The members of one published union, by quoted string only —
+    /// same parser discipline as the refusal drift test: a substring
+    /// search over the whole file would match OTHER unions.
+    fn declared_union(name: &str) -> Vec<&'static str> {
+        let after = crate::shapes::TYPES
+            .split(&format!("export type {name} ="))
+            .nth(1)
+            .unwrap_or_else(|| panic!("{name} is declared"));
+
+        after
+            .split(';')
+            .next()
+            .expect("the union terminates")
+            .split('|')
+            .filter_map(|part| {
+                let opening = part.find('"')?;
+                let rest = part.get(opening + 1..)?;
+                let closing = rest.find('"')?;
+
+                rest.get(..closing)
+            })
+            .collect()
+    }
 }

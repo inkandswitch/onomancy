@@ -136,6 +136,23 @@ impl From<Vec<u8>> for SignedDelegationBytes {
 mod tests {
     use super::*;
 
+    /// A count the input cannot back fails before any entry
+    /// allocation — the "trust the count" mutation the decode doc
+    /// comment warns about.
+    #[test]
+    fn hostile_counts_are_rejected_before_allocation() {
+        let mut bytes = Vec::new();
+        wire::put_varint(&mut bytes, 5); // declares 5 entries, provides 0
+
+        assert!(matches!(
+            DelegationChain::read_framed(&bytes),
+            Err(WireError::LengthOverrun {
+                declared: 5,
+                have: 0
+            })
+        ));
+    }
+
     mod props {
         use super::*;
 
@@ -161,6 +178,32 @@ mod tests {
                     reader.finish().expect("fully consumed");
 
                     assert_eq!(chain, decoded);
+                });
+        }
+
+        /// The framed (file-format) entry points roundtrip, and the
+        /// one behavior `read_framed` adds over `decode` — trailing
+        /// bytes are rejected — holds for every chain.
+        #[test]
+        fn framed_roundtrip_rejects_trailing_bytes() {
+            bolero::check!()
+                .with_type::<Vec<Vec<u8>>>()
+                .for_each(|blobs| {
+                    let chain: DelegationChain = blobs
+                        .iter()
+                        .cloned()
+                        .map(SignedDelegationBytes::from)
+                        .collect();
+
+                    let mut buf = Vec::new();
+                    chain.write_framed(&mut buf);
+                    assert_eq!(DelegationChain::read_framed(&buf), Ok(chain));
+
+                    buf.push(0);
+                    assert_eq!(
+                        DelegationChain::read_framed(&buf),
+                        Err(WireError::TrailingBytes { extra: 1 })
+                    );
                 });
         }
     }

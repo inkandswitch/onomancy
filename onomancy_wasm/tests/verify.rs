@@ -184,6 +184,52 @@ fn garbage_is_refused_without_panicking() {
     assert_eq!(reason_of(&empty), "malformed");
 }
 
+/// A malformed-but-string hostname carries `invalid-hostname` through
+/// the JS entry points — the same code `resolveHostname` gives for
+/// the same input, previously pinned only at the mapping level.
+#[wasm_bindgen_test]
+fn a_malformed_hostname_is_refused_with_its_own_code() {
+    for bad in ["not a hostname!", ""] {
+        let Err(refused) = verify_certificate(CERT, &host(bad), Some(YEARS_LATER)) else {
+            panic!("{bad:?} is not a hostname");
+        };
+        assert_eq!(reason_of(&refused), "invalid-hostname");
+
+        let Err(via_binding) = verify_binding(
+            &JsHeldDocuments::new(),
+            &host("automerge:2nBeEMDjAzFa9Ev2pxwejYrgCRmSLx96SbA24uhdMMTUktJWvK"),
+            &host(bad),
+            Some(YEARS_LATER),
+        ) else {
+            panic!("{bad:?} is not a hostname via the binding path either");
+        };
+        assert_eq!(reason_of(&via_binding), "invalid-hostname");
+    }
+}
+
+/// One flipped signature byte in the frozen capture reads as
+/// `invalid-signature` — someone altered this — never `malformed`,
+/// which says "you sent the wrong buffer" and points a caller under
+/// attack at their own wiring.
+#[wasm_bindgen_test]
+fn a_tampered_signature_is_a_security_signal_not_a_wiring_bug() {
+    let cert =
+        onomancy_dnssec::certificate::Certificate::decode(CERT).expect("the capture decodes");
+
+    // The signature is the 64 bytes after the signed region; flip
+    // the first of them, computed rather than hardcoded so a layout
+    // change moves the flip with it.
+    let mut tampered = CERT.to_vec();
+    let at = cert.signed_bytes().len();
+    tampered[at] ^= 0x01;
+
+    let Err(refused) = verify_certificate(&tampered, &host("brooklynzelenka.com"), None) else {
+        panic!("a tampered signature cannot verify");
+    };
+
+    assert_eq!(reason_of(&refused), "invalid-signature");
+}
+
 #[wasm_bindgen_test]
 fn a_non_string_hostname_is_a_plain_error() {
     // Not `RuntimeError: memory access out of bounds`: the parameter
@@ -193,7 +239,7 @@ fn a_non_string_hostname_is_a_plain_error() {
     };
 
     let message = value
-        .unchecked_into::<js_sys::Error>()
+        .unchecked_ref::<js_sys::Error>()
         .message()
         .as_string()
         .unwrap_or_default();
@@ -201,6 +247,15 @@ fn a_non_string_hostname_is_a_plain_error() {
     assert!(
         message.contains("must be a string"),
         "expected a type error, got: {message}"
+    );
+
+    // Reason-absence IS the published discriminator: a type error is
+    // "you passed the wrong kind of thing", not a finding.
+    assert!(
+        js_sys::Reflect::get(&value, &JsValue::from_str("reason"))
+            .expect("readable")
+            .is_undefined(),
+        "a type error must not carry a reason code"
     );
 }
 
@@ -360,6 +415,47 @@ fn an_empty_document_is_absence_with_its_own_code() {
         panic!("an unheld document holds no certificate");
     };
     assert_eq!(reason_of(&unheld), "no-certificate-held");
+}
+
+/// A refused certificate FOR the requested hostname surfaces its own
+/// refusal — never `no-certificate-held`.
+///
+/// The distinction is revocation vs absence, and the wrong side of it
+/// is the wrong-remedy failure this module's design exists to
+/// prevent: a fresh chain with an off-path generation is the zone
+/// saying the key was rotated away, and a caller told "no certificate
+/// held" would go looking for replication problems while holding the
+/// evidence of revocation. This is the only test that reaches the
+/// `refusal_for_this_hostname` arm; dropping the `get_or_insert`
+/// falls through to absence and fails here.
+#[wasm_bindgen_test]
+fn a_refused_certificate_for_this_hostname_is_not_absence() {
+    let cert = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
+        .expect("the record-made capture decodes");
+    let anchor = format!("automerge:{}", cert.root_doc());
+
+    let mut doc = automerge::Automerge::new();
+    onomancy_automerge::certificates::put(&mut doc, &cert).expect("stored at the reserved key");
+
+    let mut held = JsHeldDocuments::new();
+    held.hold(&host(&anchor), &doc.save()).expect("held");
+
+    // Inside the certificate's own window, where an off-path
+    // generation is refused outright rather than graded provisional.
+    let Err(refused) = verify_binding(
+        &held,
+        &host(&anchor),
+        &host("brooklynzelenka.com"),
+        Some(MID_OFF_PATH_WINDOW),
+    ) else {
+        panic!("a fresh off-path certificate must be refused through the binding path");
+    };
+
+    assert_eq!(
+        reason_of(&refused),
+        "generation-off-path",
+        "revocation must not be mislabeled as absence"
+    );
 }
 
 /// A document that binds OTHER hostnames is honest absence for this

@@ -43,4 +43,8 @@ extern "C" {
     /// A live DNSSEC walk's result, as published to TypeScript.
     #[wasm_bindgen(typescript_type = "Resolution")]
     pub type JsResolution;
+
+    /// A resolution walk's outcome, as published to TypeScript.
+    #[wasm_bindgen(typescript_type = "WalkOutcome")]
+    pub type JsWalkOutcome;
 }

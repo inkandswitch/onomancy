@@ -291,17 +291,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn off_length_payloads_are_rejected_distinctly_from_legacy_ids() {
+        // Neither a legacy 16-byte ID nor a 32-byte key.
+        let odd = bs58::encode(&[9u8; 20]).with_check().into_string();
+        assert_eq!(
+            DocAnchor::parse(&odd),
+            Err(ParseDocAnchorError::WrongLength)
+        );
+    }
+
+    /// 32 bytes that pass the checksum but decompress to no curve
+    /// point are their own failure, not a length or checksum error.
+    #[test]
+    fn non_curve_points_are_rejected_as_such() {
+        let non_point = non_curve_point_bytes();
+        let encoded = bs58::encode(&non_point).with_check().into_string();
+        assert_eq!(
+            DocAnchor::parse(&encoded),
+            Err(ParseDocAnchorError::NotACurvePoint)
+        );
+    }
+
+    #[test]
+    fn head_errors_distinguish_checksum_from_length() {
+        assert_eq!(
+            Head::parse("not-base58-0OIl"),
+            Err(ParseHeadError::MalformedBase58Check)
+        );
+
+        let short = bs58::encode(&[7u8; 16]).with_check().into_string();
+        assert_eq!(Head::parse(&short), Err(ParseHeadError::WrongLength));
+    }
+
+    /// The manual `Ord` is byte order — a reversed or constant `cmp`
+    /// mutation dies here.
+    #[test]
+    fn anchors_order_by_key_bytes() {
+        let low = DocAnchor::from(vector_key());
+        let high = DocAnchor::from(SigningKey::from_bytes(&[8u8; 32]).verifying_key());
+
+        assert_eq!(
+            low.cmp(&high),
+            low.verifying_key()
+                .as_bytes()
+                .cmp(high.verifying_key().as_bytes())
+        );
+        assert_eq!(low.cmp(&low), core::cmp::Ordering::Equal);
+        assert_eq!(low.cmp(&high), high.cmp(&low).reverse());
+    }
+
+    /// The first constant-fill 32-byte array that fails ed25519 point
+    /// decompression (about half the byte space does): a deterministic
+    /// non-point without hardcoding curve internals.
+    fn non_curve_point_bytes() -> [u8; 32] {
+        (0u8..=255)
+            .map(|b| [b; 32])
+            .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+            .expect("some constant fill fails decompression")
+    }
+
     mod props {
         use super::*;
 
         #[test]
         fn encode_decode_roundtrip_from_raw_bytes() {
             bolero::check!().with_type::<[u8; 32]>().for_each(|bytes| {
-                if let Ok(key) = VerifyingKey::from_bytes(bytes) {
-                    let anchor = DocAnchor::from(key);
-                    let reparsed =
-                        DocAnchor::parse(&anchor.to_string()).expect("printed keys reparse");
-                    assert_eq!(anchor, reparsed);
+                let encoded = bs58::encode(bytes).with_check().into_string();
+
+                match VerifyingKey::from_bytes(bytes) {
+                    Ok(key) => {
+                        let anchor = DocAnchor::from(key);
+                        let reparsed =
+                            DocAnchor::parse(&anchor.to_string()).expect("printed keys reparse");
+                        assert_eq!(anchor, reparsed);
+                        assert_eq!(anchor.to_string(), encoded);
+                    }
+                    // The negative arm: non-points fail as exactly
+                    // NotACurvePoint, never some other shape.
+                    Err(_) => assert_eq!(
+                        DocAnchor::parse(&encoded),
+                        Err(ParseDocAnchorError::NotACurvePoint)
+                    ),
                 }
             });
         }

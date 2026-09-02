@@ -109,4 +109,36 @@ mod tests {
         let rdata = vec![0x00, 0x01, 8, 2];
         assert!(matches!(Ds::parse(&rdata), Err(ParseDsError::EmptyDigest)));
     }
+
+    #[test]
+    fn truncated_headers_are_rejected() {
+        assert!(matches!(
+            Ds::parse(&[0x00, 0x01, 8]),
+            Err(ParseDsError::Truncated(_))
+        ));
+    }
+
+    /// Parse-don't-validate layering: a SHA-256 DS with a wrong-width
+    /// digest PARSES here (the wire reflects the wire) and fails
+    /// downstream at `DsDigest::matches_wire`, which arbitrates.
+    #[test]
+    fn wrong_width_digests_parse_then_fail_to_match() {
+        use crate::crypto::ds_digest::DsDigest;
+        use onomancy_core::digest::Digest;
+
+        let mut rdata = Vec::new();
+        rdata.extend_from_slice(&38696u16.to_be_bytes());
+        rdata.push(8);
+        rdata.push(2);
+        rdata.extend_from_slice(&[0xCD; 31]); // one byte short
+
+        let ds = Ds::parse(&rdata).expect("the frame is legal DNS");
+        assert_eq!(ds.digest().len(), 31);
+
+        let computed = DsDigest::Sha256(Digest::from_bytes([0xCD; 32]));
+        assert!(
+            !computed.matches_wire(ds.digest_type(), ds.digest()),
+            "a 31-byte digest can never equal a 32-byte commitment"
+        );
+    }
 }

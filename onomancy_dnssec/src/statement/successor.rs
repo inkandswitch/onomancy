@@ -344,6 +344,44 @@ mod tests {
     }
 
     #[test]
+    fn trailing_bytes_are_rejected() {
+        let mut bytes = sample().encode();
+        bytes.push(0);
+        assert!(matches!(
+            SuccessorStatement::decode(&bytes),
+            Err(DecodeSuccessorError::Wire(WireError::TrailingBytes {
+                extra: 1
+            }))
+        ));
+    }
+
+    /// Each of the three key positions surfaces a non-point as ITS
+    /// field — the grammar check precedes the signature check.
+    #[test]
+    fn non_curve_points_name_their_field() {
+        let non_point: [u8; 32] = (0u8..=255)
+            .map(|b| [b; 32])
+            .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+            .expect("some constant fill fails decompression");
+
+        for (position, field) in [
+            (0, FieldName::PredecessorDoc),
+            (1, FieldName::SuccessorDoc),
+            (2, FieldName::Signer),
+        ] {
+            let mut bytes = sample().encode();
+            let at = 4 + position * 32;
+            bytes[at..at + 32].copy_from_slice(&non_point);
+
+            assert_eq!(
+                SuccessorStatement::decode(&bytes),
+                Err(DecodeSuccessorError::NotACurvePoint { field }),
+                "field {field:?}"
+            );
+        }
+    }
+
+    #[test]
     fn hostname_tampering_fails_the_signature() {
         // Same-length, still-canonical hostname swap must be caught by
         // the signature check at decode.
@@ -365,12 +403,24 @@ mod tests {
     mod props {
         use super::*;
 
-        /// Byte identity: sign → encode → decode → encode.
+        /// Byte identity: sign → encode → decode → encode. The
+        /// hostname varies in length so the `hostname_len` varint
+        /// framing is exercised, not just one fixed width.
         #[test]
         fn encode_decode_byte_identity() {
             bolero::check!()
-                .with_type::<(u8, u8, u8, Vec<Vec<u8>>)>()
-                .for_each(|(a, b, c, blobs)| {
+                .with_type::<(u8, u8, u8, u8, Vec<Vec<u8>>)>()
+                .for_each(|(a, b, c, host_pick, blobs)| {
+                    let hostnames = [
+                        "a.io",
+                        "expede.wtf",
+                        "deep.sub.domain.example.com",
+                        "xn--80ak6aa92e.com",
+                    ];
+                    let hostname =
+                        DnsName::parse(hostnames[usize::from(*host_pick) % hostnames.len()])
+                            .expect("fixture hostnames are valid");
+
                     let authority: DelegationChain = blobs
                         .iter()
                         .cloned()
@@ -380,7 +430,7 @@ mod tests {
                     let statement = SuccessorStatement::sign(
                         &doc(*a),
                         &doc(*b),
-                        &host(),
+                        &hostname,
                         &SigningKey::from_bytes(&[*c; 32]),
                         authority.clone(),
                     )
@@ -391,6 +441,7 @@ mod tests {
                     assert_eq!(statement, decoded);
                     assert_eq!(bytes, decoded.encode(), "byte identity");
                     assert_eq!(decoded.authority(), &authority);
+                    assert_eq!(decoded.hostname(), &hostname);
                 });
         }
 

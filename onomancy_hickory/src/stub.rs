@@ -54,6 +54,12 @@ impl StubResolver {
         Self { timeout, ..self }
     }
 
+    /// The upstream this stub queries.
+    #[must_use]
+    pub const fn server(&self) -> SocketAddr {
+        self.server
+    }
+
     /// Answer one of the chain builder's questions, returning the
     /// answer-section records.
     ///

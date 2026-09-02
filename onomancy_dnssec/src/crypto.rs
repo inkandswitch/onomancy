@@ -226,12 +226,211 @@ pub enum VerifyError {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+    /// RFC 4035 §5.3.2 signed data for one A record, hand-assembled
+    /// for the RFC 5702/6605 worked examples (owner
+    /// `www.example.net.`, signer `example.net.`, TTL 3600).
+    fn rfc_signed_data(
+        algorithm: Algorithm,
+        expiration: u32,
+        inception: u32,
+        key_tag: u16,
+        address: [u8; 4],
+    ) -> Vec<u8> {
+        let mut message = Vec::new();
+        // RRSIG preamble: covered A(1), algorithm, labels 3, orig TTL.
+        message.extend_from_slice(&1u16.to_be_bytes());
+        message.push(algorithm.code());
+        message.push(3);
+        message.extend_from_slice(&3600u32.to_be_bytes());
+        message.extend_from_slice(&expiration.to_be_bytes());
+        message.extend_from_slice(&inception.to_be_bytes());
+        message.extend_from_slice(&key_tag.to_be_bytes());
+        message.extend_from_slice(b"\x07example\x03net\x00");
+        // The one A record in canonical form.
+        message.extend_from_slice(b"\x03www\x07example\x03net\x00");
+        message.extend_from_slice(&1u16.to_be_bytes()); // type A
+        message.extend_from_slice(&1u16.to_be_bytes()); // class IN
+        message.extend_from_slice(&3600u32.to_be_bytes());
+        message.extend_from_slice(&4u16.to_be_bytes());
+        message.extend_from_slice(&address);
+        message
+    }
+
+    /// RFC 5702 §6.1: a genuine RSA/SHA-256 signature made by another
+    /// implementation — the algorithm of the actual DNS root zone.
+    /// A wiring bug (wrong hash, wrong padding, exponent/modulus
+    /// swapped) fails closed and would brick every real-root
+    /// validation; this is the test that notices.
+    #[test]
+    fn the_rfc5702_rsa_sha256_vector_verifies() {
+        let key_blob = BASE64
+            .decode(
+                "AwEAAcFcGsaxxdgiuuGmCkVImy4h99CqT7jwY3pexPGcnUFtR2Fh36Bponcwtk\
+                 Z4cAgtvd4Qs8PkxUdp6p/DlUmObdk=",
+            )
+            .expect("published key decodes");
+        let signature = BASE64
+            .decode(
+                "kRCOH6u7l0QGy9qpC9l1sLncJcOKFLJ7GhiUOibu4teYp5VE9RncriShZNz85m\
+                 wlMgNEacFYK/lPtPiVYP4bwg==",
+            )
+            .expect("published signature decodes");
+
+        // 20300101000000 / 20000101000000 as epoch seconds; tag 9033;
+        // www.example.net. A 192.0.2.91.
+        let message = rfc_signed_data(
+            Algorithm::RSA_SHA256,
+            1_893_456_000,
+            946_684_800,
+            9033,
+            [192, 0, 2, 91],
+        );
+
+        assert_eq!(
+            verify_signature(Algorithm::RSA_SHA256, &key_blob, &message, &signature),
+            Ok(())
+        );
+
+        // One flipped message byte fails as BadSignature, never panics.
+        let mut tampered = message;
+        tampered[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(Algorithm::RSA_SHA256, &key_blob, &tampered, &signature),
+            Err(VerifyError::BadSignature)
+        );
+    }
+
+    /// RFC 6605 §6.1: a genuine ECDSA P-256 signature — pins the two
+    /// hand-rolled format details (the 0x04 SEC1 prefix prepend and
+    /// fixed-width `r ‖ s` parsing).
+    #[test]
+    fn the_rfc6605_p256_vector_verifies() {
+        let key_blob = BASE64
+            .decode(
+                "GojIhhXUN/u4v54ZQqGSnyhWJwaubCvTmeexv7bR6edbkrSqQpF64cYbcB7wNc\
+                 P+e+MAnLr+Wi9xMWyQLc8NAA==",
+            )
+            .expect("published key decodes");
+        let signature = BASE64
+            .decode(
+                "qx6wLYqmh+l9oCKTN6qIc+bw6ya+KJ8oMz0YP107epXAyGmt+3SNruPFKG7tZo\
+                 LBLlUzGGus7ZwmwWep666VCw==",
+            )
+            .expect("published signature decodes");
+
+        // 20100909100439 / 20100812100439 as epoch seconds; tag 55648;
+        // www.example.net. A 192.0.2.1.
+        let message = rfc_signed_data(
+            Algorithm::ECDSA_P256_SHA256,
+            1_284_026_679,
+            1_281_607_479,
+            55648,
+            [192, 0, 2, 1],
+        );
+
+        assert_eq!(
+            verify_signature(
+                Algorithm::ECDSA_P256_SHA256,
+                &key_blob,
+                &message,
+                &signature
+            ),
+            Ok(())
+        );
+
+        // Bit flip → BadSignature.
+        let mut tampered = message.clone();
+        tampered[0] ^= 0x01;
+        assert_eq!(
+            verify_signature(
+                Algorithm::ECDSA_P256_SHA256,
+                &key_blob,
+                &tampered,
+                &signature
+            ),
+            Err(VerifyError::BadSignature)
+        );
+
+        // A 65-byte key (0x04 already prepended) is malformed — the
+        // DNS form is exactly the 64-byte point.
+        let mut prefixed = alloc::vec![0x04];
+        prefixed.extend_from_slice(&key_blob);
+        assert_eq!(
+            verify_signature(
+                Algorithm::ECDSA_P256_SHA256,
+                &prefixed,
+                &message,
+                &signature
+            ),
+            Err(VerifyError::MalformedKey)
+        );
+    }
+
+    /// The malformed-input arms of the Ed25519 path: a wrong-width
+    /// key is `MalformedKey`; a wrong-width signature is deliberately
+    /// indistinguishable from a failed one.
+    #[test]
+    fn ed25519_malformed_inputs_have_their_documented_shapes() {
+        let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]).verifying_key();
+
+        assert_eq!(
+            verify_signature(Algorithm::ED25519, &key.as_bytes()[..31], b"m", &[0; 64]),
+            Err(VerifyError::MalformedKey)
+        );
+        assert_eq!(
+            verify_signature(Algorithm::ED25519, key.as_bytes(), b"m", &[0; 63]),
+            Err(VerifyError::BadSignature)
+        );
+    }
 
     #[test]
     fn unsupported_algorithms_are_invalid_not_insecure() {
         assert_eq!(
             verify_signature(Algorithm::new(253), &[], b"m", &[]),
             Err(VerifyError::UnsupportedAlgorithm(Algorithm::new(253)))
+        );
+    }
+
+    /// The two invalid-✗ policy arms of `ds_matches`: an unsupported
+    /// digest type and a key/DS algorithm disagreement are both their
+    /// own refusals, never insecure-but-ok.
+    #[test]
+    fn ds_matching_refuses_unsupported_digests_and_mismatched_algorithms() {
+        let mut key_rdata = Vec::new();
+        key_rdata.extend_from_slice(&0x0100u16.to_be_bytes());
+        key_rdata.push(3);
+        key_rdata.push(Algorithm::ED25519.code());
+        key_rdata.extend_from_slice(&[7; 32]);
+        let key = Dnskey::parse(&key_rdata).expect("valid DNSKEY");
+        let owner: Name = "expede.wtf".parse().expect("parses");
+
+        // SHA-384 (type 4): representable on the wire, uncomputable here.
+        let mut sha384_ds = Vec::new();
+        sha384_ds.extend_from_slice(&key.key_tag().to_be_bytes());
+        sha384_ds.push(Algorithm::ED25519.code());
+        sha384_ds.push(4);
+        sha384_ds.extend_from_slice(&[0xAA; 48]);
+        let ds = Ds::parse(&sha384_ds).expect("parses");
+        assert_eq!(
+            ds_matches(&owner, &key, &ds),
+            Err(VerifyError::UnsupportedDigest(DigestType::new(4)))
+        );
+
+        // A DS claiming a different key algorithm.
+        let mut rsa_ds = Vec::new();
+        rsa_ds.extend_from_slice(&key.key_tag().to_be_bytes());
+        rsa_ds.push(Algorithm::RSA_SHA256.code());
+        rsa_ds.push(DigestType::SHA256.code());
+        rsa_ds.extend_from_slice(ds_digest(&owner, &key).as_bytes());
+        let ds = Ds::parse(&rsa_ds).expect("parses");
+        assert_eq!(
+            ds_matches(&owner, &key, &ds),
+            Err(VerifyError::AlgorithmMismatch {
+                key: Algorithm::ED25519,
+                signature: Algorithm::RSA_SHA256
+            })
         );
     }
 
@@ -277,5 +476,36 @@ mod tests {
 
         assert!(split_rsa_key(&[]).is_err());
         assert!(split_rsa_key(&[5, 1, 2]).is_err(), "exponent overrun");
+
+        // Zero-length exponents and empty moduli are refused too.
+        assert_eq!(
+            split_rsa_key(&[0, 0, 0, 9, 9]),
+            Err(VerifyError::MalformedKey),
+            "zero exponent length"
+        );
+        assert_eq!(
+            split_rsa_key(&[2, 1, 1]),
+            Err(VerifyError::MalformedKey),
+            "empty modulus"
+        );
+    }
+
+    mod props {
+        use super::*;
+
+        /// `split_rsa_key` is total, and on success the split is an
+        /// exact partition: header + exponent + modulus = blob.
+        #[test]
+        fn rsa_key_splitting_partitions_the_blob() {
+            bolero::check!().with_type::<Vec<u8>>().for_each(|blob| {
+                if let Ok((exponent, modulus)) = split_rsa_key(blob) {
+                    assert!(!exponent.is_empty());
+                    assert!(!modulus.is_empty());
+
+                    let header_len = if blob[0] == 0 { 3 } else { 1 };
+                    assert_eq!(header_len + exponent.len() + modulus.len(), blob.len());
+                }
+            });
+        }
     }
 }

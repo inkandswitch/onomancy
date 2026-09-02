@@ -15,12 +15,14 @@ use testresult::TestResult;
 
 use onomancy_protocol::{
     test_utils::{
-        Binding, binding, binding_carrying, doc, generation, host, rotation, signer, succession,
+        Binding, binding, binding_at, binding_carrying, doc, generation, host, host2, rotation,
+        succession,
     },
     verifier::state::{
         VerifierState,
-        binding_state::{BindingGrade, BindingState, ContinuityGrade},
+        binding_state::{BindingGrade, BindingState, ContinuityGrade, DivergenceSource},
         decisions::{Acceptance, Claim, Decisions},
+        diff::EventKind,
         memory::{authority::MemoryAuthority, validator::MemoryValidator},
         store::{Store, item::Item},
     },
@@ -28,32 +30,63 @@ use onomancy_protocol::{
 
 const NOW: u64 = 1_755_000_000;
 
+/// Serial deferral bound (5 minutes, ms convention) — mirrors the
+/// derivation's private `SKEW_MS` for the boundary scenarios.
+const SKEW_MS: u64 = 5 * 60 * 1000;
+
 fn run(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> BindingState {
+    derive_full(bindings, decisions, extra)
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The full derivation, for scenarios that diff two states or read
+/// more than one hostname. Bindings register under their own
+/// certificate hostname, so multi-host fixtures need no extra setup.
+fn derive_full(bindings: &[&Binding], decisions: &Decisions, extra: Vec<Item>) -> VerifierState {
     let mut validator = MemoryValidator::default();
     let mut store = Store::default();
 
     for b in bindings {
-        validator = validator.with(host(), &b.chain, b.proof.clone());
+        validator = validator.with(b.cert.hostname().clone(), &b.chain, b.proof.clone());
         store.insert(Item::Record(b.cert.clone()));
     }
     for item in extra {
         store.insert(item);
     }
 
-    let derivation = VerifierState::compute(
+    VerifierState::compute(
         &store,
         UnixSeconds::from(NOW),
         decisions,
         &Map::default(),
         &validator,
         &MemoryAuthority::default(),
-    );
+    )
+}
 
-    derivation
-        .bindings
-        .get(&host())
-        .cloned()
-        .unwrap_or_default()
+/// Nothing survived: the FULL default state — rejection is
+/// distinguishable from contested-masking (which also blanks
+/// `accepted`, but sets `contested` and may leave forks standing).
+fn assert_rejected(state: &BindingState) {
+    assert_eq!(
+        *state,
+        BindingState::default(),
+        "rejected evidence must leave no residue at all"
+    );
+}
+
+/// Contested-masked: the output is blanked BY the contest — the
+/// other way `accepted` reads `None`.
+fn assert_masked(state: &BindingState) {
+    assert!(state.contested, "masking requires a standing contest");
+    assert!(state.accepted.is_none(), "contested output is empty");
+    assert!(
+        state.effective_serial.is_none(),
+        "a masked output carries no serial"
+    );
 }
 
 fn accept(document: DocAnchor, cited: &Binding) -> Decisions {
@@ -96,7 +129,10 @@ fn sole_stale_first_contact_is_provisional_incumbent() -> TestResult {
     let state = run(&[&b], &Decisions::default(), vec![]);
 
     let accepted = state.accepted.expect("accepted");
+    assert_eq!(accepted.document, doc(1), "the sole candidate is the one");
     assert_eq!(accepted.grade, BindingGrade::Provisional);
+    assert_eq!(state.effective_serial, Some(Serial::from(100)));
+    assert!(!state.contested && state.pending.is_empty());
     Ok(())
 }
 
@@ -116,6 +152,7 @@ fn stale_unproven_challenger_is_pending_never_displacing() -> TestResult {
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(1), "incumbent stands");
     assert_eq!(state.pending, vec![doc(2)], "challenger quarantined");
+    assert!(!state.contested, "never displaces — and never masks either");
     Ok(())
 }
 
@@ -133,7 +170,38 @@ fn fresh_challenger_is_eligible_and_displaces() -> TestResult {
     let accepted = state.accepted.expect("accepted");
     assert_eq!(accepted.document, doc(2), "fresh evidence is eligible");
     assert_eq!(accepted.grade, BindingGrade::Confirmed);
+    assert_eq!(
+        accepted.continuity,
+        ContinuityGrade::Unproven,
+        "displacement without a proof path is surfaced as unproven — \
+         the grade that gates the use-time MUST-prompt (B4)"
+    );
     assert!(state.pending.is_empty());
+    Ok(())
+}
+
+#[test]
+fn a_b2_displacement_emits_a_binding_change_in_the_diff() -> TestResult {
+    // B2's spec text: "output changes; binding-change event in the
+    // diff". Derived states, not handcrafted ones: the incumbent
+    // stands alone, then the fresh challenger arrives.
+    let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
+    let challenger = binding(2, 22, 2, 999, (NOW - 100, NOW + 1000), 60)?;
+
+    let decisions = accept(doc(1), &incumbent);
+    let before = derive_full(&[&incumbent], &decisions, vec![]);
+    let after = derive_full(&[&incumbent, &challenger], &decisions, vec![]);
+
+    let events = after.diff(&before);
+    assert!(
+        events.iter().any(|event| event.hostname == host()
+            && event.kind
+                == EventKind::BindingChanged {
+                    from: Some(doc(1)),
+                    to: Some(doc(2)),
+                }),
+        "the displacement is an event-class binding change: {events:?}"
+    );
     Ok(())
 }
 
@@ -249,6 +317,50 @@ fn fresh_record_with_lower_serial_wins_and_resets_the_ratchet() -> TestResult {
         state.accepted.expect("accepted").grade,
         BindingGrade::Confirmed
     );
+    assert_eq!(
+        state.tenure,
+        Some(onomancy_protocol::test_utils::window(NOW - 5000, NOW + 500)),
+        "tenure spans the document's evidence: earliest inception to \
+         latest window end"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_derived_ratchet_reset_surfaces_as_serial_regression() -> TestResult {
+    // The diff the test above's name promises, from DERIVED states:
+    // stale-high alone, then the fresh-low record arrives. The serial
+    // moves 999 → 7 (event-class), and the same transition carries
+    // the grade move provisional → confirmed (badge-class).
+    let stale_high = binding(1, 11, 1, 999, (NOW - 5000, NOW - 1000), 50)?;
+    let fresh_low = binding(1, 11, 2, 7, (NOW - 500, NOW + 500), 60)?;
+
+    let before = derive_full(&[&stale_high], &Decisions::default(), vec![]);
+    let after = derive_full(&[&stale_high, &fresh_low], &Decisions::default(), vec![]);
+
+    let events = after.diff(&before);
+    assert!(
+        events.iter().any(|event| {
+            event.kind
+                == EventKind::SerialRegression {
+                    from: Serial::from(999),
+                    to: Serial::from(7),
+                }
+                && event.kind.may_prompt()
+        }),
+        "the downward serial is the surfaced ratchet reset: {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.kind
+                == EventKind::GradeChanged {
+                    from: BindingGrade::Provisional,
+                    to: BindingGrade::Confirmed,
+                }
+                && !event.kind.may_prompt()
+        }),
+        "the grade move rides the same diff, badge-class: {events:?}"
+    );
     Ok(())
 }
 
@@ -261,9 +373,7 @@ fn zone_equivocation_is_contested_with_empty_output() -> TestResult {
 
     let state = run(&[&a, &b], &Decisions::default(), vec![]);
 
-    assert!(state.contested);
-    assert!(state.accepted.is_none(), "contested output is empty");
-    assert!(state.effective_serial.is_none());
+    assert_masked(&state);
     Ok(())
 }
 
@@ -305,10 +415,7 @@ fn fresh_record_with_generation_off_path_is_rejected() -> TestResult {
         .get(&host())
         .cloned()
         .unwrap_or_default();
-    assert!(
-        state.accepted.is_none(),
-        "an off-path fresh record is rejected"
-    );
+    assert_rejected(&state);
     Ok(())
 }
 
@@ -377,7 +484,7 @@ fn far_future_serials_are_deferred() -> TestResult {
     )?;
 
     let state = run(&[&poisoned], &Decisions::default(), vec![]);
-    assert!(state.accepted.is_none(), "deferred, not considered");
+    assert_rejected(&state);
     Ok(())
 }
 
@@ -400,6 +507,11 @@ fn divergent_claims_badge_but_do_not_move_bindings() -> TestResult {
     assert_eq!(accepted.document, doc(1), "claims never move bindings");
     assert_eq!(state.divergence.len(), 1);
     assert_eq!(state.divergence[0].alleged, doc(3));
+    assert_eq!(
+        state.divergence[0].source,
+        DivergenceSource::Claim,
+        "the badge names its source — a claim, not a pin"
+    );
     Ok(())
 }
 
@@ -674,9 +786,9 @@ mod succession_fork_isolation {
         assert_eq!(state.succession_forks.len(), 1);
         assert_eq!(state.succession_forks[0].predecessor, doc(1));
         assert_eq!(
-            state.pending.len(),
-            2,
-            "both unproven branches badge pending"
+            state.pending,
+            vec![doc(2), doc(3)],
+            "both unproven branches badge pending — these two, exactly"
         );
         Ok(())
     }
@@ -685,17 +797,38 @@ mod succession_fork_isolation {
 mod props {
     use super::*;
 
+    /// Lehmer-code permutation: decode `code` into an arbitrary
+    /// reordering of `items` (Fisher–Yates driven by the code
+    /// digits). Reversal and rotation only ever explore `2n` of the
+    /// `n!` orders; this reaches all of them.
+    fn permute<T: Clone>(items: &[T], code: &[u8]) -> Vec<T> {
+        let mut pool: Vec<T> = items.to_vec();
+        let mut out = Vec::with_capacity(pool.len());
+
+        for (i, _) in items.iter().enumerate() {
+            let digit = usize::from(*code.get(i % code.len().max(1)).unwrap_or(&0));
+            let pick = digit % pool.len();
+            out.push(pool.remove(pick));
+        }
+
+        out
+    }
+
     /// Verification target 7: the derivation is a function of the
-    /// evidence SET — any permutation (here: reversal and rotation) of
-    /// store insertion order yields identical output. The pool
-    /// includes carried statements, standalone statements, resets, and
-    /// acceptances — the inputs that made the first implementation
-    /// order-dependent.
+    /// evidence SET — any permutation (reversal, rotation, and an
+    /// arbitrary Lehmer-coded shuffle) of store insertion order
+    /// yields identical output, and the diff between two permuted
+    /// derivations is empty. The pool includes carried statements,
+    /// standalone statements, resets, acceptances, a bare chain
+    /// refresh, a second hostname, and pins — the inputs that made
+    /// the first implementation order-dependent, plus the cross-host
+    /// interference surfaces.
     #[test]
+    #[allow(clippy::too_many_lines)] // one property, one pool: splitting hides the scenario
     fn derivation_is_insertion_order_insensitive() {
         bolero::check!()
-            .with_type::<(Vec<(u8, u8, u64, u64, bool)>, usize)>()
-            .for_each(|(specs, rotate_by)| {
+            .with_type::<(Vec<(u8, u8, u64, u64, bool)>, usize, Vec<u8>)>()
+            .for_each(|(specs, rotate_by, lehmer)| {
                 let bindings: Vec<Binding> = specs
                     .iter()
                     .take(6)
@@ -766,6 +899,36 @@ mod props {
                     .with(host(), &carrier_x.chain, carrier_x.proof.clone())
                     .with(host(), &carrier_y.chain, carrier_y.proof.clone());
 
+                // Cross-host interference surface: a binding at a
+                // second hostname, plus a bare refresh rider for the
+                // first one.
+                let elsewhere = binding_at(
+                    host2(),
+                    (specs[0].0 % 3) + 4,
+                    (specs[0].0 % 3) + 14,
+                    102,
+                    9,
+                    (NOW - 2000, NOW + 2000),
+                    3,
+                )
+                .expect("under the unit cap");
+                let refreshed = binding(
+                    specs[0].0 % 3,
+                    (specs[0].0 % 3) + 10,
+                    103,
+                    11,
+                    (NOW - 1500, NOW + 1500),
+                    4,
+                )
+                .expect("under the unit cap");
+                validator = validator
+                    .with(host2(), &elsewhere.chain, elsewhere.proof.clone())
+                    .with(host(), &refreshed.chain, refreshed.proof.clone());
+
+                let mut pins = Map::default();
+                pins.insert(host(), vec![doc(7)]);
+                pins.insert(host2(), vec![doc((specs[0].0 % 3) + 4)]);
+
                 let mut items: Vec<Item> = bindings
                     .iter()
                     .map(|b| Item::Record(b.cert.clone()))
@@ -773,6 +936,11 @@ mod props {
                 items.extend([
                     Item::Record(carrier_x.cert.clone()),
                     Item::Record(carrier_y.cert.clone()),
+                    Item::Record(elsewhere.cert.clone()),
+                    Item::ChainRefresh {
+                        hostname: host(),
+                        chain: refreshed.chain.clone(),
+                    },
                     Item::Rotation(carried),
                     Item::Rotation(rotation(specs[0].0 % 3, 41, 42).expect("under the unit cap")),
                     Item::Successor(
@@ -791,13 +959,14 @@ mod props {
                         .cloned()
                         .collect()
                 };
+                let shuffled: Store = permute(&items, lehmer).into_iter().collect();
 
                 let run = |store: &Store| {
                     VerifierState::compute(
                         store,
                         UnixSeconds::from(NOW),
                         &decisions,
-                        &Map::default(),
+                        &pins,
                         &validator,
                         &MemoryAuthority::default(),
                     )
@@ -806,6 +975,16 @@ mod props {
                 let baseline = run(&forward);
                 assert_eq!(baseline, run(&reversed), "reversal changed the verdict");
                 assert_eq!(baseline, run(&rotated), "rotation changed the verdict");
+
+                let shuffled_state = run(&shuffled);
+                assert_eq!(
+                    baseline, shuffled_state,
+                    "an arbitrary permutation changed the verdict"
+                );
+                assert!(
+                    baseline.diff(&shuffled_state).is_empty(),
+                    "permutations of one store must diff to nothing"
+                );
             });
     }
 }
@@ -833,8 +1012,9 @@ mod certificate_signer_authority {
             &Decisions::default(),
             &Map::default(),
             &validator,
-            // The cert builder signs with `signer(200 ^ doc_seed)`.
-            &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
+            // The certificate names its own signer — deny exactly that
+            // key, not a re-derivation of the factory's seed scheme.
+            &MemoryAuthority::default().deny(doc(1), b.cert.signer()),
         );
 
         let state = derivation
@@ -842,10 +1022,7 @@ mod certificate_signer_authority {
             .get(&host())
             .cloned()
             .unwrap_or_default();
-        assert!(
-            state.accepted.is_none(),
-            "an unauthorized signer's certificate must be inert"
-        );
+        assert_rejected(&state);
         Ok(())
     }
 }
@@ -935,6 +1112,11 @@ mod refresh_corroboration {
             BindingGrade::Confirmed,
             "the refresh's fresh window is what confirms"
         );
+        assert_eq!(
+            state.effective_serial,
+            Some(Serial::from(150)),
+            "the fresh refresh row is the document's ladder-best record"
+        );
         Ok(())
     }
 
@@ -975,10 +1157,7 @@ mod refresh_corroboration {
         .cloned()
         .unwrap_or_default();
 
-        assert_eq!(
-            state.accepted, None,
-            "a bare refresh must not confirm a binding whose certificate was rejected"
-        );
+        assert_rejected(&state);
         Ok(())
     }
 
@@ -1022,10 +1201,7 @@ mod refresh_corroboration {
         .cloned()
         .unwrap_or_default();
 
-        assert_eq!(
-            state.accepted, None,
-            "a bare refresh must not revive candidacy the rewind rule killed"
-        );
+        assert_rejected(&state);
         Ok(())
     }
 
@@ -1328,12 +1504,683 @@ mod fresh_rewinds {
             vec![Item::Rotation(rotation(1, 2, 3)?)],
         );
 
-        assert!(state.contested, "a 1-vs-1 equivocation is a contest");
-        assert_eq!(state.accepted, None, "masked while the fork stands");
+        assert_masked(&state);
         assert!(
             state.forks.iter().any(|f| f.at == generation(2)),
             "and surfaced"
         );
+        Ok(())
+    }
+}
+
+/// The two deferral causes and the skew boundary (stage 2: exclude
+/// and defer).
+mod deferral {
+    use super::*;
+
+    #[test]
+    fn not_yet_begun_windows_are_deferred() -> TestResult {
+        // The second `is_deferred` branch: a chain whose window has
+        // not begun is evidence not yet in force — not stale, not
+        // considered, nothing derived from it.
+        let early = binding(1, 11, 1, 100, (NOW + 1000, NOW + 2000), 50)?;
+
+        let state = run(&[&early], &Decisions::default(), vec![]);
+        assert_rejected(&state);
+        Ok(())
+    }
+
+    #[test]
+    fn the_skew_boundary_is_closed_at_exactly_skew() -> TestResult {
+        // Serials are compared in the millisecond convention against
+        // `now·1000 + SKEW`: exactly at the bound is considered;
+        // one past it defers. The `>` vs `>=` mutation lives here.
+        let at_bound = binding(1, 11, 1, NOW * 1000 + SKEW_MS, (NOW - 1000, NOW + 1000), 50)?;
+        let state = run(&[&at_bound], &Decisions::default(), vec![]);
+        assert_eq!(
+            state
+                .accepted
+                .expect("exactly at the bound is in force")
+                .document,
+            doc(1)
+        );
+
+        let past_bound = binding(
+            1,
+            11,
+            2,
+            NOW * 1000 + SKEW_MS + 1,
+            (NOW - 1000, NOW + 1000),
+            50,
+        )?;
+        let state = run(&[&past_bound], &Decisions::default(), vec![]);
+        assert_rejected(&state);
+        Ok(())
+    }
+}
+
+/// Spec row B3: a pending candidate is refuted by fresh evidence for
+/// the accepted binding — the badge clears without a prompt.
+mod spec_row_b3 {
+    use super::*;
+
+    // FIXME(spec B3): the pending badge does NOT clear when fresh
+    // evidence for the accepted binding refutes the challenger — the
+    // pending filter quarantines every stale, unproven, non-incumbent
+    // candidate unconditionally, so `PendingCleared` never fires on
+    // refutation. Spec row B3 says it must. This test pins CURRENT
+    // behavior so the eventual fix flips a visible assertion instead
+    // of changing silent behavior.
+    #[test]
+    fn pending_survives_refuting_fresh_evidence_pinning_the_b3_gap() -> TestResult {
+        let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
+        let challenger = binding(2, 22, 2, 999, (NOW - 1500, NOW - 100), 60)?;
+        let decisions = accept(doc(1), &incumbent);
+
+        let before = derive_full(&[&incumbent, &challenger], &decisions, vec![]);
+        let pending_before = before
+            .bindings
+            .get(&host())
+            .expect("derived")
+            .pending
+            .clone();
+        assert_eq!(
+            pending_before,
+            vec![doc(2)],
+            "B1: the challenger quarantines"
+        );
+
+        // Fresh evidence for the ACCEPTED binding arrives: rung 0 now
+        // refutes the challenger's later-key claim outright.
+        let refuting = binding(1, 11, 3, 120, (NOW - 500, NOW + 500), 70)?;
+        let after = derive_full(&[&incumbent, &challenger, &refuting], &decisions, vec![]);
+        let state = after.bindings.get(&host()).expect("derived").clone();
+
+        assert_eq!(
+            state.accepted.expect("incumbent confirmed").grade,
+            BindingGrade::Confirmed
+        );
+
+        // The spec-conformant assertions, inverted to pin the gap:
+        assert_eq!(
+            state.pending,
+            vec![doc(2)],
+            "FIXME(spec B3): should be empty — refuted challengers must \
+             leave quarantine"
+        );
+        let events = after.diff(&before);
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::PendingCleared(_))),
+            "FIXME(spec B3): should emit PendingCleared(doc 2), \
+             badge-class"
+        );
+        Ok(())
+    }
+}
+
+/// Spec row B6, the derivation-side half: claims are retained
+/// provenance — a matching claim diverges nothing, and a claim keeps
+/// its hostname in the universe.
+mod spec_row_b6 {
+    use super::*;
+
+    #[test]
+    fn a_claim_matching_the_accepted_binding_diverges_nothing() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+        let decisions = Decisions {
+            claims: vec![Claim {
+                hostname: host(),
+                document: doc(1), // matches the verified record
+                note: None,
+            }],
+            ..Decisions::default()
+        };
+
+        let state = run(&[&b], &decisions, vec![]);
+        assert_eq!(state.accepted.expect("accepted").document, doc(1));
+        assert!(
+            state.divergence.is_empty(),
+            "the verified record takes display precedence; the \
+             retained claim agrees, so no badge"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_claim_alone_keeps_its_hostname_in_the_universe() {
+        // No records anywhere: the claimed hostname must still get a
+        // derived (empty) state — claims are a universe input, so a
+        // caller can observe "claimed but unverified" as a hostname
+        // with no accepted binding rather than as a missing key.
+        let decisions = Decisions {
+            claims: vec![Claim {
+                hostname: host(),
+                document: doc(3),
+                note: None,
+            }],
+            ..Decisions::default()
+        };
+
+        let derivation = derive_full(&[], &decisions, vec![]);
+        let state = derivation
+            .bindings
+            .get(&host())
+            .expect("the claimed hostname is in the universe");
+        assert_eq!(*state, BindingState::default());
+    }
+
+    #[test]
+    fn a_claim_keeps_contributing_after_a_verified_record_arrives() -> TestResult {
+        // The claim is retained provenance: when the verified record
+        // later disagrees, the OLD claim must still badge — it was
+        // never consumed by the earlier agreement.
+        let first = binding(3, 33, 1, 100, (NOW - 9000, NOW - 5000), 40)?;
+        let displacing = binding(1, 11, 2, 200, (NOW - 500, NOW + 500), 60)?;
+
+        let decisions = Decisions {
+            claims: vec![Claim {
+                hostname: host(),
+                document: doc(3),
+                note: None,
+            }],
+            ..Decisions::default()
+        };
+
+        // While the record agrees with the claim: no divergence.
+        let state = run(&[&first], &decisions, vec![]);
+        assert!(state.divergence.is_empty());
+
+        // A fresh record for another document displaces: the retained
+        // claim now diverges from the new accepted binding.
+        let state = run(&[&first, &displacing], &decisions, vec![]);
+        assert_eq!(state.accepted.expect("accepted").document, doc(1));
+        assert_eq!(state.divergence.len(), 1);
+        assert_eq!(state.divergence[0].alleged, doc(3));
+        assert_eq!(state.divergence[0].source, DivergenceSource::Claim);
+        Ok(())
+    }
+}
+
+/// Spec row B8, the cross-hostname half: rotation exclusions are
+/// document-scoped (a reset at ANY hostname excludes the statement
+/// everywhere), while record exclusions stay hostname-scoped.
+mod spec_row_b8_cross_hostname {
+    use super::*;
+
+    #[test]
+    fn a_reset_at_another_hostname_excludes_a_rotation_everywhere() -> TestResult {
+        // Settled lineage G11→G12 makes G11 protected: the stale
+        // higher-key record attesting G11 is rewind-rejected and the
+        // G12 record wins. Excluding the rotation FROM A RESET AT A
+        // DIFFERENT HOSTNAME must lift that protection here too —
+        // rotation statements are document-scoped, and a user who
+        // reset the statement's evidence anywhere meant it everywhere.
+        let statement = rotation(1, 11, 12)?;
+        let old_gen = binding(1, 11, 1, 200, (NOW - 5000, NOW - 1000), 90)?;
+        let new_gen = binding(1, 12, 2, 50, (NOW - 6000, NOW - 2000), 10)?;
+
+        let with_statement = run(
+            &[&old_gen, &new_gen],
+            &Decisions::default(),
+            vec![Item::Rotation(statement.clone())],
+        );
+        assert_eq!(
+            with_statement.accepted.expect("accepted").generation,
+            generation(12),
+            "fixture sanity: with the rotation in force, the rewind is \
+             rejected and descent orders G12 first"
+        );
+
+        // The reset lives at host2 — a hostname with no evidence at
+        // all — and names the rotation statement.
+        let mut resets = Map::default();
+        let mut excluded = Set::default();
+        excluded.insert(Item::Rotation(statement.clone()).content_hash());
+        resets.insert(host2(), excluded);
+        let decisions = Decisions {
+            resets,
+            ..Decisions::default()
+        };
+
+        let state = run(
+            &[&old_gen, &new_gen],
+            &decisions,
+            vec![Item::Rotation(statement)],
+        );
+        assert_eq!(
+            state.accepted.expect("accepted").generation,
+            generation(11),
+            "the exclusion crossed hostnames: no lineage, no rewind \
+             rule, the higher key wins"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn record_exclusions_never_leak_across_hostnames() -> TestResult {
+        // The inverse scope rule: a reset at host2 naming a RECORD
+        // held for host() must not exclude it there — record
+        // exclusions apply at their natural (hostname) scope.
+        let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+        let mut resets = Map::default();
+        let mut excluded = Set::default();
+        excluded.insert(b.cert.digest().erase());
+        resets.insert(host2(), excluded);
+        let decisions = Decisions {
+            resets,
+            ..Decisions::default()
+        };
+
+        let state = run(&[&b], &decisions, vec![]);
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(1),
+            "a reset at another hostname does not touch this one's \
+             records"
+        );
+        Ok(())
+    }
+}
+
+/// Spec row B11: a fork implicating provisional support demotes and
+/// surfaces.
+mod spec_row_b11 {
+    use super::*;
+
+    #[test]
+    fn a_fork_implicating_provisional_support_stays_demoted_and_surfaces() -> TestResult {
+        // Provisional (stale-supported) binding on G12 under settled
+        // G11→G12. A competing statement G11→G13 then implicates the
+        // accepted generation. The output must not firm up or move
+        // silently: it stays provisional (demoted), the record
+        // survives (fork territory is surfaced, never silently
+        // rejected), and the fork rides the diff as an event-class
+        // change.
+        let rec = binding(1, 12, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
+        let settled = vec![Item::Rotation(rotation(1, 11, 12)?)];
+        let forked = vec![
+            Item::Rotation(rotation(1, 11, 12)?),
+            Item::Rotation(rotation(1, 11, 13)?),
+        ];
+
+        let before = derive_full(&[&rec], &Decisions::default(), settled);
+        let before_state = before.bindings.get(&host()).expect("derived");
+        assert_eq!(
+            before_state.accepted.expect("accepted").grade,
+            BindingGrade::Provisional,
+            "fixture sanity: stale support is provisional"
+        );
+        assert!(before_state.forks.is_empty());
+
+        let after = derive_full(&[&rec], &Decisions::default(), forked);
+        let state = after.bindings.get(&host()).expect("derived");
+
+        let accepted = state
+            .accepted
+            .expect("fork territory is surfaced, not blanked");
+        assert_eq!(accepted.generation, generation(12));
+        assert_eq!(
+            accepted.grade,
+            BindingGrade::Provisional,
+            "the output stays demoted while the fork stands"
+        );
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(11)),
+            "the implicating fork is surfaced"
+        );
+
+        let events = after.diff(&before);
+        assert!(
+            events.iter().any(|event| matches!(
+                event.kind,
+                EventKind::LineageForkSurfaced(fork) if fork.at == generation(11)
+            )),
+            "the fork's arrival is an event in the derived diff: {events:?}"
+        );
+        Ok(())
+    }
+}
+
+/// Spec row B13, second half: acceptances with zone-state-equal
+/// receipts for different documents are contested.
+mod receipt_tie_contest {
+    use super::*;
+
+    #[test]
+    fn zone_state_equal_receipts_for_different_documents_contest() -> TestResult {
+        // Two acceptances, each citing a record whose zone-state key
+        // is FULLY equal to the other's — the user's own records
+        // disagree, and no tiebreak may pick one silently.
+        let a = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
+        let b = binding(2, 22, 2, 100, (NOW - 5000, NOW - 1000), 50)?;
+
+        let mut decisions = accept(doc(1), &a);
+        let mut cited = Set::default();
+        cited.insert(b.cert.digest().erase());
+        decisions
+            .acceptances
+            .get_mut(&host())
+            .expect("acceptance entry")
+            .push(Acceptance {
+                document: doc(2),
+                cited,
+            });
+
+        let state = run(&[&a, &b], &decisions, vec![]);
+
+        assert_masked(&state);
+        assert!(
+            state.losing_acceptances.is_empty(),
+            "receipt ties are the contest itself, never losers"
+        );
+        Ok(())
+    }
+}
+
+/// Acceptance evaluability: not-held receipts wait, excluded receipts
+/// are inert, malformed receipts contribute nothing.
+mod acceptance_evaluability {
+    use super::*;
+
+    /// The fixture: an older acceptance-backed incumbent and a newer
+    /// stale challenger. When the acceptance is IN FORCE the incumbent
+    /// stands; whenever it is not, the ladder-maximal challenger wins.
+    fn contested_pair() -> Result<(Binding, Binding), onomancy_core::wire::OversizeUnit> {
+        Ok((
+            binding(1, 11, 1, 100, (NOW - 9000, NOW - 5000), 10)?,
+            binding(2, 22, 2, 200, (NOW - 4000, NOW - 1000), 20)?,
+        ))
+    }
+
+    fn acceptance_for(
+        document: DocAnchor,
+        cited: Set<onomancy_core::digest::Digest<onomancy_core::digest::Blake3, [u8]>>,
+    ) -> Decisions {
+        let mut acceptances = Map::default();
+        acceptances.insert(host(), vec![Acceptance { document, cited }]);
+        Decisions {
+            acceptances,
+            ..Decisions::default()
+        }
+    }
+
+    #[test]
+    fn the_control_shape_holds_the_incumbent() -> TestResult {
+        // Sanity for the module's fixture: with a well-formed,
+        // fully-held receipt the incumbent stands and the challenger
+        // is pending.
+        let (incumbent, challenger) = contested_pair()?;
+        let state = run(
+            &[&incumbent, &challenger],
+            &accept(doc(1), &incumbent),
+            vec![],
+        );
+        assert_eq!(state.accepted.expect("accepted").document, doc(1));
+        assert_eq!(state.pending, vec![doc(2)]);
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_citing_a_not_held_item_is_not_yet_evaluable() -> TestResult {
+        // The receipt names an item this store has never seen: the
+        // acceptance waits (not-yet-evaluable), so no incumbency —
+        // the ladder-maximal challenger wins on its later key.
+        let (incumbent, challenger) = contested_pair()?;
+        let never_held = binding(1, 11, 9, 999, (NOW - 100, NOW + 100), 99)?;
+
+        let mut cited = Set::default();
+        cited.insert(never_held.cert.digest().erase());
+        let state = run(
+            &[&incumbent, &challenger],
+            &acceptance_for(doc(1), cited),
+            vec![],
+        );
+
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(2),
+            "an unevaluable acceptance confers no incumbency"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_citing_a_reset_excluded_item_is_inert() -> TestResult {
+        // The receipt is held but reset-excluded: the acceptance is
+        // inert (B8's closure includes the receipts that relied on
+        // the excluded evidence).
+        let (incumbent, challenger) = contested_pair()?;
+
+        let mut decisions = accept(doc(1), &incumbent);
+        let mut excluded = Set::default();
+        excluded.insert(incumbent.cert.digest().erase());
+        decisions.resets.insert(host(), excluded);
+
+        let state = run(&[&incumbent, &challenger], &decisions, vec![]);
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(2),
+            "an inert acceptance confers no incumbency — and the \
+             excluded record itself is gone too"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_citing_a_non_record_item_is_malformed() -> TestResult {
+        // The cited item is HELD — but it is a rotation statement,
+        // not a record. Receipt shape requires records; malformed
+        // receipts contribute nothing.
+        let (incumbent, challenger) = contested_pair()?;
+        let statement = rotation(7, 71, 72)?;
+
+        let mut cited = Set::default();
+        cited.insert(incumbent.cert.digest().erase());
+        cited.insert(Item::Rotation(statement.clone()).content_hash());
+
+        let state = run(
+            &[&incumbent, &challenger],
+            &acceptance_for(doc(1), cited),
+            vec![Item::Rotation(statement)],
+        );
+
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(2),
+            "a receipt citing a non-record item is void"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_citing_another_hostnames_record_is_malformed() -> TestResult {
+        // Every cited item must be a record for THIS hostname: a
+        // receipt reaching across hostnames is malformed, however
+        // genuine the foreign record.
+        let (incumbent, challenger) = contested_pair()?;
+        let foreign = binding_at(host2(), 1, 11, 9, 300, (NOW - 4000, NOW - 1000), 30)?;
+
+        let mut cited = Set::default();
+        cited.insert(incumbent.cert.digest().erase());
+        cited.insert(foreign.cert.digest().erase());
+
+        let state = run(
+            &[&incumbent, &challenger, &foreign],
+            &acceptance_for(doc(1), cited),
+            vec![],
+        );
+
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(2),
+            "a cross-hostname receipt is void"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_whose_receipts_never_attest_its_document_is_malformed() -> TestResult {
+        // At least one cited record must attest the acceptance's own
+        // document: accepting doc(5) on the strength of doc(1)'s
+        // records is a shape error, not a choice.
+        let (incumbent, challenger) = contested_pair()?;
+
+        let mut cited = Set::default();
+        cited.insert(incumbent.cert.digest().erase());
+        let state = run(
+            &[&incumbent, &challenger],
+            &acceptance_for(doc(5), cited),
+            vec![],
+        );
+
+        assert_eq!(
+            state.accepted.expect("accepted").document,
+            doc(2),
+            "receipts that never attest the accepted document are void"
+        );
+        Ok(())
+    }
+}
+
+/// Pins: divergence badges and hostname-universe inclusion (the
+/// derivation's fourth input).
+mod pins {
+    use super::*;
+
+    fn derive_with_pins(
+        bindings: &[&Binding],
+        pins: &Map<onomancy_dnssec::dns_name::DnsName, Vec<DocAnchor>>,
+    ) -> VerifierState {
+        let mut validator = MemoryValidator::default();
+        let mut store = Store::default();
+        for b in bindings {
+            validator = validator.with(b.cert.hostname().clone(), &b.chain, b.proof.clone());
+            store.insert(Item::Record(b.cert.clone()));
+        }
+
+        VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            pins,
+            &validator,
+            &MemoryAuthority::default(),
+        )
+    }
+
+    #[test]
+    fn a_pin_disagreeing_with_the_accepted_binding_badges_pin_divergence() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+        let mut pins = Map::default();
+        pins.insert(host(), vec![doc(9)]);
+
+        let derivation = derive_with_pins(&[&b], &pins);
+        let state = derivation.bindings.get(&host()).expect("derived");
+
+        assert_eq!(state.accepted.expect("accepted").document, doc(1));
+        assert_eq!(state.divergence.len(), 1);
+        assert_eq!(state.divergence[0].alleged, doc(9));
+        assert_eq!(
+            state.divergence[0].source,
+            DivergenceSource::Pin,
+            "the badge names its source — a pin, not a claim"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_matching_pin_diverges_nothing() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+        let mut pins = Map::default();
+        pins.insert(host(), vec![doc(1)]);
+
+        let derivation = derive_with_pins(&[&b], &pins);
+        let state = derivation.bindings.get(&host()).expect("derived");
+        assert!(state.divergence.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_pin_alone_keeps_its_hostname_in_the_universe() {
+        // Pin-driven universe inclusion: a pinned hostname with no
+        // evidence at all still derives a (default) state.
+        let mut pins = Map::default();
+        pins.insert(host2(), vec![doc(4)]);
+
+        let derivation = derive_with_pins(&[], &pins);
+        let state = derivation
+            .bindings
+            .get(&host2())
+            .expect("the pinned hostname is in the universe");
+        assert_eq!(*state, BindingState::default());
+    }
+}
+
+/// Multi-hostname derivation: per-host isolation and deterministic
+/// diff ordering — the suite's two-hostname fixtures.
+mod multi_hostname {
+    use super::*;
+
+    #[test]
+    fn hostnames_derive_in_isolation() -> TestResult {
+        // Different documents bound at different hostnames, one
+        // derivation: each hostname sees exactly its own evidence.
+        let at_one = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+        let at_two = binding_at(host2(), 2, 22, 2, 999, (NOW - 1000, NOW + 1000), 60)?;
+
+        let derivation = derive_full(&[&at_one, &at_two], &Decisions::default(), vec![]);
+
+        let one = derivation.bindings.get(&host()).expect("host 1 derived");
+        assert_eq!(one.accepted.expect("accepted").document, doc(1));
+        assert_eq!(one.effective_serial, Some(Serial::from(100)));
+        assert!(one.pending.is_empty(), "host2's evidence never leaks in");
+
+        let two = derivation.bindings.get(&host2()).expect("host 2 derived");
+        assert_eq!(two.accepted.expect("accepted").document, doc(2));
+        assert_eq!(two.effective_serial, Some(Serial::from(999)));
+        assert!(two.pending.is_empty(), "host1's evidence never leaks in");
+        Ok(())
+    }
+
+    #[test]
+    fn a_contest_at_one_hostname_never_masks_another() -> TestResult {
+        // Zone equivocation at host(): masked there, untouched at
+        // host2().
+        let a = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
+        let b = binding(2, 22, 2, 100, (NOW - 5000, NOW - 1000), 99)?;
+        let elsewhere = binding_at(host2(), 3, 33, 3, 100, (NOW - 1000, NOW + 1000), 50)?;
+
+        let derivation = derive_full(&[&a, &b, &elsewhere], &Decisions::default(), vec![]);
+
+        assert_masked(derivation.bindings.get(&host()).expect("derived"));
+        let two = derivation.bindings.get(&host2()).expect("derived");
+        assert!(!two.contested);
+        assert_eq!(two.accepted.expect("accepted").document, doc(3));
+        Ok(())
+    }
+
+    #[test]
+    fn diff_events_arrive_in_sorted_hostname_order() -> TestResult {
+        // "example.org" < "expede.wtf": the diff's hostname ordering
+        // is deterministic regardless of map iteration order.
+        let at_one = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+        let at_two = binding_at(host2(), 2, 22, 2, 200, (NOW - 1000, NOW + 1000), 60)?;
+
+        let before = derive_full(&[], &Decisions::default(), vec![]);
+        let after = derive_full(&[&at_one, &at_two], &Decisions::default(), vec![]);
+
+        let events = after.diff(&before);
+        let hostnames: Vec<_> = events.iter().map(|e| e.hostname.clone()).collect();
+        let mut sorted = hostnames.clone();
+        sorted.sort_unstable();
+        assert_eq!(hostnames, sorted, "events sort by hostname");
+        assert!(hostnames.contains(&host()) && hostnames.contains(&host2()));
         Ok(())
     }
 }

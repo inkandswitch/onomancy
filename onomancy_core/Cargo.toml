@@ -30,6 +30,7 @@ tracing = { workspace = true }
 bolero = { workspace = true, features = ["arbitrary"] }
 ed25519-dalek = { workspace = true }
 onomancy_core = { path = ".", features = ["arbitrary"] }
+serde_json = "1"
 testresult = { workspace = true }
 
 [features]

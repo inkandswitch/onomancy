@@ -345,6 +345,11 @@ mod tests {
             "prefixes of a longer key are not entries; longest-match \
              selection is the walk's job, not the store's"
         );
+        assert_eq!(
+            DocumentNamestore::new(Automerge::new()).reference(&segments(&["anything"])),
+            None,
+            "an empty document has no names"
+        );
         Ok(())
     }
 
@@ -382,12 +387,6 @@ mod tests {
         assert!(crate::certificates::CERTIFICATES_KEY.starts_with(RESERVED_PREFIX));
         assert!(crate::decisions::DECISIONS_KEY.starts_with(RESERVED_PREFIX));
     }
-    #[test]
-    fn an_empty_document_has_no_names() {
-        let store = DocumentNamestore::new(Automerge::new());
-        assert_eq!(store.reference(&segments(&["anything"])), None);
-    }
-
     /// The SHOULD half of E6/E7/E8: skipped entries are reported,
     /// not merely skipped.
     ///
@@ -431,11 +430,23 @@ mod tests {
     #[test]
     fn held_documents_answer_only_what_they_hold() -> TestResult {
         let target = anchor(1);
-        let held = HeldDocuments::default().with(target, namestore_doc(&[])?);
+        let vouched = anchor(2);
+        let held = HeldDocuments::default()
+            .with(target, namestore_doc(&[])?)
+            .with_vouched(vouched, namestore_doc(&[])?, Authority::CarriageVerified);
 
-        assert!(held.replica(&target).is_some());
+        // The grade rides the replica: `with` is the dev bridge,
+        // `with_vouched` is the caller's claim — the walk folds the
+        // weakest grade crossed, so a wrong grade here misgrades
+        // every resolution through the document.
+        let (_, authority) = held.replica(&target).expect("held").into_parts();
+        assert_eq!(authority, Authority::TrustedSubstrate);
+
+        let (_, authority) = held.replica(&vouched).expect("held").into_parts();
+        assert_eq!(authority, Authority::CarriageVerified);
+
         assert!(
-            held.replica(&anchor(2)).is_none(),
+            held.replica(&anchor(3)).is_none(),
             "not replicated here — never fetched"
         );
         Ok(())
@@ -624,5 +635,105 @@ mod tests {
             "and the writer is told which key it was"
         );
         Ok(())
+    }
+
+    mod props {
+        use super::*;
+
+        /// The parity contract as a property: a stored key is an edge
+        /// iff it is a well-formed path key AND its value parses as a
+        /// bare reference — and then `reference` returns exactly the
+        /// same target. Every key lands in exactly one bucket.
+        #[test]
+        fn every_key_lands_in_exactly_one_bucket_and_edges_match_reference() {
+            bolero::check!()
+                .with_type::<Vec<(String, u8, bool)>>()
+                .for_each(|raw_entries| {
+                    // Last write wins per key — dedupe so the
+                    // expectation is unambiguous.
+                    let mut entries: std::collections::BTreeMap<&str, String> =
+                        std::collections::BTreeMap::new();
+                    for (key, seed, is_reference) in raw_entries {
+                        let value = if *is_reference {
+                            format!("automerge:{}", anchor(*seed))
+                        } else {
+                            // Junk: the key itself — arbitrary text,
+                            // never a bare reference.
+                            format!("junk:{key}")
+                        };
+                        entries.insert(key.as_str(), value);
+                    }
+
+                    let pairs: Vec<(&str, &str)> = entries
+                        .iter()
+                        .map(|(key, value)| (*key, value.as_str()))
+                        .collect();
+                    let store =
+                        DocumentNamestore::new(namestore_doc(&pairs).expect("buildable doc"));
+                    let read = store.read();
+
+                    // Partition: single-actor writes conflict nowhere.
+                    assert!(read.conflicts.is_empty());
+                    assert_eq!(
+                        read.edges.len() + read.malformed_keys.len() + read.non_references.len(),
+                        entries.len(),
+                        "every key lands in exactly one bucket"
+                    );
+
+                    for (key, value) in &entries {
+                        let well_formed = is_path_key(key);
+                        let reference = value
+                            .strip_prefix(doc::SCHEME_PREFIX)
+                            .and_then(|body| DocAnchor::parse(body).ok());
+
+                        match (well_formed, reference) {
+                            (true, Some(target)) => {
+                                let segments: Vec<Segment> = key
+                                    .split('/')
+                                    .map(|raw| Segment::parse(raw).expect("path key segment"))
+                                    .collect();
+                                assert_eq!(
+                                    store.reference(&segments),
+                                    Some(target),
+                                    "an enumerated edge resolves to the same target"
+                                );
+                                assert!(read.edges.iter().any(|(k, t)| k == key && *t == target));
+                            }
+                            (true, None) => {
+                                assert!(read.non_references.iter().any(|k| k == key));
+                            }
+                            (false, _) => {
+                                assert!(read.malformed_keys.iter().any(|k| k == key));
+                            }
+                        }
+                    }
+                });
+        }
+
+        /// `is_path_key` is the inverse of `path_key`: every key the
+        /// writer can produce, the reader admits.
+        #[test]
+        fn written_path_keys_are_always_readable() {
+            bolero::check!()
+                .with_type::<Vec<String>>()
+                .for_each(|raw_segments| {
+                    let path: Vec<Segment> = raw_segments
+                        .iter()
+                        .filter_map(|raw| Segment::parse(raw).ok())
+                        .collect();
+
+                    match path_key(&path) {
+                        None => assert!(path.is_empty(), "only the empty path has no key"),
+                        Some(key) => {
+                            assert!(is_path_key(&key), "a written key is a readable key");
+                            // And the spelling is faithful: split
+                            // recovers the segments.
+                            let recovered: Vec<&str> = key.split('/').collect();
+                            let original: Vec<&str> = path.iter().map(Segment::as_str).collect();
+                            assert_eq!(recovered, original);
+                        }
+                    }
+                });
+        }
     }
 }

@@ -167,15 +167,37 @@ mod tests {
     struct UnitA;
     struct UnitB;
 
+    /// The manual `PartialEq` (phantom-bound workaround) actually
+    /// compares bytes: an `eq → true` mutation dies on the negative.
     #[test]
     fn digests_of_equal_bytes_agree_within_a_type() {
-        assert_eq!(
-            Digest::<Blake3, UnitA>::hash(b"payload"),
-            Digest::<Blake3, UnitA>::hash(b"payload")
-        );
         assert_ne!(
             Digest::<Blake3, UnitA>::hash(b"payload"),
             Digest::<Blake3, UnitA>::hash(b"other")
+        );
+    }
+
+    /// Known-answer pin: erased digests are PLAIN BLAKE3-256, no
+    /// keying, no derivation, no domain separation. Every store
+    /// address in the system silently changes if this moves — an
+    /// interop contract, pinned against the published vector rather
+    /// than against our own delegation one hop away.
+    #[test]
+    fn blake3_known_answer_pins_the_algorithm() {
+        // BLAKE3("") from the official test vectors.
+        const EMPTY: [u8; 32] = [
+            0xaf, 0x13, 0x49, 0xb9, 0xf5, 0xf9, 0xa1, 0xa6, 0xa0, 0x40, 0x4d, 0xea, 0x36, 0xdc,
+            0xc9, 0x49, 0x9b, 0xcb, 0x25, 0xc9, 0xad, 0xc1, 0x12, 0xb7, 0xcc, 0x9a, 0x93, 0xca,
+            0xe4, 0x1f, 0x32, 0x62,
+        ];
+
+        let digest = Digest::<Blake3, [u8]>::hash(b"");
+        assert_eq!(*digest.as_bytes(), EMPTY);
+
+        // Display is the lowercase hex of exactly those bytes.
+        assert_eq!(
+            alloc::string::ToString::to_string(&digest),
+            "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
         );
     }
 
@@ -190,19 +212,65 @@ mod tests {
     }
 
     mod props {
-        use alloc::vec::Vec;
+        use core::{
+            cmp::Ordering,
+            hash::{Hash, Hasher},
+        };
 
         use super::*;
 
-        /// Injective in practice: distinct bytes, distinct hashes
-        /// (collision = broken BLAKE3, not broken code).
+        /// Captures written bytes so `Hash` coverage is observable
+        /// without committing to any hasher's mixing function.
+        #[derive(Default)]
+        struct RecordingHasher {
+            bytes: Vec<u8>,
+        }
+
+        impl Hasher for RecordingHasher {
+            fn finish(&self) -> u64 {
+                self.bytes.len() as u64
+            }
+
+            fn write(&mut self, bytes: &[u8]) {
+                self.bytes.extend_from_slice(bytes);
+            }
+        }
+
+        /// The manual `Eq`/`Ord`/`Hash`/`from_bytes` impls agree with
+        /// each other and with raw byte order.
         #[test]
-        fn verbatim_bytes_hash_stably() {
-            bolero::check!().with_type::<Vec<u8>>().for_each(|bytes| {
-                let erased = Digest::<Blake3, [u8]>::hash(bytes);
-                assert_eq!(erased, Digest::<Blake3, [u8]>::hash(bytes));
-                assert_eq!(*erased.as_bytes(), <Blake3 as HashAlgorithm>::hash(bytes));
-            });
+        fn manual_impls_agree_with_byte_order() {
+            bolero::check!()
+                .with_type::<([u8; 32], [u8; 32])>()
+                .for_each(|(a, b)| {
+                    let da = Digest::<Blake3, UnitA>::from_bytes(*a);
+                    let db = Digest::<Blake3, UnitA>::from_bytes(*b);
+
+                    assert_eq!(da.as_bytes(), a, "from_bytes is verbatim");
+                    assert_eq!((da == db), (da.cmp(&db) == Ordering::Equal));
+                    assert_eq!(da.cmp(&db), a.cmp(b), "digest order is byte order");
+                    assert_eq!(da.cmp(&db), db.cmp(&da).reverse());
+                    assert_eq!(
+                        da.partial_cmp(&db),
+                        Some(da.cmp(&db)),
+                        "partial order agrees with the total order"
+                    );
+
+                    assert!(
+                        !format!("{da:?}").is_empty(),
+                        "debug output renders something"
+                    );
+
+                    // The manual `Hash` must feed the bytes to the
+                    // hasher: the recorded stream carries the digest
+                    // bytes themselves.
+                    let mut sink = RecordingHasher::default();
+                    da.hash(&mut sink);
+                    assert!(
+                        sink.bytes.ends_with(a),
+                        "hash covers the digest bytes (modulo the slice length prefix)"
+                    );
+                });
         }
     }
 }

@@ -262,6 +262,11 @@ mod tests {
         assert_eq!(verdict.serial, Serial::from(100));
         assert_eq!(verdict.freshness, Freshness::Fresh);
         assert_eq!(verdict.generation_check, GenerationCheck::OnPath);
+        assert_eq!(
+            verdict.window,
+            crate::test_utils::window(NOW - 1_000, NOW + 1_000),
+            "the ∩-window rides the verdict for the caller's grading"
+        );
         Ok(())
     }
 
@@ -280,6 +285,14 @@ mod tests {
         .expect("stale is a grade, not a rejection");
 
         assert_eq!(verdict.freshness, Freshness::Stale);
+        assert_eq!(
+            verdict.document,
+            doc(1),
+            "the stale path extracts the same facts as the fresh one"
+        );
+        assert_eq!(verdict.generation, generation(11));
+        assert_eq!(verdict.serial, Serial::from(100));
+        assert_eq!(verdict.generation_check, GenerationCheck::OnPath);
         Ok(())
     }
 
@@ -346,6 +359,57 @@ mod tests {
         assert!(
             evidence.serial.value() > NOW * 1000,
             "the serial that caused deferral must be readable from it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn not_yet_begun_windows_defer() -> TestResult {
+        // The second deferral cause: the chain's window has not begun
+        // — evidence not yet in force, never malformed.
+        let b = binding(1, 11, 9, 100, (NOW + 1_000, NOW + 2_000), 50)?;
+        let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+
+        let rejection = verify(
+            &b.cert.encode(),
+            &host(),
+            UnixSeconds::from(NOW),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .expect_err("a not-yet-begun window defers");
+
+        let Rejection::Deferred(evidence) = rejection else {
+            panic!("expected deferral, got {rejection:?}");
+        };
+
+        // The window is the cause this time, and it is readable.
+        assert!(
+            evidence.window.inception() > UnixSeconds::from(NOW),
+            "the not-yet-begun window must be readable from the deferral"
+        );
+        assert_eq!(evidence.document, doc(1));
+        Ok(())
+    }
+
+    #[test]
+    fn a_certificate_for_another_hostname_is_refused_by_name() -> TestResult {
+        // The one rejection that needs no validator at all: the
+        // certificate binds a different hostname, and the refusal
+        // carries WHICH one — a caller distinguishing "wrong name"
+        // from "bad zone" needs the found name, not prose.
+        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
+        let expected = onomancy_dnssec::dns_name::DnsName::parse("example.org")?;
+
+        assert_eq!(
+            verify(
+                &b.cert.encode(),
+                &expected,
+                UnixSeconds::from(NOW),
+                &MemoryValidator::default(),
+                &MemoryAuthority::default(),
+            ),
+            Err(Rejection::HostnameMismatch { found: host() })
         );
         Ok(())
     }
@@ -426,24 +490,54 @@ mod tests {
         Ok(())
     }
 
+    /// Any single bit flip anywhere in the unit is never a
+    /// DIFFERENT accepted verdict: it fails somewhere — decode for
+    /// signed-region flips, chain validation for attached-region
+    /// ones — or (defensively stated) verifies to the identical
+    /// verdict. Generalizes the old fixed-offset byte-40 flip, whose
+    /// magic offset was coupled to the wire layout.
     #[test]
-    fn tampered_bytes_fail_at_decode() -> TestResult {
-        let b = binding_carrying(1, 11, 7, 100, (NOW - 1_000, NOW + 1_000), 50, vec![])?;
-        let mut bytes = b.cert.encode();
-        if let Some(byte) = bytes.get_mut(40) {
-            *byte ^= 0x01;
-        }
+    fn no_bit_flip_yields_a_different_verdict() {
+        let b = binding_carrying(1, 11, 7, 100, (NOW - 1_000, NOW + 1_000), 50, vec![])
+            .expect("under the unit cap");
+        let bytes = b.cert.encode();
+        let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+        let authority = MemoryAuthority::default();
 
-        assert!(matches!(
-            verify(
-                &bytes,
-                &host(),
-                UnixSeconds::from(NOW),
-                &MemoryValidator::default(),
-                &MemoryAuthority::default(),
-            ),
-            Err(Rejection::Decode(_))
-        ));
-        Ok(())
+        let baseline = verify(
+            &bytes,
+            &host(),
+            UnixSeconds::from(NOW),
+            &validator,
+            &authority,
+        )
+        .expect("the untampered unit verifies");
+
+        bolero::check!()
+            .with_type::<(usize, u8)>()
+            .for_each(|&(position, bit)| {
+                let mut flipped = bytes.clone();
+                let at = position % flipped.len();
+                if let Some(byte) = flipped.get_mut(at) {
+                    *byte ^= 1 << (bit % 8);
+                }
+
+                match verify(
+                    &flipped,
+                    &host(),
+                    UnixSeconds::from(NOW),
+                    &validator,
+                    &authority,
+                ) {
+                    Err(_) => (),
+                    Ok(verdict) => assert_eq!(
+                        verdict,
+                        baseline,
+                        "a flip at byte {at} bit {} produced a DIFFERENT \
+                         accepted verdict",
+                        bit % 8
+                    ),
+                }
+            });
     }
 }

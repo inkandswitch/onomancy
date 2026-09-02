@@ -315,6 +315,55 @@ mod tests {
         ));
     }
 
+    /// Each of the three key positions surfaces a non-point as ITS
+    /// field — the grammar check precedes the signature check.
+    #[test]
+    fn non_curve_points_name_their_field() {
+        let non_point: [u8; 32] = (0u8..=255)
+            .map(|b| [b; 32])
+            .find(|bytes| VerifyingKey::from_bytes(bytes).is_err())
+            .expect("some constant fill fails decompression");
+
+        for (position, field) in [
+            (0, FieldName::RootDoc),
+            (1, FieldName::Replaced),
+            (2, FieldName::Successor),
+        ] {
+            let mut bytes = sample().encode();
+            let at = 4 + position * 32;
+            bytes[at..at + 32].copy_from_slice(&non_point);
+
+            assert_eq!(
+                RotationStatement::decode(&bytes),
+                Err(DecodeRotationError::NotACurvePoint { field }),
+                "field {field:?}"
+            );
+        }
+    }
+
+    /// The attached/signed split: two signs over the same fields with
+    /// different carriages share their signed region byte-for-byte
+    /// (ed25519 is deterministic) but are different store items.
+    #[test]
+    fn different_carriages_share_the_signed_region_but_not_the_digest() {
+        let with_carriage = sample();
+        let without = RotationStatement::sign(
+            &doc(1),
+            &gen_key(2),
+            &SigningKey::from_bytes(&[3; 32]),
+            DelegationChain::default(),
+        )
+        .expect("under the unit cap");
+
+        let signed_and_signature = SIGNED_LEN + 64;
+        assert_eq!(
+            with_carriage.encode()[..signed_and_signature],
+            without.encode()[..signed_and_signature],
+            "same signed unit"
+        );
+        assert_ne!(with_carriage.digest(), without.digest(), "different items");
+    }
+
     mod props {
         use super::*;
 

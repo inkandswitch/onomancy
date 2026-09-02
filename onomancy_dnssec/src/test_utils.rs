@@ -139,8 +139,36 @@ impl Zone {
     ///
     /// Panics on empty `RRset`s or oversized RDATA — fixture bugs.
     #[must_use]
-    #[allow(clippy::expect_used, clippy::indexing_slicing)]
     pub fn rrsig_with_labels(&self, rrset: &[Record], window: (u32, u32), labels: usize) -> Record {
+        self.rrsig_full(rrset, window, labels, self.dnskey().key_tag())
+    }
+
+    /// [`rrsig`](Self::rrsig) with an explicit key-tag field — a tag
+    /// naming a DIFFERENT key produces a signature that is valid over
+    /// its own preamble (the tag is signed) yet fails under the
+    /// hinted key, forcing a verifier's all-keys fallback. Key tags
+    /// are hints, not commitments: they collide legally.
+    ///
+    /// # Panics
+    ///
+    /// Panics on empty `RRset`s or oversized RDATA — fixture bugs.
+    #[must_use]
+    pub fn rrsig_with_key_tag(&self, rrset: &[Record], window: (u32, u32), key_tag: u16) -> Record {
+        let labels = rrset
+            .first()
+            .map_or(0, |record| record.owner.labels().len());
+        self.rrsig_full(rrset, window, labels, key_tag)
+    }
+
+    /// The general RRSIG constructor behind the public variants.
+    #[allow(clippy::expect_used, clippy::indexing_slicing)]
+    fn rrsig_full(
+        &self,
+        rrset: &[Record],
+        window: (u32, u32),
+        labels: usize,
+        key_tag: u16,
+    ) -> Record {
         let owner = &rrset[0].owner;
 
         let mut preamble = Vec::new();
@@ -150,7 +178,7 @@ impl Zone {
         preamble.extend_from_slice(&rrset[0].ttl.to_be_bytes());
         preamble.extend_from_slice(&window.1.to_be_bytes()); // expiration
         preamble.extend_from_slice(&window.0.to_be_bytes()); // inception
-        preamble.extend_from_slice(&self.dnskey().key_tag().to_be_bytes());
+        preamble.extend_from_slice(&key_tag.to_be_bytes());
         self.name.write(&mut preamble);
 
         let mut rdatas: Vec<&[u8]> = rrset.iter().map(|r| r.rdata.as_slice()).collect();
@@ -222,7 +250,8 @@ pub fn txt_record(hostname: &DnsName, text: &str) -> Record {
     rdata.extend_from_slice(text.as_bytes());
 
     Record {
-        owner: Name::onomancy_owner(hostname),
+        owner: Name::onomancy_owner(hostname)
+            .expect("fixture hostname fits under the service label"),
         rtype: RrType::TXT,
         class: CLASS_IN,
         ttl: 900,
