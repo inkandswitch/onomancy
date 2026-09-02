@@ -226,17 +226,14 @@ pub fn verify_binding(
     // already places every deferral below every verdict.
     let best = candidates.into_iter().max_by_key(|graded| match graded {
         Graded::Accepted(verdict) => (
-            match verdict.freshness {
-                Freshness::Fresh => 2_u8,
-                Freshness::Stale => 1,
-            },
+            freshness_rank(Some(verdict.freshness)),
             verdict.window.expiration(),
             verdict.serial,
             verdict.certificate.issued_at(),
             verdict.document,
         ),
         Graded::Deferred(deferred) => (
-            0,
+            freshness_rank(None),
             deferred.window.expiration(),
             deferred.serial,
             UnixSeconds::from(0),
@@ -364,6 +361,25 @@ fn grade_object(
     object.unchecked_into()
 }
 
+/// The freshness component of the selection key: fresh beats stale
+/// beats deferred (`None`).
+///
+/// A named function rather than inline literals because the ordering
+/// IS the claim — "rank already places every deferral below every
+/// verdict" — and a reviewer's mutant promoting deferrals above
+/// verdicts survived the whole suite: the fixtures cannot put a
+/// deferred and an accepted certificate in one document at any single
+/// instant (their serials and windows never line up), so the claim is
+/// untestable end-to-end. Here it is testable directly, by the code
+/// production actually calls.
+const fn freshness_rank(freshness: Option<Freshness>) -> u8 {
+    match freshness {
+        Some(Freshness::Fresh) => 2,
+        Some(Freshness::Stale) => 1,
+        None => 0,
+    }
+}
+
 /// Why a certificate was refused, in terms a caller can act on.
 ///
 /// Deliberately not the `Debug` form: these strings reach users, and
@@ -410,4 +426,19 @@ fn parse_anchor(raw: &Text) -> Result<DocAnchor, JsError> {
     let bare = raw.strip_prefix(SCHEME_PREFIX).unwrap_or(&raw);
 
     DocAnchor::parse(bare).map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The whole ordering, pinned: any regression here reorders
+    /// `verifyBinding`'s candidate selection silently, and no
+    /// end-to-end test can stage the contest (the fixtures' deferral
+    /// rules overlap at every instant).
+    #[test]
+    fn every_deferral_ranks_below_every_verdict() {
+        assert!(freshness_rank(None) < freshness_rank(Some(Freshness::Stale)));
+        assert!(freshness_rank(Some(Freshness::Stale)) < freshness_rank(Some(Freshness::Fresh)));
+    }
 }

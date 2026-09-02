@@ -467,31 +467,38 @@ fn a_clobbered_certificate_entry_names_the_pointer_problem() {
     assert_eq!(reason, "broken-indirection");
 }
 
-/// A deferred candidate never outranks an accepted one.
+/// Deferral has TWO causes, and `verifyBinding` grades both as
+/// deferred rather than erroring: a window not yet open, and a serial
+/// beyond the clock's skew bound.
 ///
-/// The selection key gives deferrals rank 0 below stale (1) and
-/// fresh (2). That claim was previously only a comment: a reviewer's
-/// mutant promoting deferrals to rank 3 survived the whole suite,
-/// because no document ever held a deferred and an accepted
-/// certificate at once. At this instant the record capture's window
-/// has not opened (deferred) while the carriage capture's has
-/// (fresh) — and the deferred one is stored FIRST, so first-wins
-/// would also fail this.
+/// At this instant the record capture's window has not opened
+/// (window-deferral) and the carriage capture's serial — a mint-time
+/// timestamp in milliseconds — reads ~71,000 s in the future
+/// (serial-deferral). Both defer, so the verdict is deferred; the
+/// serial case previously reached JS only through `verifyCertificate`.
+///
+/// This exists in place of a deferred-vs-accepted contest, which the
+/// fixtures cannot stage: for the record capture to window-defer the
+/// clock must sit before `1_787_241_600`, and by then the carriage
+/// capture's serial (`1_787_291_588_428` ms) is far-future — the two
+/// deferral rules overlap so that no instant leaves exactly one
+/// candidate standing. The rank claim itself is pinned by a unit test
+/// on `freshness_rank`, the function the selection key calls.
 #[wasm_bindgen_test]
-fn a_deferred_certificate_does_not_mask_an_accepted_one() {
+fn both_deferral_causes_grade_deferred_through_a_held_document() {
     /// After the carriage capture's inception (1_787_201_748), before
-    /// the record capture's (1_787_241_600).
-    const ONE_OPEN_ONE_NOT: f64 = 1_787_220_000.0;
+    /// the record capture's (1_787_241_600) — and before both serials.
+    const BEFORE_EVERYTHING_SETTLES: f64 = 1_787_220_000.0;
 
-    let deferred_first = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
+    let window_deferred = onomancy_dnssec::certificate::Certificate::decode(OFF_PATH_CERT)
         .expect("the record-made capture decodes");
-    let fresh_second = onomancy_dnssec::certificate::Certificate::decode(CERT)
+    let serial_deferred = onomancy_dnssec::certificate::Certificate::decode(CERT)
         .expect("the carriage capture decodes");
-    let anchor = format!("automerge:{}", fresh_second.root_doc());
+    let anchor = format!("automerge:{}", serial_deferred.root_doc());
 
     let mut doc = automerge::Automerge::new();
-    onomancy_automerge::certificates::put(&mut doc, &deferred_first).expect("stored at index 0");
-    onomancy_automerge::certificates::put(&mut doc, &fresh_second).expect("stored at index 1");
+    onomancy_automerge::certificates::put(&mut doc, &window_deferred).expect("stored at index 0");
+    onomancy_automerge::certificates::put(&mut doc, &serial_deferred).expect("stored at index 1");
 
     let mut held = JsHeldDocuments::new();
     held.hold(&host(&anchor), &doc.save()).expect("held");
@@ -500,18 +507,22 @@ fn a_deferred_certificate_does_not_mask_an_accepted_one() {
         &held,
         &host(&anchor),
         &host("brooklynzelenka.com"),
-        Some(ONE_OPEN_ONE_NOT),
+        Some(BEFORE_EVERYTHING_SETTLES),
     )
-    .expect("an open window plus an unopened one is a verdict, not a deferral");
+    .expect("deferral is a grade, not a refusal, whichever rule caused it");
 
+    assert_eq!(field(&verdict, "freshness"), "deferred");
+
+    // Proven evidence, not in force: the binding is still reported…
     assert_eq!(
-        field(&verdict, "freshness"),
-        "fresh",
-        "the accepted candidate must win over the deferred one"
+        field(&verdict, "document"),
+        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj"
     );
-    assert_eq!(
-        field(&verdict, "serial"),
-        "1787291588428",
-        "and it is the carriage capture's verdict"
+
+    // …and the D10 check was never made, which `null` says.
+    assert!(
+        js_sys::Reflect::get(&verdict, &JsValue::from_str("generation"))
+            .expect("generation")
+            .is_null()
     );
 }
