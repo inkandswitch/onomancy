@@ -98,11 +98,12 @@ export interface Resolution {
  *   zone is fine and the signing key is not delegated by that
  *   document; versus both are fine and the zone names a *different*
  *   document. Only the first is a reason to go and look at DNS.
- * - `broken-indirection` vs `malformed` — a well-formed reference
- *   that does not lead to a list, versus bytes that were never a
- *   certificate. The first is a pointer problem and is grouped with
- *   the stable facts: nothing was forged, and re-minting will not
- *   help. Repointing or populating the target will.
+ * - `broken-indirection` vs `malformed` — the document's certificate
+ *   ENTRY does not lead to a list (a second hop, or a value that is
+ *   neither list nor reference), versus certificate BYTES that were
+ *   never a certificate. The first is grouped with the stable facts:
+ *   nothing was forged, no certificate needs re-minting, and the fix
+ *   is to the entry — repoint it or restore the list.
  */
 export type RefusalReason =
   // Retrying may help. This one only.

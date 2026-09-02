@@ -420,3 +420,49 @@ fn a_stale_certificate_first_in_the_list_does_not_mask_a_fresh_one() {
         "and it is the carriage capture's verdict, not the stale one's"
     );
 }
+
+/// A certificate entry that is neither a list nor a reference refuses
+/// with `broken-indirection` — a stable fact about the document, not
+/// `malformed` (nothing needs re-minting) and not a bare throw.
+///
+/// Reachable by an application writing its own data at the reserved
+/// key, which no library call polices: the prefix is a writers'
+/// convention.
+#[wasm_bindgen_test]
+fn a_clobbered_certificate_entry_names_the_pointer_problem() {
+    use automerge::transaction::Transactable as _;
+    use onomancy_wasm::held::JsHeldDocuments;
+
+    let mut doc = automerge::Automerge::new();
+    doc.transact::<_, _, automerge::AutomergeError>(|tx| {
+        // An app's own write at the reserved key: legal, unpoliced,
+        // and neither a certificate list nor a reference.
+        tx.put(
+            automerge::ROOT,
+            onomancy_automerge::certificates::CERTIFICATES_KEY,
+            42,
+        )?;
+        Ok(())
+    })
+    .expect("build");
+
+    let mut held = JsHeldDocuments::new();
+    let anchor = "automerge:2nBeEMDjAzFa9Ev2pxwejYrgCRmSLx96SbA24uhdMMTUktJWvK";
+    held.hold(anchor, &doc.save()).expect("held");
+
+    let Err(refusal) = onomancy_wasm::verify::verify_binding(
+        &held,
+        &host(anchor),
+        &host("example.com"),
+        Some(1_788_100_000.0),
+    ) else {
+        panic!("a clobbered entry cannot verify");
+    };
+
+    let reason = js_sys::Reflect::get(&refusal, &JsValue::from_str("reason"))
+        .ok()
+        .and_then(|value| value.as_string())
+        .expect("a substantive refusal carries a reason");
+
+    assert_eq!(reason, "broken-indirection");
+}

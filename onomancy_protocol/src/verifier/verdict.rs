@@ -369,6 +369,36 @@ mod tests {
         Ok(())
     }
 
+    /// A sound chain with an unauthorized signer is a KEY problem,
+    /// named as one.
+    ///
+    /// Three refusals used to collapse into `ChainRejected`: a bad
+    /// chain, an unauthorized signer, and a zone naming a different
+    /// document. This pins the middle one — the case where the zone's
+    /// DNSSEC is fine and the certificate was simply signed by a key
+    /// the document does not delegate to. Reporting it as a chain
+    /// failure sends the holder to debug DNS they cannot fix.
+    #[test]
+    fn an_unauthorized_signer_is_not_a_chain_failure() -> TestResult {
+        let b = binding(1, 11, 1, 100, (NOW - 1_000, NOW + 1_000), 50)?;
+        let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+
+        // Same certificate, same chain — the only change is that the
+        // document now denies this signer.
+        let authority = MemoryAuthority::default().deny(doc(1), b.cert.signer());
+
+        assert_eq!(
+            verify(
+                &b.cert.encode(),
+                &host(),
+                UnixSeconds::from(NOW),
+                &validator,
+                &authority,
+            ),
+            Err(Rejection::SignerNotAuthorized)
+        );
+        Ok(())
+    }
     /// A sound chain that names someone else's document is its own
     /// refusal, not a chain failure.
     ///

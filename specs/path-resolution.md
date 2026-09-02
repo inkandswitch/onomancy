@@ -92,7 +92,9 @@ A value that is not a reference under any encoding the profile defines is not an
 > [!WARNING]
 > **A reference is an immutable value, and MUST be stored as one.**
 >
-> A CRDT substrate typically offers two ways to hold text: an immutable scalar, and a *mutable* collaborative string that merges character-by-character edits. Only the first is a reference. The second is a small document in its own right — two writers could concurrently edit a target's identifier and merge into a third identifier neither wrote, which is a way to redirect a name that no signature covers. Where a substrate offers both, a profile MUST say which is the reference; the other is a non-reference value, absent from matching however much it resembles a string.
+> A CRDT substrate typically offers two ways to hold text: an immutable scalar, and a *mutable* collaborative string that merges character-by-character edits. Only the first is a reference. The second is a small document in its own right, and the danger is specific to **in-place editing**: two writers splicing different ranges of one stored identifier merge into a third identifier *neither wrote* — a redirect no signature covers. (Concurrent whole-value *assignment* does not interleave: the substrate's conflict rule picks one of the two, as with any register.) A writer who only ever assigns whole values is therefore not exposed to the merge hazard — but their mutable strings are still non-references and resolve nowhere, and the hazard is why a *reader* must never accept mutable text as a reference, however lenient it intends to be.
+>
+> Where a substrate offers both, a profile MUST say which is the reference; the other is a non-reference value, absent from matching however much it resembles a string.
 >
 > The failure is silent by construction. The writer's own reader sees a string and reports success, so nothing local disagrees; it is caught only by a *conforming resolver*, which is usually somebody else's, later. Implementers SHOULD surface non-reference values under [E8][Error Conditions] rather than merely skipping them, because that report is the only signal a writer will get.
 >

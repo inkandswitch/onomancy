@@ -90,16 +90,16 @@ refusal_reasons! {
             /// empty.
             NoCertificateHeld => "no-certificate-held",
 
-            /// The certificate entry is a reference that does not
-            /// lead to a list — it chains a second hop, or holds
-            /// something that is neither.
+            /// The certificate ENTRY does not lead to a list: it
+            /// chains a second hop, or holds something that is
+            /// neither a list nor a reference.
             ///
-            /// Not `Malformed`: the bytes at the location are a
-            /// perfectly well-formed reference, which is the spec's
-            /// own sanctioned indirection. What is wrong is where it
-            /// points. Naming it `Malformed` would send a user to
-            /// re-mint a certificate that is fine, and re-minting
-            /// does not move a pointer.
+            /// Not `Malformed`, which is about certificate BYTES and
+            /// says "re-mint". Every certificate involved here may be
+            /// fine — the document's entry is what needs fixing, by
+            /// repointing it or restoring the list, and the likeliest
+            /// author of the bad entry is an ordinary write by a
+            /// collaborator, not whoever holds the certificate.
             BrokenIndirection => "broken-indirection",
 
             /// The hostname is not a DNS name, or cannot sit under

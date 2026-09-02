@@ -106,6 +106,10 @@ impl DocumentNamestore {
             // All values, not just the winner: a merge can leave
             // several, and the losers are worth surfacing even though
             // the winner is the one that resolves (E7).
+            //
+            // Infallible for ROOT (`get_all` errors only on an
+            // invalid object id), so the `else` is unreachable rather
+            // than a swallowed report.
             let Ok(conflicting) = self.doc.get_all(automerge::ROOT, key.as_str()) else {
                 continue;
             };
@@ -114,7 +118,14 @@ impl DocumentNamestore {
                 .into_iter()
                 .map(|(value, _)| parse_bare_reference(&value));
 
-            let Some(winner) = targets.next() else {
+            // The winner is the LAST element: `get` — what `reference`
+            // and every other resolver-side read uses — takes
+            // `.next_back()` of the same ops list `get_all` returns
+            // (automerge 0.11, `get_for`). Taking the first here made
+            // `edges` report a conflict's loser as the edge while
+            // `reference` resolved its winner — the exact divergence
+            // this struct's parity claim forbids.
+            let Some(winner) = targets.next_back() else {
                 continue;
             };
 
@@ -470,6 +481,116 @@ mod tests {
         Ok(())
     }
 
+    /// Under a merge conflict, `edges` and `reference` must name the
+    /// SAME winner, and the loser must be surfaced (E7).
+    ///
+    /// The winner is `get`'s answer — the last element of the ops
+    /// list — because `reference` uses `get` and the parity between
+    /// the two views is this module's contract. An earlier version
+    /// took the first element, so under any real conflict `edges`
+    /// showed one target while resolution followed another: the walk
+    /// and the UI silently disagreed about where a name points.
+    #[test]
+    fn conflict_winner_matches_resolution_and_loser_is_surfaced() -> TestResult {
+        let ours = anchor(1);
+        let theirs = anchor(2);
+
+        // A genuine concurrent write: fork, write both sides, merge.
+        let mut left = namestore_doc(&[])?;
+        let mut right = left.fork();
+        left.transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.put(automerge::ROOT, "bob", format!("automerge:{ours}"))?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        right
+            .transact::<_, _, automerge::AutomergeError>(|tx| {
+                tx.put(automerge::ROOT, "bob", format!("automerge:{theirs}"))?;
+                Ok(())
+            })
+            .map_err(|failure| failure.error)?;
+        left.merge(&mut right)?;
+
+        let store = DocumentNamestore::new(left);
+        let resolved = store
+            .reference(&segments(&["bob"]))
+            .expect("a conflicted key still resolves");
+        let read = store.read();
+
+        assert_eq!(
+            read.edges,
+            vec![(String::from("bob"), resolved)],
+            "enumeration must report the same winner resolution follows"
+        );
+
+        // Exactly one loser, and it is the other write.
+        let loser = if resolved == ours { theirs } else { ours };
+        assert_eq!(
+            read.conflicts,
+            vec![(String::from("bob"), loser)],
+            "the losing value is surfaced, not silently dropped (E7)"
+        );
+        Ok(())
+    }
+
+    /// Concurrent in-place edits of a `Text` merge into a THIRD value
+    /// neither writer wrote — the reason a reader must never accept
+    /// mutable text as a reference, however lenient it wants to be.
+    ///
+    /// Established empirically: left splices one range, right splices
+    /// another, and the merge contains both, spelling an identifier
+    /// that was never written by anyone. A reader that accepted
+    /// `Text` would follow it — a redirect no signature covers.
+    /// Whole-VALUE assignment does not have this problem (map keys
+    /// are last-writer-wins, always one of the two); in-place editing
+    /// is the dangerous pattern.
+    ///
+    /// This reader rejects `Text` categorically, so the merged value
+    /// is surfaced as a non-reference and never an edge — asserted
+    /// here so leniency cannot creep in later.
+    #[test]
+    fn a_merged_text_is_a_third_value_and_still_not_an_edge() -> TestResult {
+        let base = format!("automerge:{}", anchor(1));
+
+        let mut left = Automerge::new();
+        let text_id = left
+            .transact::<_, _, automerge::AutomergeError>(|tx| {
+                let id = tx.put_object(automerge::ROOT, "bob", automerge::ObjType::Text)?;
+                tx.splice_text(&id, 0, 0, &base)?;
+                Ok(id)
+            })
+            .map_err(|failure| failure.error)?
+            .result;
+        let mut right = left.fork();
+
+        left.transact::<_, _, automerge::AutomergeError>(|tx| {
+            tx.splice_text(&text_id, 10, 5, "LLLLL")?;
+            Ok(())
+        })
+        .map_err(|failure| failure.error)?;
+        right
+            .transact::<_, _, automerge::AutomergeError>(|tx| {
+                tx.splice_text(&text_id, 30, 5, "RRRRR")?;
+                Ok(())
+            })
+            .map_err(|failure| failure.error)?;
+
+        let left_view = left.text(&text_id)?;
+        let right_view = right.text(&text_id)?;
+        left.merge(&mut right)?;
+        let merged = left.text(&text_id)?;
+
+        // The CRDT property that makes mutable references unsafe.
+        assert_ne!(merged, left_view, "merge is not left's write");
+        assert_ne!(merged, right_view, "merge is not right's write");
+        assert_ne!(merged, base, "merge is not the base");
+
+        // And this reader never follows it.
+        let read = DocumentNamestore::new(left).read();
+        assert!(read.edges.is_empty(), "a Text is never an edge");
+        assert_eq!(read.non_references, vec!["bob"], "and it is surfaced");
+        Ok(())
+    }
     /// A `Text` object is not a scalar string, and so is not a
     /// reference.
     ///
