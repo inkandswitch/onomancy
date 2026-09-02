@@ -212,7 +212,7 @@ impl fmt::Display for TxtRecord {
             f,
             "{FORMAT_TAG};{KEY_ALGORITHM};n={};g={};p={}",
             self.serial,
-            BASE64.encode(self.generation.verifying_key().as_bytes()),
+            self.generation,
             BASE64.encode(self.document.verifying_key().as_bytes()),
         )
     }

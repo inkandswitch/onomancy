@@ -76,8 +76,9 @@ use self::{
 use crate::ladder::{self, Contender, Continuity, Verdict};
 
 /// Serial deferral bound: 5 minutes of clock skew, in the serial's
-/// millisecond convention.
-const SKEW_MS: u64 = 5 * 60 * 1000;
+/// millisecond convention. Public so one-shot consumers apply the
+/// same bound as the derivation.
+pub const SKEW_MS: u64 = 5 * 60 * 1000;
 
 /// Everything the verifier believes, per hostname: the deterministic
 /// derivation of the binding-cache store, the clock reading, and the

@@ -1,3 +1,16 @@
+/**
+ * Which build of this module is loaded.
+ *
+ * `version` is the package version and does not identify an artifact:
+ * two builds can share one. `revision` is the source commit the
+ * module was built from (short hash; `-dirty` when the tree had
+ * uncommitted changes; `unknown` when the builder supplied none).
+ */
+export interface BuildInfo {
+  version: string;
+  revision: string;
+}
+
 /** Epoch seconds, as returned by this module. */
 export type UnixSeconds = number;
 
@@ -50,6 +63,32 @@ export interface Verdict {
   checkedAt: UnixSeconds;
 }
 
+/**
+ * Sign exactly the bytes given, returning the 64-byte ed25519
+ * signature over them.
+ *
+ * Certificate assembly takes a signer, never key material: the
+ * module computes `signableBytes`, the signer signs them, and
+ * `encodeCertificate` checks the signature covers that region
+ * verbatim. So the signer MUST sign the bytes as given. A signer that
+ * frames its input first — a length prefix, a domain tag, a
+ * serialization envelope — produces a signature over different bytes,
+ * and no adjustment on the caller's side can make it validate:
+ * framing signers do not compose with this contract.
+ *
+ * The handle shape is what survives non-extractable `CryptoKey`s,
+ * hardware tokens, and runtimes that hold keys on the caller's
+ * behalf.
+ */
+export type SignBytes = (bytes: Uint8Array) => Promise<Uint8Array>;
+
+/** A signing capability: the verifying key, and a way to sign with its counterpart. */
+export interface Signing {
+  /** The 32-byte ed25519 verifying key. Passed as `signer` to `signableBytes`. */
+  verifyingKey: Uint8Array;
+  sign: SignBytes;
+}
+
 /** The result of a live DNSSEC walk. */
 export interface Resolution {
   hostname: string;
@@ -68,6 +107,51 @@ export interface Resolution {
   freshness: Freshness;
   window: ValidityWindow;
   checkedAt: UnixSeconds;
+}
+
+/** A binding as the zone states it, at the top serial of an `RRset`. */
+export interface RecordCandidate {
+  /** The bound document, as an `automerge:` anchor. */
+  document: string;
+  /** The attested generation key (`g=`), canonical base64. */
+  generation: string;
+  /** Serial as a decimal string: the space is u64, which `number` cannot hold. */
+  serial: string;
+}
+
+/**
+ * The result of `classifyRecords`: the `RRset` rules over one zone's
+ * TXT strings at one instant.
+ *
+ * Every input lands in exactly one place: `selected` or `contested`,
+ * or one of the four counts. `selected` and `contested` are mutually
+ * exclusive; both are absent when no binding was considered.
+ *
+ * Contest is keyed on `(document, generation)`, not on the document
+ * alone: two records for one document attesting different `g=` at one
+ * serial disagree about which key is current, and are reported as a
+ * contest rather than collapsed into a selection. A zone mid-rotation
+ * can therefore read contested here where a document-keyed rule read
+ * verified. This matches the verifier.
+ *
+ * This is the one-shot rule over one `RRset`. It is not the ratchet,
+ * not generation lineage, and not the decisions logic — all of which
+ * remember. A caller persisting state must not read `selected` as
+ * "the binding"; it is the zone's current word, before any of that.
+ */
+export interface RecordClassification {
+  /** The zone's word: the unique claim at the top serial. */
+  selected?: RecordCandidate;
+  /** Distinct claims tied at the top serial: equivocation, none picked. */
+  contested?: RecordCandidate[];
+  /** Bindings set aside: serial more than five minutes ahead of the clock. */
+  deferred: number;
+  /** Records that are not `v=ONO` at all (SPF, DKIM, anything else). */
+  foreign: number;
+  /** `v=ONO` records with a tag this software does not implement — a newer protocol version. */
+  unknownVersion: number;
+  /** `v=ONO0` records that failed the strict grammar. */
+  malformed: number;
 }
 
 /** How far a resolution walk got. */

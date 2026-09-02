@@ -47,4 +47,12 @@ extern "C" {
     /// A resolution walk's outcome, as published to TypeScript.
     #[wasm_bindgen(typescript_type = "WalkOutcome")]
     pub type JsWalkOutcome;
+
+    /// An `RRset` classification, as published to TypeScript.
+    #[wasm_bindgen(typescript_type = "RecordClassification")]
+    pub type JsRecordClassification;
+
+    /// This build's identity, as published to TypeScript.
+    #[wasm_bindgen(typescript_type = "BuildInfo")]
+    pub type JsBuildInfo;
 }

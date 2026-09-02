@@ -1,6 +1,8 @@
 //! The attested generation key (`g=`).
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, fmt};
+
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use ed25519_dalek::VerifyingKey;
 
 /// The current generation key: the attested chokepoint that certificate
@@ -24,6 +26,14 @@ impl GenerationKey {
 impl From<VerifyingKey> for GenerationKey {
     fn from(key: VerifyingKey) -> Self {
         Self(key)
+    }
+}
+
+/// The wire spelling: canonical padded base64 of the key bytes, as
+/// the `g=` field carries it.
+impl fmt::Display for GenerationKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&BASE64.encode(self.0.as_bytes()))
     }
 }
 

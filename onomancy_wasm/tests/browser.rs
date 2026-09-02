@@ -180,3 +180,22 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
 fn text(raw: &str) -> Text {
     JsValue::from_str(raw).unchecked_into()
 }
+
+/// A loaded module says which build it is: the package version, and
+/// a revision that is never empty (the builder's fallback is the
+/// literal `unknown`, so an empty string would mean the plumbing
+/// broke).
+#[wasm_bindgen_test]
+fn build_info_identifies_the_module() -> JsTestResult {
+    let info = JsValue::from(onomancy_wasm::build_info());
+    let get = |key: &str| js_sys::Reflect::get(&info, &JsValue::from_str(key));
+
+    assert_eq!(
+        get("version")?.as_string(),
+        Some(env!("CARGO_PKG_VERSION").to_owned())
+    );
+
+    let revision = get("revision")?.as_string().unwrap_or_default();
+    assert!(!revision.is_empty(), "revision is never empty");
+    Ok(())
+}
