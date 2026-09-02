@@ -25,7 +25,8 @@ use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions
 /// The decisions schema is protocol data, not names: a single root
 /// key holding a versioned map, namespaced like every other reserved
 /// entry. Its value is a map rather than a reference, so it takes no
-/// part in path matching (spec E8).
+/// part in path matching: non-reference values are absent from
+/// matching (path-resolution spec, Error Conditions).
 const DECISIONS_KEY: &str = ".well-known/onomancy/decisions";
 
 /// The decisions schema version this reader understands.

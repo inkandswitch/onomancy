@@ -48,7 +48,7 @@ pub struct Migrate {
     /// empty for a fresh document).
     pub lineage: Vec<RotationStatement>,
 
-    /// The successor document's authority carriage: D10 path proof
+    /// The successor document's authority carriage: generation-path proof
     /// for the new `g=`, attached to the successor certificate.
     /// Opaque here — minted by `onomancy_keyhive::mint`.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,

@@ -35,7 +35,7 @@ use onomancy_keyhive::authority::KeyhiveAuthority;
 use onomancy_protocol::verifier::verdict::{
     self, DeferredEvidence, GenerationCheck, Rejection, Verdict,
 };
-use wasm_bindgen::{JsCast as _, JsError, JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::{prelude::wasm_bindgen, JsCast as _, JsError, JsValue};
 
 // Reading a certificate OUT OF a document needs the document
 // substrate; verifying bytes does not. Only the former is gated.
@@ -206,7 +206,7 @@ pub fn verify_binding(
     // document at the same zone state still order deterministically;
     // a full-key tie then breaks on the document anchor. Genuine
     // zone equivocation is the derivation's to surface as contested
-    // (binding-cache B13); a one-shot check reports the maximal
+    // (binding-cache, Conditions); a one-shot check reports the maximal
     // candidate. A deferred candidate's `issued_at` reads as zero,
     // mirroring the derivation's bare-refresh convention — rank
     // already places every deferral below every verdict.
@@ -296,7 +296,7 @@ fn verdict_object(verdict: &Verdict, now: UnixSeconds) -> JsVerdict {
 ///
 /// Same key set as a verdict, because a caller should read one
 /// freshness axis one way. `generation` is explicitly `null` rather
-/// than absent: deferral precedes the D10 decision, so the check was
+/// than absent: deferral precedes the generation-path decision, so the check was
 /// not made — which is a different thing from being made and
 /// forgotten, and a missing key cannot say so.
 fn deferred_object(hostname: &DnsName, evidence: &DeferredEvidence, now: UnixSeconds) -> JsVerdict {
@@ -377,9 +377,9 @@ fn rejection_message(rejection: &Rejection) -> String {
 /// concerns here.
 ///
 /// A malformed hostname carries `invalid-hostname`, the same code
-/// `resolveHostname` gives for the same input. They differed until a
-/// review noticed, which made `"reason" in error` mean two things
-/// depending on which entry point a caller reached.
+/// `resolveHostname` gives for the same input: one code per
+/// condition regardless of entry point, or `"reason" in error`
+/// means two things.
 fn parse_hostname(raw: &Text) -> Result<DnsName, JsValue> {
     let raw = text::read(raw, "a hostname").map_err(JsValue::from)?;
 

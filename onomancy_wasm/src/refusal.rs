@@ -24,10 +24,7 @@ use wasm_bindgen::JsValue;
 ///
 /// The enum, [`RefusalReason::ALL`], and [`RefusalReason::as_str`]
 /// are all generated from the one list below, so no hand-kept copy
-/// exists to drift. A previous shape kept `ALL` by hand and guarded
-/// it with a test that iterated `ALL` itself — which could not visit
-/// a variant that was missing from it, precisely the case it claimed
-/// to catch. Now adding a `published` variant grows `ALL` by
+/// exists to drift: adding a `published` variant grows `ALL` by
 /// construction, and the union drift test fails until the `.d.ts`
 /// declares the new code.
 macro_rules! refusal_reasons {
@@ -72,12 +69,10 @@ macro_rules! refusal_reasons {
 refusal_reasons! {
     /// Why an operation was refused, as a type rather than a string.
     ///
-    /// A type because the original shape kept the vocabulary in three
-    /// places — the match arms, a hand-written `CODES` list, and the
-    /// TypeScript union — and the tests compared only the second and
-    /// third. Renaming an arm passed. Retargeting one passed. Now the
-    /// arms produce values, and the list that declares the variants
-    /// is the list `ALL` and `as_str` are generated from.
+    /// A type so the vocabulary has one home: the arms produce
+    /// values, and the list that declares the variants is the list
+    /// `ALL` and `as_str` are generated from — a code that no longer
+    /// matches its declaration cannot be spelled.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum RefusalReason {
         published {
@@ -218,8 +213,7 @@ pub const fn walk_reason(error: &crate::doh::FetchChainError) -> RefusalReason {
         // A name too long to sit under `_onomancy` is the caller's to
         // fix and is visible to them. Reporting it as a chain
         // rejection would claim a security failure over a typo — the
-        // wrong-remedy bug this module exists to prevent, and what a
-        // `_` arm here did until it was enumerated.
+        // wrong-remedy bug this module exists to prevent.
         FetchChainError::Build(BuildError::UnrepresentableName(_)) => {
             RefusalReason::InvalidHostname
         }
@@ -238,10 +232,9 @@ pub const fn walk_reason(error: &crate::doh::FetchChainError) -> RefusalReason {
 /// arriving one stage later than [`walk_reason`] catches it.
 ///
 /// Spelled out rather than wildcarded on purpose. A new `WalkError`
-/// variant would inherit `ChainRejected` silently under a `_` arm —
-/// a correct mapping falsified by a change elsewhere, which is the
-/// failure this codebase has met repeatedly. Exhaustiveness turns
-/// that into a compile error at the site that must choose.
+/// variant would inherit `ChainRejected` silently under a `_` arm;
+/// exhaustiveness turns that into a compile error at the site that
+/// must choose.
 #[cfg(feature = "doh")]
 #[must_use]
 pub const fn validation_reason(error: &onomancy_dnssec::validator::WalkError) -> RefusalReason {
@@ -275,10 +268,9 @@ mod tests {
     use onomancy_dnssec::validator::WalkError;
 
     /// `ALL` is generated from the same list that declares the
-    /// variants, so it cannot drift from the enum — the predecessor
-    /// of this test iterated `ALL` itself, which could not visit a
-    /// variant missing from it. What still needs asserting is the
-    /// boundary: the one unpublished variant stays unpublished.
+    /// variants, so it cannot drift from the enum. What still needs
+    /// asserting is the boundary: the one unpublished variant stays
+    /// unpublished.
     #[test]
     fn a_non_refusal_is_never_published() {
         assert!(!RefusalReason::ALL.contains(&RefusalReason::NotARefusal));

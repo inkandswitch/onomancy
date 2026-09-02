@@ -45,7 +45,7 @@ pub struct Bind {
     pub lineage: alloc::vec::Vec<RotationStatement>,
 
     /// The authority carriage to attach: delegation proof that
-    /// `generation` lies on `document`'s path (D10). Opaque here —
+    /// `generation` lies on `document`'s path. Opaque here —
     /// minted by `onomancy_keyhive::mint`, verified by the agent's
     /// authority.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,

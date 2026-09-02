@@ -5,7 +5,7 @@ use core::{fmt, str};
 
 use onomancy_core::{
     anchor::Anchor,
-    name::{Name, ParseSegmentsError, parse_segments, split_anchor},
+    name::{parse_segments, split_anchor, Name, ParseSegmentsError},
 };
 
 /// A normalized DNS name: lowercase ASCII A-labels, at least two labels,
@@ -208,8 +208,9 @@ pub enum ParseDnsNameError {
     /// The rightmost label was all digits.
     ///
     /// Stated as the rule rather than as one of its consequences:
-    /// the message formerly read "IP literals are not DNS names",
-    /// which explains `1.2.3.4` but misdescribes `host.123`.
+    /// "IP literals are not DNS names" explains `1.2.3.4` but
+    /// misdescribes `host.123`, which is no IP literal and is
+    /// rejected by the same rule.
     #[error(
         "a top-level domain must not be all digits (the rule that keeps IP literals from being names)"
     )]
@@ -257,9 +258,9 @@ mod tests {
         );
     }
 
-    /// The same rule, on a name that is not an IP literal — the case
-    /// whose refusal used to be explained by a reason that did not
-    /// apply to it.
+    /// The same rule, on a name that is not an IP literal — the
+    /// all-digit-TLD rejection covers more than IP literals, and this
+    /// pins the wider half.
     #[test]
     fn rejects_an_all_digit_tld_that_is_not_an_ip_literal() {
         assert_eq!(

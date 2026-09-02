@@ -18,14 +18,15 @@ use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 ///
 /// Implementations MUST treat non-conforming keys (empty, `.`, or `..`
 /// segments; `#`; leading or trailing `/`) as absent during matching
-/// (spec condition E6): `reference` simply never returns them.
+/// (path-resolution spec, Error Conditions): `reference` simply never
+/// returns them.
 ///
 /// A key whose value is not a reference is likewise not an edge
-/// (E8) — which is what lets a substrate keep protocol data in the
+/// — which is what lets a substrate keep protocol data in the
 /// same map without it participating in resolution. Such an entry is
 /// invisible to the walk by construction, never by convention.
 ///
-/// Conflict handling (E7) is the substrate's: concurrent writes to one
+/// Conflict handling is the substrate's: concurrent writes to one
 /// key MUST already be resolved to the deterministic winner by the time
 /// `reference` answers. Surfacing the losers is a reporting concern
 /// layered above this seam, not part of the walk.

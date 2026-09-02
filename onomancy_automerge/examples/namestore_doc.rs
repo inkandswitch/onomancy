@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     doc.transact::<_, _, automerge::AutomergeError>(|tx| {
         for entry in args {
             let (key, value) = entry.split_once('=').unwrap_or((entry.as_str(), ""));
-            // Only bare references belong in a namestore (E5): check
+            // Only bare references belong in a namestore (no symlinks): check
             // the spelling before writing anything.
             let anchor = value
                 .strip_prefix("automerge:")

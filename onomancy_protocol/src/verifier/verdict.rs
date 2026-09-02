@@ -6,7 +6,7 @@
 //! bytes ─► decode (strict + signature) ─► hostname check
 //!       ─► chain validation (seam)      ─► TXT cross-check + selection
 //!       ─► deferral (skew / not-yet-begun)
-//!       ─► graded freshness at `now`    ─► generation rules (D10)
+//!       ─► graded freshness at `now`    ─► generation rules
 //!       ─► Verdict { fresh ✓ / stale ⚠, … }
 //! ```
 //!
@@ -49,7 +49,7 @@ pub struct Verdict {
     pub generation: GenerationKey,
 
     /// Whether the delegation chain lies on the delegation path for the attested generation.
-    /// With a fresh chain this is always `OnPath` (D10 rejects
+    /// With a fresh chain this is always `OnPath` (verification rejects
     /// otherwise); with a stale chain the check is provisional.
     pub generation_check: GenerationCheck,
 
@@ -89,7 +89,8 @@ pub struct DeferredEvidence {
     pub window: ValidityWindow,
 }
 
-/// The D10 standing of the delegation-chain/generation-key check.
+/// The standing of the delegation-chain/generation-key check
+/// (dns-anchor, Generation Key).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GenerationCheck {
     /// Stale chain and the attested `g=` is not on the delegation path:
@@ -109,7 +110,7 @@ pub enum GenerationCheck {
 /// signature failure, a hostname other than expected, an invalid
 /// chain, a proven `RRset` that does not attest the certificate's
 /// document, a deferral (never malformed — re-evaluate later), or a
-/// fresh chain whose delegation path lacks the attested `g=` (D10).
+/// fresh chain whose delegation path lacks the attested `g=`.
 pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
     bytes: &[u8],
     expected_hostname: &DnsName,
@@ -148,7 +149,7 @@ pub fn verify<V: ChainValidator, A: AuthorityVerifier>(
 
     let freshness = state::freshness(&evidence, now);
 
-    // D10: fresh + off_paths is a rejection; stale + off_paths is
+    // Fresh + off-path is a rejection; stale + off-path is
     // provisional.
     let generation_check = if evidence.generation_on_path {
         GenerationCheck::OnPath
@@ -194,7 +195,7 @@ pub enum Rejection {
     #[error("deferred: not considered until the clock reaches it")]
     Deferred(alloc::boxed::Box<DeferredEvidence>),
 
-    /// D10: a fresh chain whose delegation path lacks the
+    /// A fresh chain whose delegation path lacks the
     /// attested `g=`.
     #[error("fresh chain does not lie on the delegation path for the attested generation key")]
     GenerationOffPath,

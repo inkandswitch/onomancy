@@ -50,7 +50,8 @@ pub(crate) struct Intent {
 /// The authority seam is the CALLER's: a plan is a witness only
 /// against the authority its verifiers will run, so `onomancer`
 /// passes `KeyhiveAuthority` and a plan whose carriage the real
-/// verifier would reject under D10 or §Who Signs fails here, at plan
+/// verifier would reject under the generation-path rule or §Who
+/// Signs fails here, at plan
 /// time — not at the first verifier.
 pub(crate) fn simulate<A: AuthorityVerifier>(
     hostname: &DnsName,

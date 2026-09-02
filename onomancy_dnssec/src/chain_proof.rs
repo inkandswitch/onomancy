@@ -27,7 +27,7 @@ pub struct ChainProof {
     /// key), not the validator's — the validator only proves what
     /// the zone said. Unknown-version and unknown-record strings
     /// are already dispositioned out; per-record grammar rejections
-    /// (D5) drop only the offending record.
+    /// drop only the offending record.
     pub records: Vec<TxtRecord>,
 
     /// The chain's ∩-window.
@@ -45,7 +45,7 @@ pub trait ChainValidator {
     /// trust anchor (including empty ∩-windows and unsupported
     /// algorithms, which MUST be invalid ✗, never insecure-but-ok).
     fn validate(&self, hostname: &DnsName, chain: &DnssecChain)
-    -> Result<ChainProof, InvalidChain>;
+        -> Result<ChainProof, InvalidChain>;
 }
 
 /// The chain never verified from the trust anchor: invalid ✗, not

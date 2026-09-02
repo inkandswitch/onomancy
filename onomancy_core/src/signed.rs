@@ -82,11 +82,10 @@ impl<P: Payload> Signed<P> {
     /// Routed through [`Self::try_from_parts`], so this constructor
     /// upholds the same invariant the external-signing path does: a
     /// `Signed` never carries a signature that does not verify under
-    /// its payload's own signer. Previously this was a debug-only
-    /// assertion, which made the in-process path the one route that
-    /// could break the invariant in a release build — the artifact
-    /// would encode, then fail at every decoder, presenting as
-    /// corruption rather than as the caller error it is.
+    /// its payload's own signer. Signing with a mismatched key would
+    /// otherwise encode an artifact that fails at every decoder —
+    /// presenting as corruption rather than as the caller error it
+    /// is.
     ///
     /// Every unit constructor in the workspace derives the payload's
     /// signer field from this key, so the error is unreachable from

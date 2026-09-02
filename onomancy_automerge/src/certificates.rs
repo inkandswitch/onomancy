@@ -16,7 +16,8 @@
 //! Top-level keys, flat: a namestore is the document's own map, not a
 //! container inside it. The certificate list sits beside the names
 //! because its value is a list rather than a reference, so path
-//! resolution passes over it (path-resolution spec, E8) without any
+//! resolution passes over it (path-resolution spec, Error Conditions)
+//! without any
 //! resolver needing to know the key.
 //!
 //! The prefix is a **writers' convention**, not an enforced
@@ -41,7 +42,7 @@ use crate::namestore::{HeldDocuments, parse_bare_reference};
 ///
 /// Unreachable by any name: `.well-known` and the rest are valid
 /// segments, but the value stored here is a list rather than a
-/// reference, so resolution treats the key as absent (E8).
+/// reference, so resolution treats the key as absent.
 pub const CERTIFICATES_KEY: &str = ".well-known/onomancy/certificates";
 
 /// Every certificate held in `doc` itself, ignoring any reference.
@@ -137,7 +138,7 @@ pub fn put(doc: &mut Automerge, certificate: &Certificate) -> Result<(), WriteEr
 
     doc.transact::<_, _, automerge::AutomergeError>(|tx| {
         // A root key, beside names and application data. The list is
-        // not a reference, so it takes no part in matching (spec E8)
+        // not a reference, so it takes no part in matching
         // and needs no resolver to know its name.
         let list = match tx.get(automerge::ROOT, CERTIFICATES_KEY)? {
             Some((Value::Object(ObjType::List), id)) => id,
@@ -449,7 +450,7 @@ mod tests {
 
     #[test]
     fn the_location_is_invisible_to_the_namestore_walk() -> TestResult {
-        // E8: the value is not a reference, so no name addresses it —
+        // The value is not a reference, so no name addresses it —
         // which is why the certificate can share the reserved map
         // with edges at all.
         let cert = certificate(1, "example.com");

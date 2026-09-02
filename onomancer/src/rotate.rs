@@ -82,7 +82,7 @@ impl Rotate {
         };
 
         // One carriage serves both: the statement's signing authority
-        // (terminates at Gₙ₊₁) and the certificate's D10 path proof.
+        // (terminates at Gₙ₊₁) and the certificate's generation-path proof.
         let carriage = mint::generation_carriage(&doc_key, &successor)?;
 
         let plan = RotateCeremony {

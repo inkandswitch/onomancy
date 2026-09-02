@@ -129,7 +129,7 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
 /// component, and STRICTLY better in at least one.
 fn dominates(other: &BindingEvidence, record: &BindingEvidence) -> bool {
     // A refresh row never prunes a certificate: candidacy is
-    // certificate-attested (B14), so a ChainOnly item component-wise
+    // certificate-attested, so a ChainOnly item component-wise
     // beating a document's last certificate would leave the pruned
     // store unable to derive the binding at all — an invariant
     // violation from static data.
@@ -311,15 +311,14 @@ mod tests {
 
     #[test]
     fn equal_component_duplicates_are_kept_whole_and_survive_resets() -> TestResult {
-        // Review probe D: two certificates identical in every ladder
-        // component — same document, generation, window, serial,
-        // issued_at — but distinct bytes (one carries a lineage
-        // statement). Under a non-strict domination relation they
-        // dominated each other MUTUALLY: both fell off the frontier,
-        // a hash-arbitrary tenure endpoint survived alone, and a
-        // reset naming the dropped sibling by hash silently lost its
-        // target — derive(pruned) diverged from derive(store).
-        // Domination is strict now; equal classes are kept whole.
+        // Two certificates identical in every ladder component —
+        // same document, generation, window, serial, issued_at — but
+        // distinct bytes (one carries a lineage statement). Without
+        // strictness they would dominate each other mutually: both
+        // fall off the frontier, a hash-arbitrary tenure endpoint
+        // survives alone, and a reset naming the dropped sibling by
+        // hash loses its target — derive(pruned) diverges from
+        // derive(store). Equal-component classes are kept whole.
         use crate::test_utils::binding_carrying;
 
         let plain = binding(1, 11, 1, 100, (NOW - 5_000, NOW + 1_000), 20)?;

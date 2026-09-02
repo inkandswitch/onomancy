@@ -71,8 +71,8 @@ pub async fn resolve_hostname(
     })?;
 
     // Checked before the fetch, so a malformed resolver URL surfaces
-    // as the caller error it is. It previously arrived as
-    // `transport`, which invites a retry that can never succeed.
+    // as the caller error it is — never as `transport`, which invites
+    // a retry that can never succeed.
     if let Some(url) = doh_url.as_deref()
         && web_sys::Url::new(url).is_err()
     {

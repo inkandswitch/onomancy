@@ -230,19 +230,12 @@ mod tests {
     /// The signing bar is `>= Access::Admin`, not `== Access::Admin`.
     ///
     /// Those agree on every input only because Admin is currently the
-    /// maximum of Keyhive's ladder. What this test provides, stated
-    /// honestly: the exhaustive `match` is a **compile-time tripwire**
-    /// — a new `Access` variant refuses to compile until a human
-    /// visits this test — and the array below is **hand-kept**, so the
-    /// runtime maximum only re-checks whatever the visitor listed. A
-    /// visitor who appends the new variant to the match arm but not to
-    /// the array keeps this green with a level above Admin in
-    /// existence: the tripwire forces the visit, and the two comments
-    /// below are the visit's instructions. (An earlier version claimed
-    /// the assertion itself would flip; it would not. A
-    /// compiler-derived enumeration would close this, at the cost of a
-    /// dependency — judged not worth it for a four-variant
-    /// upstream enum.)
+    /// maximum of Keyhive's ladder. What this test provides: the
+    /// exhaustive `match` is a compile-time tripwire — a new `Access`
+    /// variant refuses to compile until a human visits — and the
+    /// array below is hand-kept, so the runtime maximum only
+    /// re-checks what the visitor listed. The tripwire forces the
+    /// visit; the comments below are the visit's instructions.
     #[test]
     fn admin_is_the_top_of_the_ladder() {
         // Tripwire: a new `Access` variant fails to compile here.

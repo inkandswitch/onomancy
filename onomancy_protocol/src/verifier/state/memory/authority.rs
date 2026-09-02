@@ -27,7 +27,7 @@ impl MemoryAuthority {
         self
     }
 
-    /// Report `generation` as on NO delegation path (for D10
+    /// Report `generation` as on NO delegation path (for revocation
     /// scenarios).
     #[must_use]
     pub fn off_path(mut self, generation: &GenerationKey) -> Self {

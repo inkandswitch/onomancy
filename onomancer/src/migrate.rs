@@ -50,7 +50,7 @@ pub(crate) struct Migrate {
     successor_seed: Option<String>,
 
     /// The successor document's generation key file (needed to mint
-    /// its D10 path proof).
+    /// its generation-path proof).
     #[arg(long)]
     successor_generation_key: Option<PathBuf>,
 

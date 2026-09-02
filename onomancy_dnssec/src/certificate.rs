@@ -58,7 +58,7 @@ use onomancy_core::{
     anchor::doc::{DocAnchor, Head},
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
-    signed::{Signed, payload::Malformed},
+    signed::{payload::Malformed, Signed},
     time::UnixSeconds,
     wire::{self, OversizeUnit, Reader, WireError},
 };
@@ -577,15 +577,13 @@ mod tests {
                 0xAA;
                 9
             ])]),
-            lineage: vec![
-                RotationStatement::sign(
-                    &doc(1),
-                    &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
-                    &SigningKey::from_bytes(&[7; 32]),
-                    DelegationChain::default(),
-                )
-                .expect("under the unit cap"),
-            ],
+            lineage: vec![RotationStatement::sign(
+                &doc(1),
+                &GenerationKey::from(SigningKey::from_bytes(&[6; 32]).verifying_key()),
+                &SigningKey::from_bytes(&[7; 32]),
+                DelegationChain::default(),
+            )
+            .expect("under the unit cap")],
             chain: DnssecChain::from(vec![vec![0xBB; 17].into()]),
         }
     }
@@ -599,13 +597,10 @@ mod tests {
     /// hands out must be exactly what `sign` actually signed.
     ///
     /// Checked through the **signature**, not by comparing two byte
-    /// strings. An earlier version of this test asserted
-    /// `signable_bytes(..) == sample().signed_bytes()`, and both sides
-    /// of that route through `Signed::signable_region` — so it was
-    /// `f(x) == f(x)` and passed even with `Signed::sign` mutated to
-    /// omit the tag from the region it signs. Verifying the real
-    /// signature over the offered bytes is the only form that reaches
-    /// `sign` at all.
+    /// strings: both byte strings route through
+    /// `Signed::signable_region`, so comparing them is `f(x) == f(x)`
+    /// and never reaches `sign`. Verifying the real signature over
+    /// the offered bytes is the only form that does.
     #[test]
     fn signable_bytes_are_what_sign_signs() {
         let key = SigningKey::from_bytes(&[2; 32]);
@@ -654,9 +649,8 @@ mod tests {
 
     /// The same invariant on the in-process route: `Signed::sign`
     /// with a key that is not the payload's named signer is refused,
-    /// in release builds too. Formerly a debug-only assertion, which
-    /// made this the one constructor that could ship a `Signed` no
-    /// decoder would ever accept.
+    /// in release builds too — no constructor may ship a `Signed`
+    /// that no decoder would accept.
     #[test]
     fn signing_with_a_key_the_payload_does_not_name_is_refused() {
         let named = SigningKey::from_bytes(&[2; 32]);

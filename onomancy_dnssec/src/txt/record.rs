@@ -8,7 +8,7 @@
 //! binding record?").
 
 use alloc::{boxed::Box, string::String};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use core::{fmt, str};
 use ed25519_dalek::VerifyingKey;
 
@@ -342,7 +342,7 @@ pub enum ParseTxtRecordError {
 
     /// `k=` named an algorithm other than `ed25519`. Per-record
     /// rejection: siblings in the `RRset` are still processed, but this
-    /// SHOULD be surfaced as a possible downgrade signal (D5).
+    /// SHOULD be surfaced as a possible downgrade signal.
     #[error("unknown key algorithm `{got}` (ONO0 is ed25519-only)")]
     UnknownKeyAlgorithm {
         /// The algorithm name presented.
@@ -471,160 +471,164 @@ mod tests {
         }
     }
 
-    // ── Regressions ───────────────────────────────────────────────────
+    /// Pinned regressions: shapes that once mis-parsed stay parsed.
+    mod regressions {
+        use super::*;
 
-    #[test]
-    fn spec_shaped_record_roundtrips() -> TestResult {
-        let record = vector(1, 7, 9);
-        let rendered = record.to_string();
-        assert!(rendered.starts_with("v=ONO0;k=ed25519;n=1;g="));
-        assert_eq!(TxtRecord::parse(&rendered)?, record);
-        Ok(())
-    }
-
-    #[test]
-    fn max_serial_stays_within_length_bound() -> TestResult {
-        let record = vector(u64::MAX, 7, 9);
-        let rendered = record.to_string();
-        assert_eq!(rendered.len(), MAX_RECORD_LEN);
-        assert_eq!(TxtRecord::parse(&rendered)?, record);
-        Ok(())
-    }
-
-    #[test]
-    fn foreign_records_are_dispositioned_not_rejected() -> TestResult {
-        for foreign in [
-            "v=spf1 include:_spf.example.com ~all",
-            "v=DKIM1; k=rsa; p=MIGf...",
-            "",
-            "v=ONO", // no version digits at all
-            "v=ONOx;k=ed25519;n=1;g=a;p=b",
-        ] {
-            assert_eq!(TxtRecord::classify(foreign)?, Classified::UnknownRecord);
+        #[test]
+        fn spec_shaped_record_roundtrips() -> TestResult {
+            let record = vector(1, 7, 9);
+            let rendered = record.to_string();
+            assert!(rendered.starts_with("v=ONO0;k=ed25519;n=1;g="));
+            assert_eq!(TxtRecord::parse(&rendered)?, record);
+            Ok(())
         }
-        Ok(())
-    }
 
-    #[test]
-    fn future_tags_are_skipped_not_rejected() -> TestResult {
-        for future in [
-            "v=ONO1;k=ed25519;n=1;g=x;p=y",
-            "v=ONO00;utter=junk",
-            "v=ONO18446744073709551616", // > u64::MAX is still an ONO tag
-        ] {
-            assert_eq!(TxtRecord::classify(future)?, Classified::UnknownVersion);
+        #[test]
+        fn max_serial_stays_within_length_bound() -> TestResult {
+            let record = vector(u64::MAX, 7, 9);
+            let rendered = record.to_string();
+            assert_eq!(rendered.len(), MAX_RECORD_LEN);
+            assert_eq!(TxtRecord::parse(&rendered)?, record);
+            Ok(())
         }
-        Ok(())
-    }
 
-    #[test]
-    fn ono0_junk_is_rejected_with_field_precision() {
-        let good = vector(3, 7, 9).to_string();
+        #[test]
+        fn foreign_records_are_dispositioned_not_rejected() -> TestResult {
+            for foreign in [
+                "v=spf1 include:_spf.example.com ~all",
+                "v=DKIM1; k=rsa; p=MIGf...",
+                "",
+                "v=ONO", // no version digits at all
+                "v=ONOx;k=ed25519;n=1;g=a;p=b",
+            ] {
+                assert_eq!(TxtRecord::classify(foreign)?, Classified::UnknownRecord);
+            }
+            Ok(())
+        }
 
-        // Reordered fields: the field in `k`'s position lacks its prefix.
-        let reordered = good.replace("k=ed25519;n=3", "n=3;k=ed25519");
-        assert_eq!(
-            TxtRecord::parse(&reordered),
-            Err(ParseTxtRecordError::WrongFieldPrefix {
-                field: FieldName::KeyAlgorithm
-            })
-        );
+        #[test]
+        fn future_tags_are_skipped_not_rejected() -> TestResult {
+            for future in [
+                "v=ONO1;k=ed25519;n=1;g=x;p=y",
+                "v=ONO00;utter=junk",
+                "v=ONO18446744073709551616", // > u64::MAX is still an ONO tag
+            ] {
+                assert_eq!(TxtRecord::classify(future)?, Classified::UnknownVersion);
+            }
+            Ok(())
+        }
 
-        // Unknown algorithm is its own (surfaceable) case.
-        let rsa = good.replace("k=ed25519", "k=rsa");
-        assert_eq!(
-            TxtRecord::parse(&rsa),
-            Err(ParseTxtRecordError::UnknownKeyAlgorithm {
-                got: String::from("rsa")
-            })
-        );
+        #[test]
+        fn ono0_junk_is_rejected_with_field_precision() {
+            let good = vector(3, 7, 9).to_string();
 
-        // Extra field.
-        let extended = alloc::format!("{good};x=1");
-        assert_eq!(
-            TxtRecord::parse(&extended),
-            Err(ParseTxtRecordError::WrongFieldCount { got: 6 })
-        );
-    }
+            // Reordered fields: the field in `k`'s position lacks its prefix.
+            let reordered = good.replace("k=ed25519;n=3", "n=3;k=ed25519");
+            assert_eq!(
+                TxtRecord::parse(&reordered),
+                Err(ParseTxtRecordError::WrongFieldPrefix {
+                    field: FieldName::KeyAlgorithm
+                })
+            );
 
-    #[test]
-    fn base64_failures_name_their_field() {
-        let good = vector(3, 7, 9).to_string();
-        let g_value = good
-            .split(';')
-            .nth(3)
-            .and_then(|f| f.strip_prefix("g="))
-            .expect("well-formed vector")
-            .to_string();
+            // Unknown algorithm is its own (surfaceable) case.
+            let rsa = good.replace("k=ed25519", "k=rsa");
+            assert_eq!(
+                TxtRecord::parse(&rsa),
+                Err(ParseTxtRecordError::UnknownKeyAlgorithm {
+                    got: String::from("rsa")
+                })
+            );
 
-        // Wrong length.
-        let short = good.replace(&g_value, &g_value[..40]);
-        assert_eq!(
-            TxtRecord::parse(&short),
-            Err(ParseTxtRecordError::WrongBase64Length {
-                field: FieldName::GenerationKey,
-                got: 40
-            })
-        );
+            // Extra field.
+            let extended = alloc::format!("{good};x=1");
+            assert_eq!(
+                TxtRecord::parse(&extended),
+                Err(ParseTxtRecordError::WrongFieldCount { got: 6 })
+            );
+        }
 
-        // Invalid alphabet, same length.
-        let junk = good.replace(&g_value, &"!".repeat(44));
-        assert_eq!(
-            TxtRecord::parse(&junk),
-            Err(ParseTxtRecordError::MalformedBase64 {
-                field: FieldName::GenerationKey
-            })
-        );
-    }
+        #[test]
+        fn base64_failures_name_their_field() {
+            let good = vector(3, 7, 9).to_string();
+            let g_value = good
+                .split(';')
+                .nth(3)
+                .and_then(|f| f.strip_prefix("g="))
+                .expect("well-formed vector")
+                .to_string();
 
-    /// The decode engine must reject non-canonical trailing-bit
-    /// spellings — the injectivity guarantee `decode_key_field` leans
-    /// on. 32-byte payloads carry 4 data bits + 2 spare bits in their
-    /// 43rd character; flipping the sextet's lowest bit changes only a
-    /// spare bit, producing an alternate spelling of the same bytes.
-    #[test]
-    fn non_canonical_base64_is_malformed() -> TestResult {
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            // Wrong length.
+            let short = good.replace(&g_value, &g_value[..40]);
+            assert_eq!(
+                TxtRecord::parse(&short),
+                Err(ParseTxtRecordError::WrongBase64Length {
+                    field: FieldName::GenerationKey,
+                    got: 40
+                })
+            );
 
-        let good = vector(3, 7, 9).to_string();
-        let (prefix, _) = good.split_once(";g=").expect("well-formed vector");
-        let g_value = good
-            .split(';')
-            .nth(3)
-            .and_then(|f| f.strip_prefix("g="))
-            .expect("well-formed vector");
-        let p_field = good.split(';').nth(4).expect("well-formed vector");
+            // Invalid alphabet, same length.
+            let junk = good.replace(&g_value, &"!".repeat(44));
+            assert_eq!(
+                TxtRecord::parse(&junk),
+                Err(ParseTxtRecordError::MalformedBase64 {
+                    field: FieldName::GenerationKey
+                })
+            );
+        }
 
-        let mut spelled: alloc::vec::Vec<u8> = g_value.bytes().collect();
-        let final_data_char = spelled.get_mut(42).expect("44-char field");
-        let pos = ALPHABET
-            .iter()
-            .position(|c| c == final_data_char)
-            .expect("alphabet character");
-        *final_data_char = *ALPHABET.get(pos ^ 1).expect("in range");
+        /// The decode engine must reject non-canonical trailing-bit
+        /// spellings — the injectivity guarantee `decode_key_field` leans
+        /// on. 32-byte payloads carry 4 data bits + 2 spare bits in their
+        /// 43rd character; flipping the sextet's lowest bit changes only a
+        /// spare bit, producing an alternate spelling of the same bytes.
+        #[test]
+        fn non_canonical_base64_is_malformed() -> TestResult {
+            const ALPHABET: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-        let noncanonical = String::from_utf8(spelled)?;
-        assert_ne!(noncanonical, g_value, "must be an alternate spelling");
+            let good = vector(3, 7, 9).to_string();
+            let (prefix, _) = good.split_once(";g=").expect("well-formed vector");
+            let g_value = good
+                .split(';')
+                .nth(3)
+                .and_then(|f| f.strip_prefix("g="))
+                .expect("well-formed vector");
+            let p_field = good.split(';').nth(4).expect("well-formed vector");
 
-        let candidate = alloc::format!("{prefix};g={noncanonical};{p_field}");
-        assert_eq!(
-            TxtRecord::parse(&candidate),
-            Err(ParseTxtRecordError::MalformedBase64 {
-                field: FieldName::GenerationKey
-            })
-        );
-        Ok(())
-    }
+            let mut spelled: alloc::vec::Vec<u8> = g_value.bytes().collect();
+            let final_data_char = spelled.get_mut(42).expect("44-char field");
+            let pos = ALPHABET
+                .iter()
+                .position(|c| c == final_data_char)
+                .expect("alphabet character");
+            *final_data_char = *ALPHABET.get(pos ^ 1).expect("in range");
 
-    #[test]
-    fn oversized_records_are_rejected_before_field_work() {
-        let long = alloc::format!("v=ONO0;{}", "a".repeat(MAX_RECORD_LEN));
-        assert_eq!(
-            TxtRecord::parse(&long),
-            Err(ParseTxtRecordError::RecordTooLong {
-                len: long.len(),
-                max: MAX_RECORD_LEN
-            })
-        );
+            let noncanonical = String::from_utf8(spelled)?;
+            assert_ne!(noncanonical, g_value, "must be an alternate spelling");
+
+            let candidate = alloc::format!("{prefix};g={noncanonical};{p_field}");
+            assert_eq!(
+                TxtRecord::parse(&candidate),
+                Err(ParseTxtRecordError::MalformedBase64 {
+                    field: FieldName::GenerationKey
+                })
+            );
+            Ok(())
+        }
+
+        #[test]
+        fn oversized_records_are_rejected_before_field_work() {
+            let long = alloc::format!("v=ONO0;{}", "a".repeat(MAX_RECORD_LEN));
+            assert_eq!(
+                TxtRecord::parse(&long),
+                Err(ParseTxtRecordError::RecordTooLong {
+                    len: long.len(),
+                    max: MAX_RECORD_LEN
+                })
+            );
+        }
     }
 }

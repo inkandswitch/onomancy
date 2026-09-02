@@ -380,7 +380,8 @@ fn parse_keys(link: &Link) -> Result<Vec<Dnskey>, WalkError> {
 
 /// Extract the parseable `ONO0` binding records from a proven TXT
 /// `RRset`. Unknown records/versions are dispositioned out; a grammar
-/// violation drops only its own record (D5 is per-record).
+/// violation drops only its own record — grammar rejection is
+/// per-record, never RRset-wide.
 fn parse_bindings(link: &Link) -> Vec<TxtRecord> {
     link.rrset()
         .iter()

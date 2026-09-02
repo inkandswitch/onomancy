@@ -32,11 +32,10 @@ const CERT: &[u8] =
 /// Well after the chain's RRSIG windows lapsed — the certificate is
 /// stale, which is a risk signal and never a forgery signal.
 ///
-/// In **seconds**, as the parameter is named. Asserting the contract
-/// rather than the behaviour is the point: the first version of this
-/// constant was in milliseconds, matching an implementation that
-/// divided the caller's value by 1000, and so the test certified the
-/// bug instead of catching it.
+/// In **seconds**, as the parameter is named — the constant asserts
+/// the declared contract, never whatever scaling an implementation
+/// happens to apply. A milliseconds constant would certify a
+/// milliseconds bug instead of catching it.
 const YEARS_LATER: f64 = 1_788_100_000.0;
 
 /// One second before this certificate's chain window opens
@@ -178,7 +177,7 @@ fn garbage_is_refused_without_panicking() {
     // signal.
     assert_eq!(reason_of(&refused), "malformed");
 
-    // No bytes at all is the same wiring bug wearing a shorter coat.
+    // No bytes at all is the same class of wiring bug.
     let Err(empty) = verify_certificate(&[], &host("brooklynzelenka.com"), None) else {
         panic!("no bytes at all");
     };
@@ -224,7 +223,7 @@ fn a_not_yet_valid_chain_grades_deferred_rather_than_throwing() {
         "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj"
     );
 
-    // The D10 check was never reached, and `null` says so where a
+    // The generation-path check was never reached, and `null` says so where a
     // missing key could not.
     assert!(
         js_sys::Reflect::get(&verdict, &JsValue::from_str("generation"))
@@ -364,9 +363,8 @@ fn an_empty_document_is_absence_with_its_own_code() {
 }
 
 /// A document that binds OTHER hostnames is honest absence for this
-/// one — the exact confusion a past review caught: `hostname-mismatch`
-/// is a security signal about a unit, not the answer to "does this
-/// document bind that name".
+/// one: `hostname-mismatch` is a security signal about a unit, not
+/// the answer to "does this document bind that name".
 #[wasm_bindgen_test]
 fn another_hostnames_certificate_is_absence_not_a_mismatch() {
     let (held, anchor) = held_with_certificate();
@@ -383,9 +381,9 @@ fn another_hostnames_certificate_is_absence_not_a_mismatch() {
 /// index 0 must not mask a fresh one at index 1. The two frozen
 /// captures overlap so that at this instant one is stale
 /// (`real_brooklynzelenka`, window ends 1787355259) and the other
-/// fresh (`…_carriage`, window ends 1787381748) — under the old
-/// first-that-verifies loop, list order decided which verdict a
-/// caller saw.
+/// fresh (`…_carriage`, window ends 1787381748) — a
+/// first-that-verifies loop would let list order pick the verdict,
+/// which is what this pins against.
 #[wasm_bindgen_test]
 fn a_stale_certificate_first_in_the_list_does_not_mask_a_fresh_one() {
     const BOTH_HELD_ONE_FRESH: f64 = 1_787_360_000.0;

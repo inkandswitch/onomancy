@@ -25,7 +25,7 @@ use crate::{
         digest_type::DigestType,
         dnskey::Dnskey,
         name::Name,
-        record::{CLASS_IN, Record},
+        record::{Record, CLASS_IN},
         rr_type::RrType,
     },
 };
@@ -133,7 +133,7 @@ impl Zone {
     }
 
     /// [`rrsig`](Self::rrsig) with an explicit label count — labels
-    /// below the owner's simulate wildcard expansion (D14 inputs).
+    /// below the owner's simulate wildcard expansion.
     ///
     /// # Panics
     ///

@@ -35,16 +35,16 @@ pub enum Resolution<N> {
     },
 }
 
-/// Why a walk stopped early (spec conditions E1 and E2).
+/// Why a walk stopped early (path-resolution spec, Error Conditions).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartialReason {
     /// No key in the current namestore matches the remaining segments
-    /// (E1). Greedy matching never backtracks, so this outcome stands
+    /// Greedy matching never backtracks, so this outcome stands
     /// even when a shorter key could have led elsewhere.
     DanglingSegment,
 
     /// The matched reference's namestore is not locally replicated
-    /// (E2) — unavailable, not wrong.
+    /// — unavailable, not wrong.
     UnsyncedTarget {
         /// The reference whose replica is missing.
         target: DocAnchor,

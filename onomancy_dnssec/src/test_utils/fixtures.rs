@@ -14,12 +14,12 @@ use crate::{
 };
 use onomancy_core::anchor::doc::DocAnchor;
 
-use super::{ChainWindows, Zone, binding_chain, link, txt_record, zone};
+use super::{binding_chain, link, txt_record, zone, ChainWindows, Zone};
 use crate::{
     trust_anchor::TrustAnchor,
     wire::{
         name::Name,
-        record::{CLASS_IN, Record},
+        record::{Record, CLASS_IN},
         rr_type::RrType,
     },
 };

@@ -78,10 +78,10 @@ export interface Resolution {
  * JavaScript type, which is a caller bug rather than a finding.
  *
  * So `"reason" in error` separates "this is what happened" from "you
- * passed the wrong kind of thing". An earlier version of this comment
- * drew the line at argument errors instead, which was wrong:
- * `invalid-hostname` is an argument error and carries a reason,
- * because a caller can act on it and a user can see it.
+ * passed the wrong kind of thing". The line is drawn at TYPE errors,
+ * not argument errors: `invalid-hostname` is an argument error and
+ * carries a reason, because a caller can act on it and a user can
+ * see it.
  *
  * Grouped by the remedy, because that is the only distinction a UI
  * can act on — and the grouping below is the grouping, not a

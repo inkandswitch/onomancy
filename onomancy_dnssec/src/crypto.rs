@@ -2,7 +2,7 @@
 //! verification and the DS digest check. Signed-data construction
 //! (RFC 4035 §5.3.2) lives with [`Rrsig`](crate::wire::rrsig::Rrsig).
 //!
-//! # Algorithms (D13)
+//! # Algorithms
 //!
 //! RSA/SHA-256 (8), ECDSA P-256/SHA-256 (13), Ed25519 (15). Anything
 //! else fails verification — unsupported is invalid ✗, never
@@ -28,7 +28,7 @@ use crate::wire::{
 ///
 /// # Errors
 ///
-/// Returns [`VerifyError`] on unsupported algorithms (D13), malformed
+/// Returns [`VerifyError`] on unsupported algorithms, malformed
 /// key material, or a failed verification.
 pub fn verify_signature(
     algorithm: Algorithm,
@@ -151,7 +151,7 @@ pub fn ds_digest(owner: &Name, key: &Dnskey) -> Digest<Sha256, OwnedDnskey> {
 /// # Errors
 ///
 /// Returns [`VerifyError::UnsupportedDigest`] for digest types this
-/// implementation cannot compute (invalid ✗ per the D13 doctrine) and
+/// implementation cannot compute (invalid ✗, never insecure) and
 /// [`VerifyError::DsMismatch`] when the digest simply differs.
 pub fn ds_matches(owner: &Name, key: &Dnskey, ds: &Ds) -> Result<(), VerifyError> {
     if ds.digest_type() != DigestType::SHA256 {
@@ -211,12 +211,12 @@ pub enum VerifyError {
     #[error("DNSKEY is not a zone key")]
     NotAZoneKey,
 
-    /// D13: an algorithm this implementation cannot verify — invalid,
+    /// An algorithm this implementation cannot verify — invalid,
     /// never insecure-but-ok.
     #[error("unsupported algorithm {0}")]
     UnsupportedAlgorithm(Algorithm),
 
-    /// D13 for digests: a DS digest type this implementation cannot
+    /// The same rule for digests: a DS digest type this implementation cannot
     /// compute.
     #[error("unsupported DS digest type {0}")]
     UnsupportedDigest(DigestType),

@@ -23,7 +23,7 @@ impl DigestType {
     }
 
     /// SHA-256 (2) — the only type this implementation computes;
-    /// everything else fails validation (the D13 doctrine applied to
+    /// everything else fails validation (unsupported-is-invalid applied to
     /// digests).
     pub const SHA256: Self = Self(2);
 

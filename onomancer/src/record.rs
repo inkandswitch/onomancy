@@ -123,7 +123,7 @@ impl Record {
             doc_key.clone()
         };
 
-        // The D10 proof, as `bind` mints it: without it the attested
+        // The generation-path proof, as `bind` mints it: without it the attested
         // generation key lies on no path, so the certificate is
         // REJECTED while its own chain is fresh and only graded
         // provisional once stale — exactly backwards.

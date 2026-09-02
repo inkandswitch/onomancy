@@ -58,7 +58,7 @@ impl Bind {
             self.generation_key.as_deref(),
         )?;
 
-        // The D10 proof: the document delegates the generation key.
+        // The path proof: the document delegates the generation key.
         let carriage = mint::generation_carriage(&doc_key, &generation_key)?;
 
         let plan = BindCeremony {

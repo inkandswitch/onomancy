@@ -45,7 +45,7 @@ pub struct Rotate {
     /// The authority carriage: delegation proof terminating at Gₙ₊₁
     /// (dns-anchor §Statement validity item 3). Rides BOTH the
     /// rotation statement (its signing authority) and the refreshed
-    /// certificate (D10 path membership for the new `g=`). Opaque
+    /// certificate (path membership for the new `g=`). Opaque
     /// here — minted by `onomancy_keyhive::mint`.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }

@@ -44,7 +44,7 @@ pub struct BindingState {
     /// challengers to the incumbent. Badge, never a prompt.
     pub pending: Vec<DocAnchor>,
 
-    /// Succession-proof forks (D16): one predecessor with competing
+    /// Succession-proof forks: one predecessor with competing
     /// valid successor statements. Surfaced, never traversed by
     /// incumbency extension or eligibility.
     pub succession_forks: Vec<SuccessionFork>,
@@ -93,7 +93,8 @@ pub enum ContinuityGrade {
     Bridged,
 
     /// The accepted document displaced the incumbent with no proof
-    /// path at all — a surfaced, unproven binding change (B4).
+    /// path at all — a surfaced, unproven binding change that gates
+    /// the use-time prompt.
     Unproven,
 }
 
@@ -140,7 +141,7 @@ pub struct Fork {
     pub at: GenerationKey,
 }
 
-/// A succession-proof fork (D16): competing valid successor statements
+/// A succession-proof fork: competing valid successor statements
 /// from one predecessor document. Provable equivocation — surfaced,
 /// never auto-resolved, and it stops proof-graph traversal.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

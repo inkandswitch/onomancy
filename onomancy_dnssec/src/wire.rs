@@ -19,7 +19,7 @@
 //! - [`record`] — [`Record`](record::Record) framing and
 //!   [`RrType`](rr_type::RrType)
 //! - [`algorithm`] — [`Algorithm`](algorithm::Algorithm) codes and the
-//!   D13 supported-set
+//!   supported-set
 //! - RDATA views: [`rrsig`], [`dnskey`], [`ds`], [`txt`], [`cname`]
 //!
 //! Deliberately absent: NSEC/NSEC3 views. Negative proofs are out of

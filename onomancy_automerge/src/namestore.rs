@@ -27,19 +27,21 @@ use onomancy_protocol::resolve::namestore::{Authority, Namestore, Replicas, Vouc
 ///
 /// Nothing needs a registry of these keys. A protocol entry holds a
 /// value that is not a namestore reference, so it is absent from
-/// matching by shape (spec E8) rather than by a resolver knowing the
+/// matching by shape (path-resolution spec, Error Conditions) rather
+/// than by a resolver knowing the
 /// name — the same rule that keeps application data out of the way.
 pub const RESERVED_PREFIX: &str = ".well-known/onomancy/";
 
 /// A namestore read from one held Automerge document.
 ///
 /// Non-conforming stored keys (empty, `.`, or `..` segments; `#`;
-/// leading or trailing `/`) are absent by construction (spec E6):
+/// leading or trailing `/`) are absent by construction:
 /// lookups are exact joins of already-valid [`Segment`]s, which no
 /// malformed key can equal. Values that are not bare `automerge:`
 /// references are absent too — a name where a reference belongs is
-/// the symlink ban (E5), and anything else is simply not an edge
-/// (E8). E8 is what lets non-name data share the reserved map: see
+/// the symlink ban, and anything else is simply not an edge. That
+/// non-reference values are absent from matching is what lets
+/// non-name data share the reserved map: see
 /// [`certificates`](crate::certificates), whose entries sit under
 /// `.well-known/` and hold lists rather than references.
 #[derive(Debug, Clone)]
@@ -69,7 +71,8 @@ impl DocumentNamestore {
     /// non-reference values are skipped, matching
     /// [`Namestore::reference`]'s view — which is how protocol
     /// entries and ordinary application data coexist here without a
-    /// registry of reserved names (spec E8).
+    /// registry of reserved names: a value that is not a reference is
+    /// absent from matching (path-resolution spec, Error Conditions).
     #[must_use]
     pub fn edges(&self) -> Vec<(String, DocAnchor)> {
         self.doc
@@ -229,7 +232,7 @@ mod tests {
     fn non_reference_values_are_absent() -> TestResult {
         let target = anchor(1);
         let store = DocumentNamestore::new(namestore_doc(&[
-            // A name where a reference belongs: the symlink ban (E5).
+            // A name where a reference belongs: the symlink ban.
             ("sym", "@bob.example/pics"),
             // Missing scheme.
             ("bare", &target.to_string()),

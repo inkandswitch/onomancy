@@ -31,7 +31,7 @@ jobs:
         # `tests/verify.rs` and `tests/browser.rs` are
         # `cfg(target_arch = "wasm32")`, so ci-test compiles them away
         # and reports "running 0 tests" — green, while looking at
-        # nothing. Omitting this job made those suites ornamental.
+        # nothing. Without this job those suites are ornamental.
         check:
           [
             ci-fmt,

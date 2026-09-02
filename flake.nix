@@ -247,9 +247,8 @@
             # that EXECUTES the wasm test suites (ci-test compiles
             # them away as cfg(wasm32) and reports "running 0 tests"),
             # and ci-e2e is the only one driving the npm build. A
-            # green board here without this notice reproduced the
-            # exact "ornamental suite" failure the hosted matrix was
-            # fixed for.
+            # green board without this notice reads as full coverage
+            # while the wasm suites went unexecuted.
             echo
             echo "NOT RUN (hosted CI runs both): ci-browser, ci-e2e"
             echo "  nix run .#ci-browser   # executes the wasm test suites"
