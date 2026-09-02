@@ -1,0 +1,33 @@
+# cargo-mutants configuration (https://mutants.rs)
+#
+# Run locally with `nix run .#ci-mutants` (full workspace, slow) or let CI
+# scope it to the PR diff with `--in-diff`.
+
+# Feature-gated tests (idna, test_utils, doh, …) must run, or their mutants
+# read as missed.
+additional_cargo_args = ["--all-features"]
+
+# Excluded from mutation, not from testing:
+# - onomancy_wasm: its test suites are cfg(target_arch = "wasm32") and only
+#   execute under ci-browser; on the host every mutant would survive, which
+#   is pure noise, not signal.
+# - onomancy_hickory: socket courier; its only test is a #[ignore]d live
+#   smoke, so host runs cannot catch its mutants either.
+exclude_globs = [
+  # CLI glue with no test suite (2026-09): every mutant survives, so a
+  # blocking diff gate would fail any PR touching it. Remove this line the
+  # day onomancer grows tests.
+  "onomancer/**",
+  "onomancy_hickory/**",
+  "onomancy_wasm/**",
+]
+
+# Cross-crate tests are load-bearing here (onomancy_protocol conformance
+# pins dnssec behavior; onomancy_chain and the validator share constants),
+# so a mutant must survive the whole workspace's suite, not just its own
+# crate's.
+test_workspace = true
+
+# Property tests (bolero) make some suites slow-ish; give mutants headroom
+# before they are declared timeouts.
+timeout_multiplier = 2.5

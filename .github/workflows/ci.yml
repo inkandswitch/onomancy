@@ -50,3 +50,34 @@ jobs:
 
       - name: ${{ matrix.check }}
         run: nix run .#${{ matrix.check }}
+
+  # Mutation testing, scoped to the PR's changed code (full-workspace runs
+  # are hours; `nix run .#ci-mutants` does the deliberate full sweep
+  # locally). Blocking: a missed mutant in code you touched fails the job.
+  mutants:
+    name: ci-mutants (PR diff)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the merge-base with the target branch exists.
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Diff against the merge base
+        run: git diff "origin/${{ github.base_ref }}...HEAD" > pr.diff
+
+      - name: ci-mutants
+        run: nix run .#ci-mutants -- --in-diff pr.diff
+
+      # mutants.out holds the missed/caught/timeout lists and per-mutant
+      # logs — the thing to read when the job goes red.
+      - name: Upload mutants report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-report
+          path: mutants.out
+          if-no-files-found: ignore
