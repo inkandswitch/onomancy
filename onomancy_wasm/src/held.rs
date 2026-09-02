@@ -154,12 +154,24 @@ impl JsHeldDocuments {
     /// Add a namestore edge: `path` (segments joined by `/`) names
     /// `target` from the `anchor` document.
     ///
+    /// Paths under `.well-known/` are refused: that prefix carries
+    /// protocol and application data by the writers' convention the
+    /// path-resolution spec assigns (Onomancy's own certificate and
+    /// decision lists live there), and a bind at such a key would
+    /// replace protocol data with a name while looking like a
+    /// successful bind.
+    ///
     /// # Errors
     ///
-    /// Throws for unknown anchors, malformed paths or targets, and
-    /// write failures.
+    /// Throws for unknown anchors, malformed or reserved paths,
+    /// malformed targets, and write failures.
     pub fn bind(&mut self, anchor: &Text, path: &Text, target: &Text) -> Result<(), JsError> {
         let key = path_of(&text::read(path, "a path")?)?;
+        if key == WELL_KNOWN || key.starts_with(WELL_KNOWN_PREFIX) {
+            return Err(JsError::new(&format!(
+                "\"{key}\" is reserved: paths under {WELL_KNOWN_PREFIX} carry protocol data, not names"
+            )));
+        }
         let value = format!(
             "{}{}",
             doc::SCHEME_PREFIX,
@@ -483,6 +495,14 @@ fn parse_anchor(raw: &str) -> Result<DocAnchor, JsError> {
 }
 
 /// Validate a `/`-joined path and return its canonical flat-map key.
+/// The writers'-convention prefix for protocol and application data
+/// (path-resolution spec, Namestore Layout).
+const WELL_KNOWN: &str = ".well-known";
+
+/// [`WELL_KNOWN`] with its trailing separator, for prefix tests that
+/// must not match a name like `.well-known-ish`.
+const WELL_KNOWN_PREFIX: &str = ".well-known/";
+
 fn path_of(path: &str) -> Result<String, JsError> {
     let segments: Vec<Segment> = path
         .split('/')

@@ -13,7 +13,7 @@ use js_sys::{Array, Reflect};
 use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_dnssec::txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial};
 use onomancy_wasm::{
-    records::{classify_records, next_serial},
+    records::{classify_records, encode_record, next_serial},
     text::Text,
 };
 use wasm_bindgen::{JsCast as _, JsValue};
@@ -159,4 +159,55 @@ fn a_non_string_record_is_a_type_error() {
         .expect_err("type error");
 
     assert!(get(&refused, "reason").is_undefined());
+}
+
+/// An encoded record classifies back to the spellings it was built
+/// from: encoder and parser are one definition.
+#[wasm_bindgen_test]
+fn an_encoded_record_roundtrips_through_classification() {
+    let key = |seed: u8| SigningKey::from_bytes(&[seed; 32]).verifying_key();
+    let generation = GenerationKey::from(key(1)).to_string();
+    let document = format!("automerge:{}", DocAnchor::from(key(2)));
+
+    let encoded = encode_record(&text("7"), &text(&generation), &text(&document))
+        .expect("canonical spellings encode");
+
+    let outcome =
+        classify_records(vec![text(&encoded)], Some(NOW_SECS)).expect("own output classifies");
+    let selected = get(&JsValue::from(outcome), "selected");
+    assert_eq!(get(&selected, "serial").as_string().as_deref(), Some("7"));
+    assert_eq!(
+        get(&selected, "generation").as_string(),
+        Some(generation.clone())
+    );
+    assert_eq!(get(&selected, "document").as_string(), Some(document));
+
+    // The bare bs58check payload is the same document.
+    let bare = format!("{}", DocAnchor::from(key(2)));
+    assert_eq!(
+        encode_record(&text("7"), &text(&generation), &text(&bare)).expect("bare payload encodes"),
+        encoded
+    );
+}
+
+#[wasm_bindgen_test]
+fn encode_refusals_are_argument_problems() {
+    let key = |seed: u8| SigningKey::from_bytes(&[seed; 32]).verifying_key();
+    let generation = GenerationKey::from(key(1)).to_string();
+    let document = format!("automerge:{}", DocAnchor::from(key(2)));
+    let unpadded = generation.replace('=', "");
+
+    for (serial, generation, document) in [
+        ("07", generation.as_str(), document.as_str()), // not canonical decimal
+        ("7", unpadded.as_str(), document.as_str()),    // not canonical base64
+        ("7", generation.as_str(), "automerge:nonsense"),
+    ] {
+        let refused = encode_record(&text(serial), &text(generation), &text(document))
+            .expect_err("refused");
+        assert_eq!(
+            reason(&refused),
+            "invalid-argument",
+            "{serial} / {generation} / {document}"
+        );
+    }
 }

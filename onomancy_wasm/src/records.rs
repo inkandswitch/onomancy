@@ -15,8 +15,12 @@
 //! binding" — it is the zone's current word, before any of that.
 
 use js_sys::{Array, Date, Object, Reflect};
-use onomancy_core::{anchor::doc::SCHEME_PREFIX, time::UnixSeconds};
+use onomancy_core::{
+    anchor::doc::{DocAnchor, ParseDocAnchorError, SCHEME_PREFIX},
+    time::UnixSeconds,
+};
 use onomancy_dnssec::txt::{
+    generation_key::{GenerationKey, ParseGenerationKeyError},
     record::{Classified, TxtRecord},
     serial::{Serial, SerialExhausted},
 };
@@ -65,6 +69,44 @@ pub fn next_serial(last: Option<Text>, now_ms: Option<f64>) -> Result<String, Js
     Serial::next(last, now_ms)
         .map(|serial| serial.to_string())
         .map_err(|error| JsValue::from(RecordsError::Exhausted(error)))
+}
+
+/// Encode the TXT binding record a zone publishes, from the same
+/// spellings `classifyRecords` reports: a canonical decimal serial, a
+/// generation key in its canonical base64, and the document as an
+/// `automerge:` anchor (the bare bs58check payload is also accepted).
+///
+/// The output and the parser are two spellings of one definition, so
+/// this cannot mint a record `classifyRecords` refuses. Mint the
+/// serial with `nextSerial` rather than a bare clock read, and
+/// republish an *unchanged* binding under its existing serial — a
+/// serial orders records, and only a changed `g=` or `p=` is a new
+/// record.
+///
+/// # Errors
+///
+/// Rejects a serial that is not a canonical decimal u64, a generation
+/// key that is not the canonical base64 spelling of a curve point,
+/// and a document that is not a key-based Automerge URL.
+#[wasm_bindgen(js_name = encodeRecord)]
+pub fn encode_record(
+    serial: &Text,
+    generation: &Text,
+    document: &Text,
+) -> Result<String, JsValue> {
+    let serial = text::read(serial, "a serial").map_err(JsValue::from)?;
+    let serial =
+        Serial::parse(&serial).map_err(|error| JsValue::from(RecordsError::Serial(error)))?;
+
+    let generation = text::read(generation, "a generation key").map_err(JsValue::from)?;
+    let generation = GenerationKey::parse(&generation)
+        .map_err(|error| JsValue::from(RecordsError::Generation(error)))?;
+
+    let document = text::read(document, "a document anchor").map_err(JsValue::from)?;
+    let document = DocAnchor::parse(document.strip_prefix(SCHEME_PREFIX).unwrap_or(&document))
+        .map_err(|error| JsValue::from(RecordsError::Document(error)))?;
+
+    Ok(TxtRecord::new(serial, generation, document).to_string())
 }
 
 /// Apply the `RRset` rules to one zone's TXT strings.
@@ -289,8 +331,8 @@ fn host_now_ms() -> u64 {
 /// Why a records call refused its inputs.
 #[derive(Debug, thiserror::Error)]
 enum RecordsError {
-    /// `last` is not a canonical decimal serial.
-    #[error("last: {0}")]
+    /// A serial argument is not a canonical decimal u64.
+    #[error("serial: {0}")]
     Serial(onomancy_dnssec::txt::serial::ParseSerialError),
 
     /// `nowMs` is not a non-negative integer.
@@ -300,6 +342,14 @@ enum RecordsError {
     /// No serial follows `last`.
     #[error(transparent)]
     Exhausted(#[from] SerialExhausted),
+
+    /// A generation key argument is not the `g=` wire spelling.
+    #[error("generation key: {0}")]
+    Generation(ParseGenerationKeyError),
+
+    /// A document argument is not a key-based Automerge URL.
+    #[error("document: {0}")]
+    Document(ParseDocAnchorError),
 }
 
 impl From<RecordsError> for JsValue {

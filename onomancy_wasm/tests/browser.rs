@@ -104,6 +104,35 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     Ok(())
 }
 
+/// The `.well-known/` prefix carries protocol data by the writers'
+/// convention, so `bind` refuses it before any document is touched —
+/// a bind at the certificate list's key would replace the list with a
+/// name while reporting success.
+#[wasm_bindgen_test]
+fn binds_under_well_known_are_refused() -> JsTestResult {
+    use onomancy_wasm::held::JsHeldDocuments;
+
+    let mut held = JsHeldDocuments::new();
+    let root = held.create_document()?;
+    let target = held.create_document()?;
+
+    for path in [
+        ".well-known",
+        ".well-known/onomancy/certificates",
+        ".well-known/other-app/data",
+    ] {
+        assert!(
+            held.bind(&text(&root), &text(path), &text(&target))
+                .is_err(),
+            "{path} must refuse"
+        );
+    }
+
+    // The refusal is about the reserved prefix, not dotted names.
+    held.bind(&text(&root), &text(".well-known-ish"), &text(&target))?;
+    Ok(())
+}
+
 /// A hop to an unheld document is the designed partial outcome.
 #[wasm_bindgen_test]
 async fn unsynced_targets_walk_partially() -> JsTestResult {
