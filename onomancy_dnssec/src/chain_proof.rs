@@ -45,7 +45,7 @@ pub trait ChainValidator {
     /// trust anchor (including empty ∩-windows and unsupported
     /// algorithms, which MUST be invalid ✗, never insecure-but-ok).
     fn validate(&self, hostname: &DnsName, chain: &DnssecChain)
-        -> Result<ChainProof, InvalidChain>;
+    -> Result<ChainProof, InvalidChain>;
 }
 
 /// The chain never verified from the trust anchor: invalid ✗, not

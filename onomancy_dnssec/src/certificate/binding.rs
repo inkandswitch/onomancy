@@ -12,7 +12,7 @@ use onomancy_core::{
 
 use crate::{dns_name::DnsName, statement::successor::SuccessorStatement};
 
-use super::{read_heads, read_key, DecodeCertificateError, FieldName};
+use super::{DecodeCertificateError, FieldName, read_heads, read_key};
 
 /// The signed fields: `hostname` is bound to `root_doc`, attested by
 /// `signer` (a delegated admin key) at `issued_at`, optionally with

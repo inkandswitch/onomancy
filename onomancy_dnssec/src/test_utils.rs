@@ -25,7 +25,7 @@ use crate::{
         digest_type::DigestType,
         dnskey::Dnskey,
         name::Name,
-        record::{Record, CLASS_IN},
+        record::{CLASS_IN, Record},
         rr_type::RrType,
     },
 };

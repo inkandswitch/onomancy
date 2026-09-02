@@ -5,7 +5,7 @@ use core::{fmt, str};
 
 use onomancy_core::{
     anchor::Anchor,
-    name::{parse_segments, split_anchor, Name, ParseSegmentsError},
+    name::{Name, ParseSegmentsError, parse_segments, split_anchor},
 };
 
 /// A normalized DNS name: lowercase ASCII A-labels, at least two labels,
