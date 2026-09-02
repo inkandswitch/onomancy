@@ -1,6 +1,6 @@
 # What Onomancy Needs from Keyhive
 
-_The coordination asks blocking `onomancy_keyhive` — the last stubbed seam in an otherwise end-to-end system. Written for the upstream conversation; everything else in this repo runs today (CLI, Node, and browser verifiers against live DNS)._
+_The coordination asks that would let `onomancy_keyhive` shed its workarounds — the crate itself runs today, replaying carriages into throwaway `keyhive_core` instances. Written for the upstream conversation; the whole verifier stack runs now (CLI, Node, and browser against live DNS)._
 
 ## Context, in one diagram
 
@@ -10,15 +10,15 @@ DNS zone (DNSSEC-signed)                    Keyhive document
     n=<serial> g=<generation> p=<doc id>      (root key destroyed at
          │                                     creation: EphemeralSigner)
          │  chain verified from IANA root          │
-         ▼  keys — REAL today                       │  delegation graph
-  Onomancy certificate (ONC)                        │  — STUBBED today
+         ▼  keys                                    │  delegation graph,
+  Onomancy certificate (ONC)                        │  replayed per question
     root_doc, hostname, signature ──────────────────┘
     + attached Signed<Delegation> chain: doc root → signer
 ```
 
-Onomancy binds hostnames to Keyhive documents. The DNS half is done: chains are fetched, walked from the baked-in IANA keys, and graded. The Keyhive half — verifying that the certificate's signer actually holds delegated admin authority over the document, and that the zone-attested _generation key_ lies on that delegation path — runs against a permissive stub (the `AuthorityVerifier` seam). Every verdict currently prints `VACUOUSLY: delegation checks are permissive until onomancy_keyhive`.
+Onomancy binds hostnames to Keyhive documents. The DNS half is done: chains are fetched, walked from the baked-in IANA keys, and graded. The Keyhive half — verifying that the certificate's signer actually holds delegated admin authority over the document, and that the zone-attested _generation key_ lies on that delegation path — runs today via `KeyhiveAuthority`, which replays each carriage into a throwaway `keyhive_core` 0.5 instance (see "What we run meanwhile" below). The asks below are what would replace that workaround with a supported API.
 
-The seam is two functions (`onomancy_protocol::verifier_state::seam::AuthorityVerifier`):
+The seam is two functions (`onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier`):
 
 ```rust
 /// Valid delegation chain: roots at `root`, terminates at `signer`,
@@ -73,9 +73,9 @@ ARK's membership events and our `kh0` carriage entries are the same underlying K
 
 ## Adjacent (automerge-repo, not Keyhive proper)
 
-- **Reserved namestore location**: Onomancy walks a flat map at a reserved top-level key (currently `onomancy`, marked provisional) in the document. Coordination so no upstream convention collides — and a ruling on the flat-map-with-multi-segment-keys vs sub-tree-path tension ([names.md](./names.md), open warning).
+- **Top-level key conventions**: Onomancy walks a document's **own** top-level map — a name is a bare root key, with no container to reserve. Protocol data uses the `.well-known/<owner>/<artifact>` prefix, and Onomancy claims only `.well-known/onomancy/`. What we need from upstream is agreement on that prefix convention rather than on a reserved container, so an application's keys and a protocol's keys can share one map without either enumerating the other. Still open: the flat-map-with-multi-segment-keys vs sub-tree-path tension ([names.md](./names.md), open warning).
 - **Doc-ID text encoding**: we adopted `automerge:` + bs58check wholesale; confirm key-based document IDs keep that spelling.
 
 ## What we run meanwhile
 
-`onomancy_keyhive` runs the REAL `AuthorityVerifier` today: carriages replay into a throwaway `keyhive_core` 0.5 instance behind a versioned envelope (`kh0`), so encoding churn (Ask 1) is a loud parse error and a re-attach — never a misread. Ask 2 (a pure bytes-in API) would delete the throwaway-instance workaround and unlock in-browser verification; Asks 4–6 gate document-content verification (today graded `carriage-verified` at best — the `Authority` seam in `onomancy_protocol` carries the gap explicitly until verified ingest or signed operations land).
+`onomancy_keyhive` is the production `AuthorityVerifier`: carriages replay into a throwaway `keyhive_core` 0.5 instance behind a versioned envelope (`kh0`), so encoding churn (Ask 1) is a loud parse error and a re-attach — never a misread. Ask 2 (a pure bytes-in API) would delete the throwaway-instance workaround and unlock in-browser verification; Asks 4–6 gate document-content verification (today graded `carriage-verified` at best — the `Authority` seam in `onomancy_protocol` carries the gap explicitly until verified ingest or signed operations land).

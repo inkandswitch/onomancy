@@ -7,7 +7,7 @@
 //! the decision document, so renames move only the label and can
 //! never sever divergence detection (P1).
 
-use automerge::{Automerge, ObjType, ReadDoc, transaction::Transactable};
+use automerge::{Automerge, transaction::Transactable};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     collections::Map,
@@ -16,7 +16,7 @@ use onomancy_core::{
 use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::{resolve::namestore::Namestore, verifier::state::decisions::Decisions};
 
-use crate::namestore::{DocumentNamestore, RESERVED_KEY, path_key};
+use crate::namestore::{DocumentNamestore, path_key};
 
 /// Write access to the petname edges of the user's own root document.
 ///
@@ -40,19 +40,17 @@ impl<'a> PetnameStore<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`WriteError`] when the substrate rejects the
-    /// transaction.
+    /// Returns [`WriteError::EmptyPath`] for a path with no segments,
+    /// and [`WriteError`] when the substrate rejects the transaction.
     pub fn pin(&mut self, path: &[Segment], target: &DocAnchor) -> Result<(), WriteError> {
-        let key = path_key(path);
+        let key = path_key(path).ok_or(WriteError::EmptyPath)?;
         let reference = format!("{}{target}", doc::SCHEME_PREFIX);
 
         self.doc
+            // A name is a root key: `foo` is `root["foo"]`, flat, with
+            // no container map to descend into.
             .transact::<_, _, automerge::AutomergeError>(|tx| {
-                let map = match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                    Some((automerge::Value::Object(ObjType::Map), id)) => id,
-                    _ => tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?,
-                };
-                tx.put(&map, key.as_str(), reference.as_str())
+                tx.put(automerge::ROOT, key.as_str(), reference.as_str())
             })
             .map_err(|failure| WriteError::Automerge(failure.error))?;
 
@@ -67,17 +65,12 @@ impl<'a> PetnameStore<'a> {
     /// exists there, or [`WriteError::Automerge`] when the substrate
     /// rejects the transaction.
     pub fn unpin(&mut self, path: &[Segment]) -> Result<(), WriteError> {
-        let key = path_key(path);
+        let key = path_key(path).ok_or(WriteError::EmptyPath)?;
         self.existing_edge(path)?;
 
         self.doc
             .transact::<_, _, automerge::AutomergeError>(|tx| {
-                match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                    Some((automerge::Value::Object(ObjType::Map), map)) => {
-                        tx.delete(&map, key.as_str())
-                    }
-                    _ => Ok(()),
-                }
+                tx.delete(automerge::ROOT, key.as_str())
             })
             .map_err(|failure| WriteError::Automerge(failure.error))?;
 
@@ -152,6 +145,16 @@ pub enum WriteError {
     /// The source path holds no well-formed petname edge.
     #[error("no petname edge at the source path")]
     MissingEdge,
+
+    /// A path with no segments.
+    ///
+    /// There is no key for "no segments": keys MUST be one or more
+    /// segments (path-resolution spec, Namestore Layout), and the
+    /// obvious fallback of `""` would write a key no name can ever
+    /// match — a write that appears to succeed and can never be read
+    /// back through a name.
+    #[error("a petname path needs at least one segment")]
+    EmptyPath,
 }
 
 #[cfg(test)]
@@ -277,5 +280,23 @@ mod tests {
             "the join survives the rename"
         );
         Ok(())
+    }
+
+    /// Writing a name with no segments is refused rather than
+    /// silently writing the empty key — a pin that appears to succeed
+    /// and can never be resolved back.
+    #[test]
+    fn pinning_an_empty_path_is_refused() {
+        let mut doc = Automerge::new();
+
+        assert!(matches!(
+            PetnameStore::new(&mut doc).pin(&[], &anchor(1)),
+            Err(WriteError::EmptyPath)
+        ));
+
+        // And nothing was written: no empty key, no edge.
+        let read = DocumentNamestore::new(doc).read();
+        assert!(read.edges.is_empty());
+        assert!(read.malformed_keys.is_empty());
     }
 }

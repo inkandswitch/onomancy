@@ -99,7 +99,8 @@ impl SuccessorStatement {
                 hostname: hostname.clone(),
             },
             signer,
-        );
+        )
+        .unwrap_or_else(|_| unreachable!("the succession names this signer's verifying key"));
 
         let mut bytes = Vec::new();
         signed_unit.encode_into(&mut bytes);

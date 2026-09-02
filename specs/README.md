@@ -4,9 +4,9 @@ Normative specifications for **Onomancy**, a local-first edgename protocol, writ
 
 | Spec                       | Scope                                                                                                                                                                         |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [Onomancy Name Grammar]    | The textual grammar: three spelling families, parse-time anchor disjointness, shared segment rules, doc-anchor payload, pinned heads.                                         |
+| [Onomancy Name Grammar]    | The textual grammar: three spelling families, parse-time anchor disjointness, shared segment rules, doc-anchor payload, and the no-version-pinning rule.                      |
 | [Onomancy Path Resolution] | Resolving segments across documents: flat edge maps, greedy longest-key matching, hops, termination, error conditions. Anchor-agnostic.                                       |
-| [DNS Anchoring]            | Rooting `@` names in DNSSEC: TXT binding record, the Onomancy certificate and its lookup endpoint, generation key, chain validation, graded freshness, succession.                      |
+| [DNS Anchoring]            | Rooting `@` names in DNSSEC: TXT binding record, the Onomancy certificate and its in-document location, generation key, chain validation, graded freshness, succession.                 |
 | [Binding Cache]            | The verifier's store and its derived view: `derive(store, now, decisions)`: union-merge record sync, the user-private decision document (claims, acceptances, resets), surfacing-as-diff, pruning.        |
 | [Petname Anchoring]        | Rooting `~` names in the user's own root document: local-only property, petname store, divergence/re-pin, offline-introduction upgrade path.                                  |
 | [Serialization]            | Wire encodings for the proof records: canonical certificate encoding (the signature target), DNSSEC/delegation chain framing, TXT record grammar. Built on [bijou64] varints. |

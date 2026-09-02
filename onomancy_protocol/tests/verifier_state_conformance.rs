@@ -1,7 +1,7 @@
-//! Conformance scenarios for `VerifierState::compute(store, now, decisions)`, tagged
-//! with the binding-cache spec's condition table (B1, B12, B13, …) and
-//! the DNS-anchor decision rows (D4a, D10, D12/D12a), plus the
-//! permutation-determinism property (verification target 7).
+//! Conformance scenarios for `VerifierState::compute(store, now, decisions)`:
+//! each test pins one row of the specs' condition tables (binding-cache
+//! Conditions; dns-anchor dispositions), named for the behavior it pins,
+//! plus the permutation-determinism property.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
@@ -91,7 +91,7 @@ fn sole_fresh_record_is_accepted_confirmed() -> TestResult {
 
 #[test]
 fn sole_stale_first_contact_is_provisional_incumbent() -> TestResult {
-    // B10: sole candidate, only stale evidence.
+    // Sole candidate, only stale evidence.
     let b = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
     let state = run(&[&b], &Decisions::default(), vec![]);
 
@@ -101,7 +101,7 @@ fn sole_stale_first_contact_is_provisional_incumbent() -> TestResult {
 }
 
 #[test]
-fn b1_stale_unproven_challenger_is_pending_never_displacing() -> TestResult {
+fn stale_unproven_challenger_is_pending_never_displacing() -> TestResult {
     // Acceptance-backed incumbent (doc 1), stale challenger (doc 2)
     // with a strictly later zone-state key and no proof.
     let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
@@ -120,7 +120,7 @@ fn b1_stale_unproven_challenger_is_pending_never_displacing() -> TestResult {
 }
 
 #[test]
-fn b2_fresh_challenger_is_eligible_and_displaces() -> TestResult {
+fn fresh_challenger_is_eligible_and_displaces() -> TestResult {
     let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
     let challenger = binding(2, 22, 2, 999, (NOW - 100, NOW + 1000), 60)?;
 
@@ -235,7 +235,7 @@ fn multi_hop_bridges_are_always_provisional() -> TestResult {
 }
 
 #[test]
-fn d4a_fresh_record_with_lower_serial_wins_and_resets_the_ratchet() -> TestResult {
+fn fresh_record_with_lower_serial_wins_and_resets_the_ratchet() -> TestResult {
     // Same document: stale record with a huge serial, fresh record
     // with a small one. Fresh wins rung 0; effective serial follows
     // the WINNER (the downward move is the surfaced ratchet reset).
@@ -253,7 +253,7 @@ fn d4a_fresh_record_with_lower_serial_wins_and_resets_the_ratchet() -> TestResul
 }
 
 #[test]
-fn b13_zone_equivocation_is_contested_with_empty_output() -> TestResult {
+fn zone_equivocation_is_contested_with_empty_output() -> TestResult {
     // Two unconnected documents, both stale, equal (window_end,
     // serial) — issued_at differs but MUST NOT resolve it.
     let a = binding(1, 11, 1, 100, (NOW - 5000, NOW - 1000), 50)?;
@@ -269,7 +269,7 @@ fn b13_zone_equivocation_is_contested_with_empty_output() -> TestResult {
 
 #[test]
 fn stale_candidates_with_ordered_keys_pick_the_later_provisionally() -> TestResult {
-    // The narrowed B13: strictly ordered windows are NOT contested.
+    // Equivocation is narrow: strictly ordered windows are NOT contested.
     let earlier = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
     let later = binding(2, 22, 2, 100, (NOW - 4000, NOW - 1000), 50)?;
 
@@ -283,7 +283,7 @@ fn stale_candidates_with_ordered_keys_pick_the_later_provisionally() -> TestResu
 }
 
 #[test]
-fn d10_fresh_record_g_not_on_path_is_rejected() -> TestResult {
+fn fresh_record_with_generation_off_path_is_rejected() -> TestResult {
     let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
 
     let mut validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
@@ -305,16 +305,19 @@ fn d10_fresh_record_g_not_on_path_is_rejected() -> TestResult {
         .get(&host())
         .cloned()
         .unwrap_or_default();
-    assert!(state.accepted.is_none(), "D10 rejects the record");
+    assert!(
+        state.accepted.is_none(),
+        "an off-path fresh record is rejected"
+    );
     Ok(())
 }
 
 #[test]
-fn b8_reset_excludes_the_challenger() -> TestResult {
+fn a_reset_excludes_the_challenger() -> TestResult {
     let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
     let poison = binding(2, 22, 2, 999, (NOW - 100, NOW + 1000), 60)?;
 
-    // Fresh challenger would displace (see B2) — but it is excluded.
+    // A fresh challenger would displace — but it is excluded.
     let mut decisions = accept(doc(1), &incumbent);
     let mut excluded = Set::default();
     excluded.insert(poison.cert.digest().erase());
@@ -400,267 +403,283 @@ fn divergent_claims_badge_but_do_not_move_bindings() -> TestResult {
     Ok(())
 }
 
-// ───── the protected prefix and fork repair ─────
+/// The protected prefix and fork repair: rewinds stay rejected
+/// through forks, and convergence merges settle the lineage.
+mod protected_prefix_and_fork_repair {
+    use super::*;
 
-#[test]
-fn d12_protected_prefix_survives_a_fork() -> TestResult {
-    // Lineage G11→G12→G13, then a fork at G13 (→G14 and →G15).
-    // A stale record attesting the PROTECTED G11 is still a provable
-    // rewind — the fork buys no immunity below the fork point — while
-    // a record attesting fork-implicated G14 survives, surfaced.
-    let rewind = binding(1, 11, 1, 50, (NOW - 9000, NOW - 5000), 10)?;
-    let branch = binding(1, 14, 2, 60, (NOW - 4000, NOW - 1000), 20)?;
+    #[test]
+    fn the_protected_prefix_survives_a_fork() -> TestResult {
+        // Lineage G11→G12→G13, then a fork at G13 (→G14 and →G15).
+        // A stale record attesting the PROTECTED G11 is still a provable
+        // rewind — the fork buys no immunity below the fork point — while
+        // a record attesting fork-implicated G14 survives, surfaced.
+        let rewind = binding(1, 11, 1, 50, (NOW - 9000, NOW - 5000), 10)?;
+        let branch = binding(1, 14, 2, 60, (NOW - 4000, NOW - 1000), 20)?;
 
-    let lineage = vec![
-        Item::Rotation(rotation(1, 11, 12)?),
-        Item::Rotation(rotation(1, 12, 13)?),
-        Item::Rotation(rotation(1, 13, 14)?),
-        Item::Rotation(rotation(1, 13, 15)?),
-    ];
+        let lineage = vec![
+            Item::Rotation(rotation(1, 11, 12)?),
+            Item::Rotation(rotation(1, 12, 13)?),
+            Item::Rotation(rotation(1, 13, 14)?),
+            Item::Rotation(rotation(1, 13, 15)?),
+        ];
 
-    let state = run(&[&rewind, &branch], &Decisions::default(), lineage);
+        let state = run(&[&rewind, &branch], &Decisions::default(), lineage);
 
-    let accepted = state.accepted.expect("branch record survives");
-    assert_eq!(
-        accepted.generation,
-        generation(14),
-        "rewind rejected, branch kept"
-    );
-    assert!(
-        state.forks.iter().any(|f| f.at == generation(13)),
-        "the fork is surfaced"
-    );
-    Ok(())
+        let accepted = state.accepted.expect("branch record survives");
+        assert_eq!(
+            accepted.generation,
+            generation(14),
+            "rewind rejected, branch kept"
+        );
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(13)),
+            "the fork is surfaced"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn lineage_descent_orders_within_a_document_before_the_key() -> TestResult {
+        // Fork at G11 (→G12, →G13): the rewind rejection is suspended
+        // for the implicated suffix, so records attesting the fork point
+        // and a branch both survive to stage 5 — where rung 1's
+        // same-document half must order them. The branch record wins on
+        // signed descent despite a LOWER zone-state key; the serial is
+        // only a tiebreak when lineage is silent.
+        let at_fork = binding(1, 11, 1, 200, (NOW - 5000, NOW - 1000), 90)?;
+        let on_branch = binding(1, 12, 2, 50, (NOW - 6000, NOW - 2000), 10)?;
+
+        let lineage = vec![
+            Item::Rotation(rotation(1, 11, 12)?),
+            Item::Rotation(rotation(1, 11, 13)?),
+        ];
+
+        let state = run(&[&at_fork, &on_branch], &Decisions::default(), lineage);
+
+        let accepted = state.accepted.expect("accepted");
+        assert_eq!(
+            accepted.generation,
+            generation(12),
+            "descent outranks the zone-state key"
+        );
+        assert_eq!(
+            state.effective_serial,
+            Some(Serial::from(50)),
+            "the descendant record's serial, not the fork point's"
+        );
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(11)),
+            "the fork is still surfaced"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn cross_branch_records_fall_back_to_the_key_deterministically() -> TestResult {
+        // Records on the two branches of the same fork: descent orders
+        // neither over the other (incomparable lineage is never
+        // evidence), so rung 2's key decides — deterministically — while
+        // the fork stays surfaced.
+        let branch_a = binding(1, 12, 1, 50, (NOW - 6000, NOW - 2000), 10)?;
+        let branch_b = binding(1, 13, 2, 200, (NOW - 5000, NOW - 1000), 90)?;
+
+        let lineage = vec![
+            Item::Rotation(rotation(1, 11, 12)?),
+            Item::Rotation(rotation(1, 11, 13)?),
+        ];
+
+        let state = run(&[&branch_a, &branch_b], &Decisions::default(), lineage);
+
+        let accepted = state.accepted.expect("accepted");
+        assert_eq!(accepted.generation, generation(13), "higher key wins");
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(11)),
+            "picking a branch record never resolves the fork"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn fork_repair_by_convergence_merge_settles_the_lineage() -> TestResult {
+        // Same fork, repaired: both branch heads retire into fresh G16
+        // (a double-successor MERGE — legal, only G16's holder can mint
+        // it). Single head again: retired branches rejoin the protected
+        // prefix, the current generation is accepted, the historical fork
+        // stays surfaced.
+        let stale_branch = binding(1, 14, 1, 50, (NOW - 9000, NOW - 5000), 10)?;
+        let current = binding(1, 16, 2, 60, (NOW - 1000, NOW + 1000), 20)?;
+
+        let lineage = vec![
+            Item::Rotation(rotation(1, 11, 12)?),
+            Item::Rotation(rotation(1, 12, 13)?),
+            Item::Rotation(rotation(1, 13, 14)?),
+            Item::Rotation(rotation(1, 13, 15)?),
+            Item::Rotation(rotation(1, 14, 16)?),
+            Item::Rotation(rotation(1, 15, 16)?),
+        ];
+
+        let state = run(&[&stale_branch, &current], &Decisions::default(), lineage);
+
+        let accepted = state.accepted.expect("current generation accepted");
+        assert_eq!(accepted.generation, generation(16));
+        assert_eq!(
+            state.effective_serial,
+            Some(Serial::from(60)),
+            "retired branch record is rewind-rejected post-repair"
+        );
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(13)),
+            "repair converges heads; it never launders the fork"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unauthorized_statements_have_no_lineage_effect() -> TestResult {
+        // The rotation's carriage fails authority verification: it must
+        // be discarded entirely — no rewind rejection, no fork evidence.
+        let old_gen = binding(1, 11, 1, 50, (NOW - 1000, NOW + 1000), 10)?;
+
+        let mut validator =
+            MemoryValidator::default().with(host(), &old_gen.chain, old_gen.proof.clone());
+        let _ = &mut validator;
+        let mut store = Store::default();
+        store.insert(Item::Record(old_gen.cert.clone()));
+        store.insert(Item::Rotation(rotation(1, 11, 12)?));
+
+        let derivation = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default().deny(doc(1), generation(12).verifying_key()),
+        );
+
+        let state = derivation
+            .bindings
+            .get(&host())
+            .cloned()
+            .unwrap_or_default();
+        let accepted = state.accepted.expect("old generation still accepted");
+        assert_eq!(
+            accepted.generation,
+            generation(11),
+            "no rewind rejection from garbage"
+        );
+        assert!(state.forks.is_empty(), "never fork evidence either");
+        Ok(())
+    }
 }
 
-#[test]
-fn lineage_descent_orders_within_a_document_before_the_key() -> TestResult {
-    // Fork at G11 (→G12, →G13): D12's hard rejection is suspended
-    // for the implicated suffix, so records attesting the fork point
-    // and a branch both survive to stage 5 — where rung 1's
-    // same-document half must order them. The branch record wins on
-    // signed descent despite a LOWER zone-state key; the serial is
-    // only a tiebreak when lineage is silent.
-    let at_fork = binding(1, 11, 1, 200, (NOW - 5000, NOW - 1000), 90)?;
-    let on_branch = binding(1, 12, 2, 50, (NOW - 6000, NOW - 2000), 10)?;
+/// Extraction closure under resets: excluding a carrier excludes what
+/// it carried, unless an unexcluded item independently carries it.
+mod extraction_closure_under_resets {
+    use super::*;
 
-    let lineage = vec![
-        Item::Rotation(rotation(1, 11, 12)?),
-        Item::Rotation(rotation(1, 11, 13)?),
-    ];
+    #[test]
+    fn statements_survive_resets_via_independent_carriers() -> TestResult {
+        // Rotation R (G11→G12) is carried by BOTH cert A and cert B.
+        // Excluding only A leaves R in force via B; excluding both
+        // removes it — and neither outcome depends on insertion order.
+        let statement = rotation(1, 11, 12)?;
+        let carrier_a = binding_carrying(
+            1,
+            12,
+            1,
+            50,
+            (NOW - 5000, NOW - 1000),
+            10,
+            vec![statement.clone()],
+        )?;
+        let carrier_b = binding_carrying(
+            1,
+            12,
+            2,
+            60,
+            (NOW - 4000, NOW - 500),
+            20,
+            vec![statement.clone()],
+        )?;
+        let rewind = binding(1, 11, 3, 70, (NOW - 3000, NOW - 200), 30)?;
 
-    let state = run(&[&at_fork, &on_branch], &Decisions::default(), lineage);
+        let reset_a = {
+            let mut decisions = Decisions::default();
+            let mut excluded = Set::default();
+            excluded.insert(carrier_a.cert.digest().erase());
+            decisions.resets.insert(host(), excluded);
+            decisions
+        };
 
-    let accepted = state.accepted.expect("accepted");
-    assert_eq!(
-        accepted.generation,
-        generation(12),
-        "descent outranks the zone-state key"
-    );
-    assert_eq!(
-        state.effective_serial,
-        Some(Serial::from(50)),
-        "the descendant record's serial, not the fork point's"
-    );
-    assert!(
-        state.forks.iter().any(|f| f.at == generation(11)),
-        "the fork is still surfaced"
-    );
-    Ok(())
+        let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_a, vec![]);
+        let accepted = state.accepted.expect("accepted");
+        assert_eq!(
+            accepted.generation,
+            generation(12),
+            "R survives via the non-excluded carrier: the rewind stays rejected"
+        );
+
+        let reset_both = {
+            let mut decisions = Decisions::default();
+            let mut excluded = Set::default();
+            excluded.insert(carrier_a.cert.digest().erase());
+            excluded.insert(carrier_b.cert.digest().erase());
+            decisions.resets.insert(host(), excluded);
+            decisions
+        };
+
+        let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_both, vec![]);
+        let accepted = state.accepted.expect("accepted");
+        assert_eq!(
+            accepted.generation,
+            generation(11),
+            "excluding every carrier excludes the extracted statement"
+        );
+        Ok(())
+    }
 }
 
-#[test]
-fn cross_branch_records_fall_back_to_the_key_deterministically() -> TestResult {
-    // Records on the two branches of the same fork: descent orders
-    // neither over the other (incomparable lineage is never
-    // evidence), so rung 2's key decides — deterministically — while
-    // the fork stays surfaced.
-    let branch_a = binding(1, 12, 1, 50, (NOW - 6000, NOW - 2000), 10)?;
-    let branch_b = binding(1, 13, 2, 200, (NOW - 5000, NOW - 1000), 90)?;
+/// Succession forks: competing valid successor statements stop
+/// incumbency extension and eligibility, surfaced.
+mod succession_fork_isolation {
+    use super::*;
 
-    let lineage = vec![
-        Item::Rotation(rotation(1, 11, 12)?),
-        Item::Rotation(rotation(1, 11, 13)?),
-    ];
+    #[test]
+    fn succession_forks_surface_and_stop_eligibility() -> TestResult {
+        // Two valid successor statements from doc1: →doc2 and →doc3.
+        // Provable equivocation: surfaced, and NEITHER branch can ride
+        // the forked proof graph past the incumbent.
+        let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
+        let branch_x = binding(2, 22, 2, 999, (NOW - 1500, NOW - 100), 60)?;
+        let branch_y = binding(3, 33, 3, 998, (NOW - 1500, NOW - 100), 60)?;
 
-    let state = run(&[&branch_a, &branch_b], &Decisions::default(), lineage);
+        let proofs = vec![
+            Item::Successor(succession(1, 2, 21)?),
+            Item::Successor(succession(1, 3, 22)?),
+        ];
 
-    let accepted = state.accepted.expect("accepted");
-    assert_eq!(accepted.generation, generation(13), "higher key wins");
-    assert!(
-        state.forks.iter().any(|f| f.at == generation(11)),
-        "picking a branch record never resolves the fork"
-    );
-    Ok(())
-}
+        let state = run(
+            &[&incumbent, &branch_x, &branch_y],
+            &accept(doc(1), &incumbent),
+            proofs,
+        );
 
-#[test]
-fn fork_repair_by_convergence_merge_settles_the_lineage() -> TestResult {
-    // Same fork, repaired: both branch heads retire into fresh G16
-    // (a double-successor MERGE — legal, only G16's holder can mint
-    // it). Single head again: retired branches rejoin the protected
-    // prefix, the current generation is accepted, the historical fork
-    // stays surfaced.
-    let stale_branch = binding(1, 14, 1, 50, (NOW - 9000, NOW - 5000), 10)?;
-    let current = binding(1, 16, 2, 60, (NOW - 1000, NOW + 1000), 20)?;
-
-    let lineage = vec![
-        Item::Rotation(rotation(1, 11, 12)?),
-        Item::Rotation(rotation(1, 12, 13)?),
-        Item::Rotation(rotation(1, 13, 14)?),
-        Item::Rotation(rotation(1, 13, 15)?),
-        Item::Rotation(rotation(1, 14, 16)?),
-        Item::Rotation(rotation(1, 15, 16)?),
-    ];
-
-    let state = run(&[&stale_branch, &current], &Decisions::default(), lineage);
-
-    let accepted = state.accepted.expect("current generation accepted");
-    assert_eq!(accepted.generation, generation(16));
-    assert_eq!(
-        state.effective_serial,
-        Some(Serial::from(60)),
-        "retired branch record is D12-rejected post-repair"
-    );
-    assert!(
-        state.forks.iter().any(|f| f.at == generation(13)),
-        "repair converges heads; it never launders the fork"
-    );
-    Ok(())
-}
-
-#[test]
-fn b9_unauthorized_statements_have_no_lineage_effect() -> TestResult {
-    // The rotation's carriage fails authority verification: it must
-    // be discarded entirely — no D12, no fork evidence.
-    let old_gen = binding(1, 11, 1, 50, (NOW - 1000, NOW + 1000), 10)?;
-
-    let mut validator =
-        MemoryValidator::default().with(host(), &old_gen.chain, old_gen.proof.clone());
-    let _ = &mut validator;
-    let mut store = Store::default();
-    store.insert(Item::Record(old_gen.cert.clone()));
-    store.insert(Item::Rotation(rotation(1, 11, 12)?));
-
-    let derivation = VerifierState::compute(
-        &store,
-        UnixSeconds::from(NOW),
-        &Decisions::default(),
-        &Map::default(),
-        &validator,
-        &MemoryAuthority::default().deny(doc(1), generation(12).verifying_key()),
-    );
-
-    let state = derivation
-        .bindings
-        .get(&host())
-        .cloned()
-        .unwrap_or_default();
-    let accepted = state.accepted.expect("old generation still accepted");
-    assert_eq!(accepted.generation, generation(11), "no D12 from garbage");
-    assert!(state.forks.is_empty(), "never fork evidence either");
-    Ok(())
-}
-
-// ───── review fix #1: extraction closure under resets ─────
-
-#[test]
-fn statements_survive_resets_via_independent_carriers() -> TestResult {
-    // Rotation R (G11→G12) is carried by BOTH cert A and cert B.
-    // Excluding only A leaves R in force via B; excluding both
-    // removes it — and neither outcome depends on insertion order.
-    let statement = rotation(1, 11, 12)?;
-    let carrier_a = binding_carrying(
-        1,
-        12,
-        1,
-        50,
-        (NOW - 5000, NOW - 1000),
-        10,
-        vec![statement.clone()],
-    )?;
-    let carrier_b = binding_carrying(
-        1,
-        12,
-        2,
-        60,
-        (NOW - 4000, NOW - 500),
-        20,
-        vec![statement.clone()],
-    )?;
-    let rewind = binding(1, 11, 3, 70, (NOW - 3000, NOW - 200), 30)?;
-
-    let reset_a = {
-        let mut decisions = Decisions::default();
-        let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().erase());
-        decisions.resets.insert(host(), excluded);
-        decisions
-    };
-
-    let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_a, vec![]);
-    let accepted = state.accepted.expect("accepted");
-    assert_eq!(
-        accepted.generation,
-        generation(12),
-        "R survives via the non-excluded carrier: the rewind stays rejected"
-    );
-
-    let reset_both = {
-        let mut decisions = Decisions::default();
-        let mut excluded = Set::default();
-        excluded.insert(carrier_a.cert.digest().erase());
-        excluded.insert(carrier_b.cert.digest().erase());
-        decisions.resets.insert(host(), excluded);
-        decisions
-    };
-
-    let state = run(&[&carrier_a, &carrier_b, &rewind], &reset_both, vec![]);
-    let accepted = state.accepted.expect("accepted");
-    assert_eq!(
-        accepted.generation,
-        generation(11),
-        "excluding every carrier excludes the extracted statement"
-    );
-    Ok(())
-}
-
-// ───── review fix #4: D16 succession forks ─────
-
-#[test]
-fn d16_succession_forks_surface_and_stop_eligibility() -> TestResult {
-    // Two valid successor statements from doc1: →doc2 and →doc3.
-    // Provable equivocation: surfaced, and NEITHER branch can ride
-    // the forked proof graph past the incumbent.
-    let incumbent = binding(1, 11, 1, 100, (NOW - 5000, NOW - 2000), 50)?;
-    let branch_x = binding(2, 22, 2, 999, (NOW - 1500, NOW - 100), 60)?;
-    let branch_y = binding(3, 33, 3, 998, (NOW - 1500, NOW - 100), 60)?;
-
-    let proofs = vec![
-        Item::Successor(succession(1, 2, 21)?),
-        Item::Successor(succession(1, 3, 22)?),
-    ];
-
-    let state = run(
-        &[&incumbent, &branch_x, &branch_y],
-        &accept(doc(1), &incumbent),
-        proofs,
-    );
-
-    let accepted = state.accepted.expect("accepted");
-    assert_eq!(
-        accepted.document,
-        doc(1),
-        "a forked proof graph confers no eligibility"
-    );
-    assert_eq!(state.succession_forks.len(), 1);
-    assert_eq!(state.succession_forks[0].predecessor, doc(1));
-    assert_eq!(
-        state.pending.len(),
-        2,
-        "both unproven branches badge pending"
-    );
-    Ok(())
+        let accepted = state.accepted.expect("accepted");
+        assert_eq!(
+            accepted.document,
+            doc(1),
+            "a forked proof graph confers no eligibility"
+        );
+        assert_eq!(state.succession_forks.len(), 1);
+        assert_eq!(state.succession_forks[0].predecessor, doc(1));
+        assert_eq!(
+            state.pending.len(),
+            2,
+            "both unproven branches badge pending"
+        );
+        Ok(())
+    }
 }
 
 mod props {
@@ -791,38 +810,530 @@ mod props {
     }
 }
 
-// ───── seam parity: certificate signers are authority-checked ─────
+/// Seam parity: certificate signers face the same authority check as
+/// statement signers.
+mod certificate_signer_authority {
+    use super::*;
 
-#[test]
-fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
-    // Same shape as B9 for statements: a certificate whose signer the
-    // authority refuses for its own document is discarded entirely —
-    // no binding evidence, no accepted state. Vacuous under the
-    // permissive default; the check that makes delegation graphs bite.
-    let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
+    #[test]
+    fn unauthorized_certificate_signers_contribute_nothing() -> TestResult {
+        // Same shape as the statement rule: a certificate whose signer the
+        // authority refuses for its own document is discarded entirely —
+        // no binding evidence, no accepted state. Vacuous under the
+        // permissive default; the check that makes delegation graphs bite.
+        let b = binding(1, 11, 1, 100, (NOW - 1000, NOW + 1000), 50)?;
 
-    let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
-    let mut store = Store::default();
-    store.insert(Item::Record(b.cert.clone()));
+        let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+        let mut store = Store::default();
+        store.insert(Item::Record(b.cert.clone()));
 
-    let derivation = VerifierState::compute(
-        &store,
-        UnixSeconds::from(NOW),
-        &Decisions::default(),
-        &Map::default(),
-        &validator,
-        // The cert builder signs with `signer(200 ^ doc_seed)`.
-        &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
-    );
+        let derivation = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            // The cert builder signs with `signer(200 ^ doc_seed)`.
+            &MemoryAuthority::default().deny(doc(1), &signer(200 ^ 1).verifying_key()),
+        );
 
-    let state = derivation
+        let state = derivation
+            .bindings
+            .get(&host())
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            state.accepted.is_none(),
+            "an unauthorized signer's certificate must be inert"
+        );
+        Ok(())
+    }
+}
+
+/// Bare chain refreshes corroborate a certificate-backed document;
+/// they never create candidacy on their own (binding-cache, The
+/// Store).
+mod refresh_corroboration {
+    use super::*;
+
+    #[test]
+    fn a_bare_chain_refresh_alone_is_not_a_binding() -> TestResult {
+        // The zone's word is one direction, and neither direction
+        // alone is a binding (dns-anchor, Verification). A store holding
+        // exactly one bare refresh — no certificate anywhere — must
+        // derive no accepted binding, however valid the chain.
+        let b = binding(1, 2, 7, 100, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+
+        let validator = MemoryValidator::default().with(host(), &b.chain, b.proof.clone());
+        let mut store = Store::default();
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: b.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default(),
+        )
         .bindings
         .get(&host())
         .cloned()
         .unwrap_or_default();
-    assert!(
-        state.accepted.is_none(),
-        "an unauthorized signer's certificate must be inert"
-    );
-    Ok(())
+
+        assert_eq!(
+            state.accepted, None,
+            "a bare chain refresh must never make a document a candidate"
+        );
+        assert!(!state.contested, "absence of candidates is not a contest");
+        Ok(())
+    }
+
+    #[test]
+    fn a_bare_chain_refresh_corroborates_a_certificate_backed_document() -> TestResult {
+        // The other half: the refresh's real job. A stale certificate
+        // supplies candidacy (the document's direction, proven once); a
+        // fresh bare refresh supplies the zone's current word — together
+        // they confirm, where the certificate alone would only be
+        // provisional.
+        let lapsed = binding(1, 2, 7, 100, (NOW - 200_000, NOW - 50_000), NOW - 150_000)?;
+        let fresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+
+        let validator = MemoryValidator::default()
+            .with(host(), &lapsed.chain, lapsed.proof.clone())
+            .with(host(), &fresh.chain, fresh.proof.clone());
+
+        let mut store = Store::default();
+        store.insert(Item::Record(lapsed.cert.clone()));
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: fresh.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        let accepted = state
+            .accepted
+            .expect("the certificate-backed document is accepted");
+        assert_eq!(accepted.document, doc(1));
+        assert_eq!(
+            accepted.grade,
+            BindingGrade::Confirmed,
+            "the refresh's fresh window is what confirms"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_refresh_never_revives_an_off_path_certificate() -> TestResult {
+        // Corroboration across the stage boundary: the hostname's only
+        // certificate is FRESH with an off-path generation — the
+        // generation rules MUST reject it — and a fresh bare refresh
+        // attests the same
+        // document. The refresh is the zone's word alone; it must not
+        // relaunder the document into candidacy, and its own path input
+        // is judged against validated carriages, never assumed.
+        let b = binding(1, 2, 7, 100, (NOW - 1_000, NOW + 100_000), NOW - 10)?;
+        let refresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+        let validator = MemoryValidator::default()
+            .with(host(), &b.chain, b.proof.clone())
+            .with(host(), &refresh.chain, refresh.proof.clone());
+        let authority = MemoryAuthority::default().off_path(&generation(2));
+
+        let mut store = Store::default();
+        store.insert(Item::Record(b.cert.clone()));
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &authority,
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        assert_eq!(
+            state.accepted, None,
+            "a bare refresh must not confirm a binding whose certificate was rejected"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_refresh_never_revives_a_rewound_certificate() -> TestResult {
+        // The rewind flavour: the settled
+        // rotation G2→G3 puts G2 in the protected prefix, so the stale
+        // certificate attesting G2 is rejected at stage 4. The fresh
+        // bare refresh attests G3 — the CURRENT generation, on-path,
+        // unprotected — so the refresh row itself survives every
+        // stage-4 rule, and only the stage-5 candidacy restriction
+        // (certificate-attested survivors) stands between the zone's
+        // word and a Confirmed binding. This is the case the stage-2
+        // filter alone cannot carry.
+        let statement = rotation(1, 2, 3)?;
+        let old = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+        let refresh = binding(1, 3, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+        let validator = MemoryValidator::default()
+            .with(host(), &old.chain, old.proof.clone())
+            .with(host(), &refresh.chain, refresh.proof.clone());
+
+        let mut store = Store::default();
+        store.insert(Item::Record(old.cert.clone()));
+        store.insert(Item::Rotation(statement));
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        assert_eq!(
+            state.accepted, None,
+            "a bare refresh must not revive candidacy the rewind rule killed"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_refresh_cannot_swap_the_accepted_generation_off_path() -> TestResult {
+        // The generation-swap: the document
+        // IS a candidate — its certificate survives, stale, attesting
+        // G2 on-path — and the zone then publishes a fresh record for a
+        // NEW generation G9 that lies on no validated carriage's path.
+        // A bare refresh carries that record. Its path input must be
+        // judged against the validated carriages (off-path ⇒ fresh
+        // reject), never assumed: otherwise the fresh refresh row
+        // becomes the document's ladder-best record and the accepted
+        // binding silently carries a generation key no carriage was
+        // ever checked against.
+        let cert = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+        let refresh = binding(1, 9, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+        let validator = MemoryValidator::default()
+            .with(host(), &cert.chain, cert.proof.clone())
+            .with(host(), &refresh.chain, refresh.proof.clone());
+        let authority = MemoryAuthority::default().off_path(&generation(9));
+
+        let mut store = Store::default();
+        store.insert(Item::Record(cert.cert.clone()));
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &authority,
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        let accepted = state
+            .accepted
+            .expect("the certificate-backed document stands");
+        assert_eq!(
+            accepted.generation,
+            generation(2),
+            "the accepted generation must be the certificate-attested one"
+        );
+        assert_eq!(
+            accepted.grade,
+            BindingGrade::Provisional,
+            "an off-path fresh refresh confers no fresh support"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn equal_key_junk_never_blanks_an_acceptance_backed_incumbent() -> TestResult {
+        // Pending and contested together: an acceptance-backed
+        // incumbent, plus two stale, unproven, unconnected candidates
+        // whose zone-state keys are fully equal. One junk record is a
+        // pending badge; two junk records must not become a contest that
+        // masks the binding — the candidate contest requires no standing
+        // incumbent, and pending challengers never displace one, however
+        // many arrive or how late their keys read.
+        let incumbent = binding(1, 2, 1, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+        let junk_a = binding(2, 3, 2, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+        let junk_b = binding(3, 4, 3, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+
+        let state = run(
+            &[&incumbent, &junk_a, &junk_b],
+            &accept(doc(1), &incumbent),
+            vec![],
+        );
+
+        assert!(
+            !state.contested,
+            "ineligible ties are pending, never a contest"
+        );
+        let accepted = state.accepted.expect("the incumbent stands");
+        assert_eq!(accepted.document, doc(1));
+        assert_eq!(
+            state.pending,
+            vec![doc(2), doc(3)],
+            "both challengers badge pending"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_dual_publish_refresh_does_not_contest_its_own_hostname() -> TestResult {
+        // A bare refresh of an RRset carrying TWO records
+        // for one document (serials 100 and 150) — the spec's sanctioned
+        // migration shape. Within one item the highest serial is the
+        // zone's word, exactly as the certificate path reads it; a
+        // publisher doing what the spec recommends must not render their
+        // own name contested.
+        let cert = binding(1, 2, 7, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+        let refresh = binding(1, 2, 8, 150, (NOW - 1_000, NOW + 100_000), NOW - 5)?;
+
+        let dual = onomancy_dnssec::chain_proof::ChainProof {
+            records: vec![
+                onomancy_dnssec::txt::record::TxtRecord::new(
+                    Serial::from(100),
+                    onomancy_protocol::test_utils::generation(2),
+                    doc(1),
+                ),
+                onomancy_dnssec::txt::record::TxtRecord::new(
+                    Serial::from(150),
+                    onomancy_protocol::test_utils::generation(2),
+                    doc(1),
+                ),
+            ],
+            window: refresh.proof.window,
+        };
+
+        let validator = MemoryValidator::default()
+            .with(host(), &cert.chain, cert.proof.clone())
+            .with(host(), &refresh.chain, dual);
+
+        let mut store = Store::default();
+        store.insert(Item::Record(cert.cert.clone()));
+        store.insert(Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        });
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &Decisions::default(),
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        assert!(
+            !state.contested,
+            "dual-publish is sanctioned, not a contest"
+        );
+        let accepted = state.accepted.expect("the document stands");
+        assert_eq!(accepted.document, doc(1));
+        assert_eq!(accepted.grade, BindingGrade::Confirmed);
+        assert_eq!(
+            state.effective_serial,
+            Some(Serial::from(150)),
+            "the higher serial is the zone's word"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_acceptance_citing_a_dual_publish_refresh_holds() -> TestResult {
+        // One cited ITEM can legally yield several
+        // evidence rows — a bare refresh of a migration RRset carries one
+        // row per document. A receipt-shape check that counts rows
+        // against cited hashes silently voids exactly those receipts,
+        // reverting the hostname to ladder-maximal incumbency. The check
+        // must be per item.
+        let cert_one = binding(1, 2, 1, 100, (NOW - 90_000, NOW - 50_000), 40)?;
+        let challenger = binding(2, 3, 2, 200, (NOW - 80_000, NOW - 40_000), 50)?;
+        let refresh = binding(1, 2, 8, 150, (NOW - 80_000, NOW - 40_000), 45)?;
+
+        // The refresh's RRset dual-publishes ACROSS documents: one record
+        // each for doc(1) and doc(2) — two evidence rows, one item hash.
+        let dual = onomancy_dnssec::chain_proof::ChainProof {
+            records: vec![
+                onomancy_dnssec::txt::record::TxtRecord::new(
+                    Serial::from(150),
+                    onomancy_protocol::test_utils::generation(2),
+                    doc(1),
+                ),
+                onomancy_dnssec::txt::record::TxtRecord::new(
+                    Serial::from(150),
+                    onomancy_protocol::test_utils::generation(3),
+                    doc(2),
+                ),
+            ],
+            window: refresh.proof.window,
+        };
+
+        let refresh_item = Item::ChainRefresh {
+            hostname: host(),
+            chain: refresh.chain.clone(),
+        };
+
+        let mut cited = Set::default();
+        cited.insert(refresh_item.content_hash());
+        let mut acceptances = Map::default();
+        acceptances.insert(
+            host(),
+            vec![Acceptance {
+                document: doc(1),
+                cited,
+            }],
+        );
+        let decisions = Decisions {
+            acceptances,
+            ..Decisions::default()
+        };
+
+        let validator = MemoryValidator::default()
+            .with(host(), &cert_one.chain, cert_one.proof.clone())
+            .with(host(), &challenger.chain, challenger.proof.clone())
+            .with(host(), &refresh.chain, dual);
+
+        let mut store = Store::default();
+        store.insert(Item::Record(cert_one.cert.clone()));
+        store.insert(Item::Record(challenger.cert.clone()));
+        store.insert(refresh_item);
+
+        let state = VerifierState::compute(
+            &store,
+            UnixSeconds::from(NOW),
+            &decisions,
+            &Map::default(),
+            &validator,
+            &MemoryAuthority::default(),
+        )
+        .bindings
+        .get(&host())
+        .cloned()
+        .unwrap_or_default();
+
+        assert!(!state.contested);
+        let accepted = state
+            .accepted
+            .expect("the acceptance-backed incumbent stands");
+        assert_eq!(
+            accepted.document,
+            doc(1),
+            "a well-formed receipt must not be voided by a row count"
+        );
+        assert_eq!(state.pending, vec![doc(2)], "the challenger badges pending");
+        Ok(())
+    }
+}
+
+/// Fresh rewinds and the monotone-generation clock: corroborated
+/// rewinds are rejected, the uncorroborated residual contests.
+mod fresh_rewinds {
+    use super::*;
+
+    #[test]
+    fn a_corroborated_rewind_is_rejected_even_fresh() -> TestResult {
+        // Settled lineage G2→G3, and the zone was OBSERVED running on G3
+        // (a held record attests it). A fresh chain now attesting the
+        // retired G2 is a corroborated rewind: the zone's own attested
+        // history moved forward and is attesting backward — 2-vs-1
+        // against the fresh chain, whose minting required exactly the
+        // zone control the rewind attacker holds. Rejected regardless of
+        // freshness, with the fork surfaced so the owner learns their
+        // zone is publishing a retired key. The name keeps resolving at
+        // the honest generation on its stale support.
+        let honest = binding(1, 3, 1, 100, (NOW - 9_000, NOW - 5_000), 20)?;
+        let rewind = binding(1, 2, 2, 200, (NOW - 1_000, NOW + 1_000), 90)?;
+
+        let state = run(
+            &[&honest, &rewind],
+            &Decisions::default(),
+            vec![Item::Rotation(rotation(1, 2, 3)?)],
+        );
+
+        let accepted = state.accepted.expect("the honest generation stands");
+        assert_eq!(accepted.generation, generation(3), "the rewind is rejected");
+        assert_eq!(
+            accepted.grade,
+            BindingGrade::Provisional,
+            "stale support only — the fresh chain was the attacker's"
+        );
+        assert!(!state.contested, "corroboration resolves it; no contest");
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(2)),
+            "the rewind attempt is surfaced as a fork"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_uncorroborated_fresh_rewind_derives_contested() -> TestResult {
+        // The residual 1-vs-1: a valid statement claims G2→G3, but no
+        // held record EVER attested G3 — the fresh chain attesting G2 is
+        // either an honest zone under a forged kill-switch statement, or
+        // a rewind racing ahead of gossip (or a slow zone mid-rotation).
+        // Indistinguishable from the evidence, so neither side wins
+        // silently: contested, output masked, resolution falls to pins
+        // and the use-time prompt; repair is the convergence merge.
+        let rewind = binding(1, 2, 2, 200, (NOW - 1_000, NOW + 1_000), 90)?;
+
+        let state = run(
+            &[&rewind],
+            &Decisions::default(),
+            vec![Item::Rotation(rotation(1, 2, 3)?)],
+        );
+
+        assert!(state.contested, "a 1-vs-1 equivocation is a contest");
+        assert_eq!(state.accepted, None, "masked while the fork stands");
+        assert!(
+            state.forks.iter().any(|f| f.at == generation(2)),
+            "and surfaced"
+        );
+        Ok(())
+    }
 }

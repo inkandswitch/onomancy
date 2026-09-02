@@ -19,7 +19,7 @@ pub struct MemoryNamestore {
 
 impl MemoryNamestore {
     /// Add one entry, builder-style. Keys are paths — already-parsed
-    /// segments, so non-conforming keys (E6) are unrepresentable here.
+    /// segments, so non-conforming keys are unrepresentable here.
     #[must_use]
     pub fn with(mut self, path: &[Segment], target: DocAnchor) -> Self {
         self.entries.insert(path.to_vec(), target);

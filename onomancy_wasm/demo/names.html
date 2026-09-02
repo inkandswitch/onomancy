@@ -36,7 +36,6 @@
       padding: .75rem 1rem; margin: .75rem 0;
     }
     .doc .anchor { font-weight: bold; word-break: break-all; }
-    .doc .note { opacity: .8; }
     .edge { margin-left: 1rem; }
     .resolved { color: #2a2; } .partial { color: #b80; } .error { color: #c33; }
     footer { margin-top: 3rem; font-size: .8rem; opacity: .6; }
@@ -161,13 +160,7 @@
         title.textContent = anchor;
         card.append(title);
 
-        const note = held.note(anchor);
-        if (note) {
-          const noteLine = document.createElement("div");
-          noteLine.className = "note";
-          noteLine.textContent = "note: " + note;
-          card.append(noteLine);
-        }
+
 
         for (const { path, target } of held.edges(anchor)) {
           const edge = document.createElement("div");
@@ -183,9 +176,7 @@
         for (const other of held.anchors) {
           targetSelect.add(new Option(short(other), other));
         }
-        const noteInput = document.createElement("input");
-        noteInput.placeholder = "note";
-        noteInput.value = note ?? "";
+
         const bindButton = document.createElement("button");
         bindButton.textContent = "bind";
         const saveLink = document.createElement("a");
@@ -195,13 +186,10 @@
         saveLink.href = URL.createObjectURL(
           new Blob([held.save(anchor)], { type: "application/octet-stream" }),
         );
-        bindForm.append(pathInput, targetSelect, noteInput, bindButton, saveLink);
+        bindForm.append(pathInput, targetSelect, bindButton, saveLink);
         bindForm.addEventListener("submit", (event) => {
           event.preventDefault();
           try {
-            if (noteInput.value !== (note ?? "")) {
-              held.setNote(anchor, noteInput.value);
-            }
             if (pathInput.value) {
               held.bind(anchor, pathInput.value, targetSelect.value);
             }
@@ -226,9 +214,6 @@
       const gallery = held.createDocument();
       const year = held.createDocument();
       const root = held.createDocument();
-      held.setNote(root, "my root document");
-      held.setNote(gallery, "the gallery");
-      held.setNote(year, "🎉 best of 2026");
       held.bind(root, "pics/best", gallery);
       held.bind(gallery, "2026", year);
       render();

@@ -54,6 +54,7 @@ use onomancy_core::{
 };
 use onomancy_dnssec::{
     certificate::Certificate,
+    chain::DnssecChain,
     chain_proof::{ChainProof, ChainValidator},
     dns_name::DnsName,
     freshness::{Freshness, Grade, ValidityWindow},
@@ -181,6 +182,23 @@ fn derive_host<A: AuthorityVerifier>(
             .filter(|r| !excluded.contains(&r.hash))
             .filter(|r| !is_deferred(r, now))
             .collect();
+
+        // A bare chain refresh is the zone's word alone, so it rides
+        // only beside a certificate record for the same document.
+        // Judged after exclusion — a reset that clears a document's
+        // certificates clears its refreshes' standing with them — but
+        // before the stage-4 generation rules, so this filter is only
+        // the first cut: stage 5 restricts candidacy to
+        // certificate-attested survivors again.
+        let corroborated: Set<DocAnchor> = records
+            .iter()
+            .filter(|r| r.attestation == Attestation::Certificate)
+            .map(|r| r.document)
+            .collect();
+        records.retain(|r| {
+            r.attestation == Attestation::Certificate || corroborated.contains(&r.document)
+        });
+
         // Deterministic evaluation order regardless of store order.
         records.sort_unstable_by_key(|r| (r.document, r.key, r.hash));
         records
@@ -190,32 +208,17 @@ fn derive_host<A: AuthorityVerifier>(
     // suffix, per document (rotation statements are document-scoped).
     let lineage = build_lineage(evidence, &rotation_exclusions);
 
-    // Stage 4: grade chains; apply the generation rules. A fresh
-    // record attesting a protected generation is D12a fork territory:
-    // it survives WITH a surfaced fork, never a silent rejection.
-    let mut generation_forks: Vec<Fork> = Vec::new();
-    let surviving: Vec<&BindingEvidence> = considered
-        .iter()
-        .copied()
-        .filter(|r| match generation_rule(r, now, &lineage) {
-            Disposition::Keep => true,
-            Disposition::Reject => false,
-            Disposition::KeepSurfacingFork => {
-                generation_forks.push(Fork {
-                    document: r.document,
-                    at: r.generation,
-                });
-                true
-            }
-        })
-        .collect();
+    // Stage 4: grade chains; apply the generation rules.
+    let graded = apply_generation_rules(&considered, now, &lineage);
+    let surviving = graded.surviving;
+    let generation_contested = graded.contested_documents;
 
     let mut forks: Vec<Fork> = lineage
         .forks
         .iter()
         .filter(|f| considered.iter().any(|r| r.document == f.document))
         .copied()
-        .chain(generation_forks)
+        .chain(graded.forks)
         .collect();
     forks.sort_unstable();
     forks.dedup();
@@ -262,7 +265,7 @@ fn derive_host<A: AuthorityVerifier>(
         // accepted document — fresh-first, then lineage descent, then
         // zone-state key — so a fresh record with a lower serial wins
         // and its downward serial surfaces as a ratchet reset in the
-        // diff (D4a).
+        // diff as a ratchet reset.
         let mut already_surfaced = false;
         let serial = best_of_document(&surviving, binding.document, &ctx, &mut already_surfaced)
             .map(|r| r.key.serial);
@@ -271,14 +274,26 @@ fn derive_host<A: AuthorityVerifier>(
         (serial, span)
     });
 
+    // When the document that would be accepted has an
+    // open, uncorroborated generation contest — a fresh chain and a
+    // valid statement pointing opposite ways with no zone history to
+    // arbitrate — the output is contested like every other
+    // equivocation. Resolution falls to pins and the use-time prompt;
+    // repair is the convergence merge. A contest on a document that
+    // does NOT win masks nothing: the fork alone surfaces it.
+    let contested = resolution.contested
+        || accepted
+            .as_ref()
+            .is_some_and(|binding| generation_contested.contains(&binding.document));
+
     // Stage 8: divergence against the POST-mask output.
-    let masked = resolution.contested;
+    let masked = contested;
     let output_binding = if masked { None } else { accepted };
     let divergence = derive_divergence(hostname, output_binding.as_ref(), decisions, pins);
 
     BindingState {
         accepted: output_binding,
-        contested: resolution.contested,
+        contested,
         divergence,
         effective_serial: if masked { None } else { effective_serial },
         forks,
@@ -302,14 +317,38 @@ struct Evidence {
 /// One validated binding record's derivation-relevant facts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BindingEvidence {
+    /// What vouches for this record's document.
+    pub(crate) attestation: Attestation,
     pub(crate) document: DocAnchor,
     pub(crate) generation: GenerationKey,
     pub(crate) hash: Digest<Blake3, [u8]>,
     pub(crate) hostname: DnsName,
     pub(crate) key: ZoneStateKey,
-    /// Whether the delegation chain lies on the delegation path for the attested `g=` (D10).
+    /// Whether the delegation chain lies on the delegation path for
+    /// the attested `g=` (dns-anchor, Generation Key).
     pub(crate) generation_on_path: bool,
     pub(crate) window: ValidityWindow,
+}
+
+/// What vouches for a binding record's document.
+///
+/// A binding needs both directions (dns-anchor, Verification): the
+/// zone's TXT record names the document, and the certificate proves
+/// the document accepts the hostname. A record extracted from a bare
+/// chain refresh carries the zone's word only — it corroborates a
+/// document some certificate record already attests, and MUST NOT
+/// make a document a candidate on its own (binding-cache, The
+/// Store).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Attestation {
+    /// Extracted from a validated certificate: signature verified,
+    /// signer authorized, TXT cross-checked, generation path judged
+    /// against the
+    /// certificate's own carriage.
+    Certificate,
+
+    /// Extracted from a bare chain refresh: the zone direction only.
+    ChainOnly,
 }
 
 /// Extraction provenance for a carried statement: excluded only when
@@ -379,7 +418,22 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
     validator: &V,
     authority: &A,
 ) -> Evidence {
+    /// A refresh item deferred to the second extraction pass, so it
+    /// is judged against every validated certificate carriage
+    /// regardless of store order.
+    struct PendingRefresh<'a> {
+        hostname: &'a DnsName,
+        chain: &'a DnssecChain,
+        hash: Digest<Blake3, [u8]>,
+    }
+
     let mut evidence = Evidence::default();
+
+    // Carriages of certificates that VALIDATED (chain proven, signer
+    // authorized): the only delegation evidence a bare refresh may be
+    // judged against.
+    let mut validated_carriages: Vec<(DnsName, DocAnchor, &DelegationChain)> = Vec::new();
+    let mut refreshes: Vec<PendingRefresh<'_>> = Vec::new();
 
     for item in store.items() {
         let hash = item.content_hash();
@@ -409,39 +463,24 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
                     );
                 }
 
-                if let Some(binding) = validate_record(certificate, hash, validator, authority) {
+                if let Ok(binding) = validate_record(certificate, hash, validator, authority) {
+                    validated_carriages.push((
+                        binding.hostname.clone(),
+                        binding.document,
+                        certificate.delegation_chain(),
+                    ));
                     evidence.records.push(binding);
                 }
             }
 
-            Item::ChainRefresh { hostname, chain } => {
-                let Ok(ChainProof { records, window }) = validator.validate(hostname, chain) else {
-                    continue;
-                };
-
-                // A bare refresh proves the whole RRset: each record
-                // is candidate evidence (dual-publish carries several
-                // documents); the ladder selects downstream.
-                evidence
-                    .records
-                    .extend(records.iter().map(|record| BindingEvidence {
-                        document: *record.document(),
-                        generation: *record.generation(),
-                        hash,
-                        hostname: hostname.clone(),
-                        key: ZoneStateKey {
-                            window_end: window.expiration(),
-                            serial: record.serial(),
-                            // Bare refreshes sort below equal-window,
-                            // equal-serial certificate items.
-                            issued_at: UnixSeconds::from(0),
-                        },
-                        // No delegation chain to check: D10 is a
-                        // certificate rule.
-                        generation_on_path: true,
-                        window,
-                    }));
-            }
+            // Deferred to the second pass: a refresh's generation-path standing
+            // is judged against validated certificate carriages, and
+            // store order must not decide which certificates it sees.
+            Item::ChainRefresh { hostname, chain } => refreshes.push(PendingRefresh {
+                hostname,
+                chain,
+                hash,
+            }),
 
             Item::Rotation(statement) => {
                 extract_rotation(&mut evidence, authority, statement, None);
@@ -453,32 +492,118 @@ fn validate_and_extract<V: ChainValidator, A: AuthorityVerifier>(
         }
     }
 
+    for PendingRefresh {
+        hostname,
+        chain,
+        hash,
+    } in refreshes
+    {
+        let Ok(ChainProof { records, window }) = validator.validate(hostname, chain) else {
+            continue;
+        };
+
+        // A bare refresh proves the whole RRset — as corroborating
+        // evidence, never candidacy (stage 5 restricts the
+        // candidate universe to certificate-attested survivors).
+        // Within one RRset, several records for one document are
+        // legal only as migration dual-publish ACROSS documents; for
+        // a single document the highest serial is the zone's word,
+        // exactly as `validate_record` reads it on the certificate
+        // path — emitting every serial as its own row would make one
+        // refresh item contest itself.
+        let mut documents: Vec<DocAnchor> = records.iter().map(|r| *r.document()).collect();
+        documents.sort_unstable();
+        documents.dedup();
+
+        for document in documents {
+            let Some(record) = records
+                .iter()
+                .filter(|r| r.document() == &document)
+                .max_by_key(|r| r.serial())
+            else {
+                continue;
+            };
+
+            // The generation path is judged, never assumed: the refresh carries
+            // no carriage of its own, so its attested generation is on
+            // a delegation path only if some VALIDATED certificate's
+            // carriage for this same binding puts it there. No such
+            // certificate ⇒ fail closed — a zone-capture attacker
+            // must not be able to swap the accepted generation key
+            // with a bare refresh (dns-anchor, Generation Key: positive path
+            // membership).
+            let generation_on_path = validated_carriages
+                .iter()
+                .filter(|(h, d, _)| h == hostname && *d == document)
+                .any(|(_, _, carriage)| authority.on_path(carriage, record.generation()));
+
+            evidence.records.push(BindingEvidence {
+                attestation: Attestation::ChainOnly,
+                document,
+                generation: *record.generation(),
+                hash,
+                hostname: hostname.clone(),
+                key: ZoneStateKey {
+                    window_end: window.expiration(),
+                    serial: record.serial(),
+                    // Bare refreshes sort below equal-window,
+                    // equal-serial certificate items.
+                    issued_at: UnixSeconds::from(0),
+                },
+                generation_on_path,
+                window,
+            });
+        }
+    }
+
     evidence
 }
 
+/// Why a certificate did not become a binding record.
+///
+/// Three conditions, kept apart because they send a caller to three
+/// different places: the zone's DNSSEC, the signing key, and which
+/// document the zone actually names. Collapsing them into one
+/// "rejected" sends someone to debug their zone when the answer is
+/// that they signed with the wrong key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RecordRejected {
+    /// The DNSSEC chain did not validate from the trust anchors.
+    Chain,
+
+    /// The chain is sound, but the signer is not authorized by the
+    /// document it claims to bind.
+    Signer,
+
+    /// The chain is sound and the signer authorized, but no proven
+    /// TXT record names this certificate's document.
+    Unattested,
+}
+
 /// Validate one certificate item into a binding record: chain proof,
-/// TXT cross-check, D10 path-membership input.
+/// TXT cross-check, generation-path input.
 pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     certificate: &Certificate,
     hash: Digest<Blake3, [u8]>,
     validator: &V,
     authority: &A,
-) -> Option<BindingEvidence> {
+) -> Result<BindingEvidence, RecordRejected> {
     let Ok(ChainProof { records, window }) =
         validator.validate(certificate.hostname(), certificate.dnssec_chain())
     else {
-        return None;
+        return Err(RecordRejected::Chain);
     };
 
-    // Seam parity with statements (B9): a certificate whose signer is
+    // Seam parity with statements: a certificate whose signer is
     // not authorized by its own document contributes nothing. Vacuous
-    // under the permissive default; real once delegation graphs land.
+    // under `MemoryAuthority` (tests only); real under
+    // `KeyhiveAuthority`, which replays the carriage.
     if !authority.authorizes(
         certificate.root_doc(),
         certificate.signer(),
         certificate.delegation_chain(),
     ) {
-        return None;
+        return Err(RecordRejected::Signer);
     }
 
     // Cross-check: the chain-proven RRset must attest the
@@ -488,11 +613,13 @@ pub(crate) fn validate_record<V: ChainValidator, A: AuthorityVerifier>(
     let record = records
         .iter()
         .filter(|record| record.document() == certificate.root_doc())
-        .max_by_key(|record| record.serial())?;
+        .max_by_key(|record| record.serial())
+        .ok_or(RecordRejected::Unattested)?;
 
     let generation_on_path = authority.on_path(certificate.delegation_chain(), record.generation());
 
-    Some(BindingEvidence {
+    Ok(BindingEvidence {
+        attestation: Attestation::Certificate,
         document: *certificate.root_doc(),
         generation: *record.generation(),
         hash,
@@ -514,7 +641,7 @@ fn extract_rotation<A: AuthorityVerifier>(
     carrier: Option<Digest<Blake3, Certificate>>,
 ) {
     // Signature validity was settled at decode; carriage authority is
-    // the remaining validity condition (B9: invalid statements are
+    // the remaining validity condition (invalid statements are
     // discarded entirely — no lineage effect, never fork evidence).
     if !authority.authorizes(
         statement.root_doc(),
@@ -607,9 +734,11 @@ struct LineageView {
     /// filtered and deduped): rung 1's same-document vocabulary.
     edges: Vec<(DocAnchor, GenerationKey, GenerationKey)>,
     forks: Vec<Fork>,
-    /// Fork-implicated generations, per document: D12a territory.
+    /// Fork-implicated generations, per document: fork territory,
+    /// where the rewind rule is suspended.
     implicated: Set<(DocAnchor, GenerationKey)>,
-    /// The protected prefix, per document: D12 stays armed here.
+    /// The protected prefix, per document: the rewind rule stays
+    /// armed here.
     protected: Set<(DocAnchor, GenerationKey)>,
 }
 
@@ -671,7 +800,7 @@ fn build_lineage(evidence: &Evidence, excluded: &Set<Digest<Blake3, [u8]>>) -> L
             .filter(|r| r.root_doc == document)
             .collect();
 
-        // Set-wise chain-shape checks (D18): double-replace and
+        // Set-wise chain-shape checks: double-replace and
         // cycles from generation-key reuse. A double SUCCESSOR with
         // distinct replaced keys is a legal convergence merge — fork
         // repair requires it, and only the successor key's holder can
@@ -793,25 +922,98 @@ pub(crate) fn freshness(record: &BindingEvidence, now: UnixSeconds) -> Freshness
     }
 }
 
+/// Stage 4's output: the surviving records, the forks the generation
+/// rules surfaced, and the documents whose generation is contested
+/// (the uncorroborated-rewind residual).
+struct GradedRecords<'a> {
+    surviving: Vec<&'a BindingEvidence>,
+    forks: Vec<Fork>,
+    contested_documents: Set<DocAnchor>,
+}
+
+/// Stage 4: apply the generation rules to the considered set. A
+/// fresh record attesting a protected generation splits on the
+/// zone's own attested history (the monotone-generation clock): a
+/// CORROBORATED rewind is rejected with the fork surfaced; the
+/// uncorroborated residual survives and contests its document —
+/// neither side of a 1-vs-1 equivocation wins silently.
+fn apply_generation_rules<'a>(
+    considered: &[&'a BindingEvidence],
+    now: UnixSeconds,
+    lineage: &LineageView,
+) -> GradedRecords<'a> {
+    let mut forks: Vec<Fork> = Vec::new();
+    let mut contested_documents: Set<DocAnchor> = Set::default();
+
+    let surviving: Vec<&'a BindingEvidence> = considered
+        .iter()
+        .copied()
+        .filter(|r| {
+            let fork = Fork {
+                document: r.document,
+                at: r.generation,
+            };
+
+            match generation_rule(r, now, lineage, considered) {
+                Disposition::Keep => true,
+                Disposition::Reject => false,
+                Disposition::KeepSurfacingFork => {
+                    forks.push(fork);
+                    true
+                }
+                Disposition::KeepContesting => {
+                    forks.push(fork);
+                    contested_documents.insert(r.document);
+                    true
+                }
+                Disposition::RejectSurfacingFork => {
+                    forks.push(fork);
+                    false
+                }
+            }
+        })
+        .collect();
+
+    GradedRecords {
+        surviving,
+        forks,
+        contested_documents,
+    }
+}
+
 /// A record's fate under the generation rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Disposition {
     Keep,
-    /// D12a: a fresh chain contradicting settled lineage is competing
-    /// valid evidence — it survives, loudly.
+    /// Fork-implicated evidence survives, loudly.
     KeepSurfacingFork,
+    /// An UNCORROBORATED fresh rewind survives, loudly,
+    /// and the document derives contested while the fork stands —
+    /// picking either side of a 1-vs-1 equivocation silently would
+    /// hand one of two indistinguishable attackers the win.
+    KeepContesting,
     Reject,
+    /// A corroborated rewind: rejected, but the fork surfaces — the
+    /// owner must see that their zone is publishing a retired key.
+    RejectSurfacingFork,
 }
 
-/// D10 and D12/D12a: the generation rules.
+/// The generation rules: path membership, the rewind rule, and its
+/// fork-competition residual (dns-anchor, Generation Key; Heads and
+/// the Protected Prefix).
+///
+/// `considered` is the hostname's post-exclusion, post-deferral
+/// record set — the corroboration witness pool for the monotone-
+/// generation check below.
 fn generation_rule(
     record: &BindingEvidence,
     now: UnixSeconds,
     lineage: &LineageView,
+    considered: &[&BindingEvidence],
 ) -> Disposition {
     let fresh = freshness(record, now) == Freshness::Fresh;
 
-    // D10: a fresh record whose delegation path lacks the
+    // A fresh record whose delegation path lacks the
     // attested g= is rejected.
     if fresh && !record.generation_on_path {
         return Disposition::Reject;
@@ -820,13 +1022,34 @@ fn generation_rule(
     let slot = (record.document, record.generation);
 
     if lineage.protected.contains(&slot) {
-        // D12 for stale history: a protected-prefix generation is a
-        // provable rewind. A FRESH chain attesting it is competing
-        // valid observation (D12a): surfaced, never hard-rejected.
-        return if fresh {
-            Disposition::KeepSurfacingFork
+        // A stale protected-prefix attestation is a provable
+        // rewind with no competing fresh observation — rejected.
+        if !fresh {
+            return Disposition::Reject;
+        }
+
+        // A FRESH protected-prefix attestation is one of two
+        // indistinguishable-looking events, and the zone's own
+        // attested-generation history is the monotone clock that
+        // separates them: if any considered record attests a
+        // lineage-LATER generation for this document, the zone was
+        // observed moving forward and is now attesting backward — a
+        // CORROBORATED rewind, 2-vs-1 against the fresh chain, and
+        // the attacker needs zone control they demonstrably have.
+        // Rejected, with the fork surfaced so the owner learns their
+        // zone is publishing a retired key. Without corroboration
+        // (the true kill-switch / slow-zone ambiguity: a statement
+        // alone claims the succession) the record survives and the
+        // document derives contested — neither side wins silently.
+        let corroborated = considered.iter().any(|other| {
+            other.document == record.document
+                && lineage.descends(record.document, record.generation, other.generation)
+        });
+
+        return if corroborated {
+            Disposition::RejectSurfacingFork
         } else {
-            Disposition::Reject
+            Disposition::KeepContesting
         };
     }
 
@@ -849,7 +1072,7 @@ struct DocumentResolution {
     pending: Vec<DocAnchor>,
 }
 
-/// The hostname's succession-proof graph, with D16 forks isolated:
+/// The hostname's succession-proof graph, with succession forks isolated:
 /// traversal never crosses a fork point.
 #[derive(Debug, Default)]
 struct ProofGraph<'e> {
@@ -881,7 +1104,7 @@ impl<'e> ProofGraph<'e> {
         edges.sort_unstable();
         edges.dedup();
 
-        // D16: one predecessor, competing valid successors = a fork.
+        // One predecessor, competing valid successors = a fork.
         let mut forks: Vec<SuccessionFork> = Vec::new();
         let mut predecessors: Vec<DocAnchor> = edges.iter().map(|(pred, _)| *pred).collect();
         predecessors.sort_unstable();
@@ -909,13 +1132,13 @@ impl<'e> ProofGraph<'e> {
         }
     }
 
-    /// Whether `document` is a fork point (D16 stops traversal here).
+    /// Whether `document` is a fork point (traversal stops here).
     fn is_fork_point(&self, document: DocAnchor) -> bool {
         self.forks.iter().any(|f| f.predecessor == document)
     }
 
     /// The unique-successor chain from `from`: proofs are followed one
-    /// hop at a time, stopping at forks (D16) and cycles.
+    /// hop at a time, stopping at forks and cycles.
     fn chain_from(&self, from: DocAnchor) -> Vec<DocAnchor> {
         let mut chain = vec![from];
         let mut current = from;
@@ -967,7 +1190,20 @@ fn resolve_document<A: AuthorityVerifier>(
     // in a deterministic order.
     let mut internally_contested = false;
     let best: Vec<&BindingEvidence> = {
-        let mut documents: Vec<DocAnchor> = surviving.iter().map(|r| r.document).collect();
+        // Candidates are the documents of surviving CERTIFICATE-
+        // attested records (binding-cache, stage 5): "surviving" is a
+        // post-stage-4 predicate, so a document whose only
+        // certificate died under the generation rules is no candidate however
+        // fresh its bare refreshes — the stage-2 corroboration filter
+        // ran before the generation rules and cannot be trusted for
+        // candidacy. Surviving ChainOnly rows still corroborate: they
+        // feed freshness, tenure, and the per-document ladder of
+        // documents that ARE candidates.
+        let mut documents: Vec<DocAnchor> = surviving
+            .iter()
+            .filter(|r| r.attestation == Attestation::Certificate)
+            .map(|r| r.document)
+            .collect();
         documents.sort_unstable();
         documents.dedup();
 
@@ -998,25 +1234,51 @@ fn resolve_document<A: AuthorityVerifier>(
         .copied()
         .collect();
 
-    let mut contested = undominated.len() != 1 || internally_contested;
+    let mut contested = internally_contested;
     // Under a dominance cycle (undominated empty) the output is
     // contested and masked; the fallback feeds masked internals only,
     // deterministically (best is document-sorted).
     let maximal = undominated.first().copied().unwrap_or(first_candidate);
 
     // The winning acceptance, by the receipts rule; its losers are
-    // surfaced through the output state.
+    // surfaced through the output state. Receipt ties contest
+    // unconditionally — they are the user's own conflicting records.
     let acceptance_resolution = winning_acceptance(hostname, decisions, evidence, &mut contested);
     let acceptance = acceptance_resolution.winner;
 
     // Incumbency: acceptance-backed, extended along proofs up to the
-    // first fork (D16); else the ladder-maximal candidate (graded
-    // provisional at stage 6 when its support is stale — B10).
+    // first fork; else the ladder-maximal candidate (graded
+    // provisional at stage 6 when its support is stale).
     let incumbent = acceptance.map_or(maximal.document, |document| {
         *ctx.graph.chain_from(document).last().unwrap_or(&document)
     });
 
-    // Eligibility: the pending doctrine (B1). Every stale, unproven
+    // A cross-document tie contests only among ELIGIBLE candidates
+    // (binding-cache stage 5). A
+    // stale, unproven challenger is pending however late
+    // its zone-state key reads — and two of them must not do
+    // together what one cannot do alone: blank an acceptance-backed
+    // incumbent. With no acceptance there is no incumbent to defend,
+    // and any non-unique undominated set is a contest. A
+    // dominance cycle (empty undominated set) is pathological and
+    // contests regardless.
+    contested |= if acceptance.is_some() && !undominated.is_empty() {
+        let eligible_documents: Set<DocAnchor> = undominated
+            .iter()
+            .filter(|record| {
+                record.document == incumbent
+                    || freshness(record, ctx.now) == Freshness::Fresh
+                    || ctx.graph.proves(incumbent, record.document)
+            })
+            .map(|record| record.document)
+            .collect();
+
+        eligible_documents.len() > 1
+    } else {
+        undominated.len() != 1
+    };
+
+    // Eligibility: the pending doctrine. Every stale, unproven
     // non-incumbent candidate is pending — not just the maximal one.
     let accepted_document = if maximal.document == incumbent || contested {
         incumbent
@@ -1051,7 +1313,7 @@ fn resolve_document<A: AuthorityVerifier>(
         }
     };
 
-    // B1: every stale candidate attesting a document other than the
+    // Every stale candidate attesting a document other than the
     // decision-backed incumbent, without a proof, badges pending — not
     // just the maximal challenger. The incumbent itself never does:
     // when displaced, that surfaces as a binding change, not a badge.
@@ -1076,7 +1338,7 @@ fn resolve_document<A: AuthorityVerifier>(
 
     // The accepted document's ladder-winning record carries the
     // attested generation (fresh-first, then lineage descent, then
-    // key — the D4a order with rung 1's same-document half).
+    // key — fresh-first, with rung 1's same-document half).
     let generation = best
         .iter()
         .find(|r| r.document == accepted_document)
@@ -1214,7 +1476,7 @@ fn as_contender(record: &BindingEvidence, now: UnixSeconds) -> Contender {
 
 /// Resolve possibly-concurrent acceptances by the receipts rule:
 /// greatest zone-state key among cited records held in evidence.
-/// Receipt ties for different documents are contested (B13).
+/// Receipt ties for different documents are contested.
 /// The receipts rule's outcome: the winner, and the losers it
 /// outranked — surfaced, never silently dropped (stage 5: "the loser
 /// is surfaced").
@@ -1255,13 +1517,23 @@ fn winning_acceptance(
             // Receipt shape: every cited item a record for THIS
             // hostname, at least one attesting the acceptance's
             // document. Malformed receipts contribute nothing.
+            // Judged per ITEM, never by row count: one cited item can
+            // legally yield several evidence rows (a bare refresh of
+            // a dual-publish RRset carries one row per document), and
+            // a row-count comparison would silently void exactly
+            // those receipts.
             let cited_records: Vec<&BindingEvidence> = evidence
                 .records
                 .iter()
                 .filter(|r| acceptance.cited.contains(&r.hash))
                 .collect();
 
-            if cited_records.len() != acceptance.cited.len()
+            let every_cited_item_is_a_record = acceptance
+                .cited
+                .iter()
+                .all(|hash| cited_records.iter().any(|r| r.hash == *hash));
+
+            if !every_cited_item_is_a_record
                 || cited_records.iter().any(|r| r.hostname != *hostname)
                 || !cited_records
                     .iter()

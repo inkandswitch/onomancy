@@ -14,7 +14,7 @@ use onomancy_dnssec::{
     validator::{Validator, WalkError},
 };
 use onomancy_hickory::provider::FetchChainError;
-use onomancy_keyhive::mint;
+use onomancy_keyhive::{authority::KeyhiveAuthority, mint};
 use onomancy_publish::{ceremony::migrate::Migrate as MigrateCeremony, signer::Signer};
 
 use crate::{
@@ -50,7 +50,7 @@ pub(crate) struct Migrate {
     successor_seed: Option<String>,
 
     /// The successor document's generation key file (needed to mint
-    /// its D10 path proof).
+    /// its generation-path proof).
     #[arg(long)]
     successor_generation_key: Option<PathBuf>,
 
@@ -108,6 +108,7 @@ impl Migrate {
             now_ms(),
             &Signer::new(predecessor_key),
             &Signer::new(successor_key),
+            &KeyhiveAuthority,
         )?;
 
         crate::block_on(plan_io::execute(&plan, &self.out_dir))??;

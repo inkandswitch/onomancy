@@ -246,3 +246,116 @@ fn document_carriages_vouch_their_anchor_and_nothing_else() -> TestResult {
     );
     Ok(())
 }
+
+/// A nested graph: `root` delegates Admin to an intermediate `team`
+/// group, and `team` delegates to `member`. The signer is two hops
+/// from the root and is not a direct member of it.
+///
+/// This is the topology §Generation Key describes — *"an organization
+/// MAY interpose a dedicated generation key over its cert-signing
+/// members"* — and the shape a `AccessEditor`-style UI produces when a
+/// user grants a *team* admin over their document.
+struct Nested {
+    anchor: DocAnchor,
+    member_key: VerifyingKey,
+    carriage: DelegationChain,
+}
+
+async fn nested_fixture() -> TestResult<Nested> {
+    use keyhive_core::principal::agent::Agent;
+
+    let owner = instance().await?;
+    let member = instance().await?;
+
+    let root = owner.generate_group(vec![]).await?;
+    let root_id = { root.lock().await.group_id() };
+    let anchor = DocAnchor::from(Identifier::from(root_id).0);
+
+    let team = owner.generate_group(vec![]).await?;
+    let team_id = { team.lock().await.group_id() };
+
+    let mut events: Vec<StaticEvent<[u8; 32]>> = Vec::new();
+
+    // root --Admin--> team
+    owner
+        .add_member(
+            Agent::Group(team_id, team.clone()),
+            &Membered::Group(root_id, root.clone()),
+            Access::Admin,
+            &[],
+        )
+        .await?;
+
+    // team --Admin--> member
+    let card = member.contact_card().await?;
+    owner.receive_contact_card(&card).await?;
+    events.push(prekey_event(card.op()));
+
+    let agent = owner
+        .get_agent(Identifier::from(card.id()))
+        .await
+        .ok_or("just introduced")?;
+    owner
+        .add_member(agent, &Membered::Group(team_id, team), Access::Admin, &[])
+        .await?;
+
+    let member_key = Identifier::from(member.contact_card().await?.id()).0;
+
+    for ops in owner
+        .reachable_prekey_ops_for_all_agents()
+        .await
+        .ops
+        .values()
+    {
+        for op in ops {
+            events.push(prekey_event(op));
+        }
+    }
+    for op_map in owner.membership_ops_for_all_agents().await.ops.values() {
+        for op in op_map.values() {
+            let event: Event<_, _, _, _> = op.clone().into();
+            events.push(event.into());
+        }
+    }
+
+    Ok(Nested {
+        anchor,
+        member_key,
+        carriage: Carriage::new(events).to_delegation_bytes()?,
+    })
+}
+
+#[test]
+fn a_signer_delegated_through_a_group_is_on_the_path() -> TestResult {
+    // `on_path` walks transitively and finds the member at depth 2.
+    let f = block_on(nested_fixture())?;
+
+    assert!(
+        KeyhiveAuthority.on_path(&f.carriage, &GenerationKey::from(f.member_key)),
+        "path membership is 'at any depth' (dns-anchor §Generation Key)"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "known gap: `sanctioned` is direct-membership only \
+            (authority.rs: 'naming chains through nested group \
+            intermediaries are future work'). Un-ignore when it walks \
+            transitively."]
+fn a_signer_delegated_through_a_group_is_authorized() -> TestResult {
+    // The gap, executable. §Generation Key describes signers sitting
+    // below an interposed group; §Who Signs requires only that the
+    // signer hold admin in the delegation chain, with no depth
+    // qualifier. `sanctioned` looks only at the root's DIRECT members,
+    // so this correctly-configured signer is refused.
+    //
+    // Note the asymmetry with the test above: the same carriage, the
+    // same key, `on_path` true and `authorizes` false.
+    let f = block_on(nested_fixture())?;
+
+    assert!(
+        KeyhiveAuthority.authorizes(&f.anchor, &f.member_key, &f.carriage),
+        "an admin delegated through an intermediate group is still an admin"
+    );
+    Ok(())
+}

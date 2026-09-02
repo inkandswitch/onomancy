@@ -95,7 +95,8 @@ impl Rrsig {
 
     /// The owner-name label count (the wildcard-synthesis detector:
     /// fewer labels than the owner name means the answer was expanded
-    /// from a wildcard — D14 requires a no-closer-match proof).
+    /// from a wildcard — accepting one would need a no-closer-match
+    /// proof, which is outside the protocol).
     #[must_use]
     pub const fn labels(&self) -> u8 {
         self.labels

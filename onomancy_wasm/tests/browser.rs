@@ -8,8 +8,8 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use onomancy_wasm::name::JsName;
-use wasm_bindgen::JsValue;
+use onomancy_wasm::{name::JsName, text::Text};
+use wasm_bindgen::{JsCast as _, JsValue};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
@@ -20,7 +20,7 @@ type JsTestResult = Result<(), JsValue>;
 
 #[wasm_bindgen_test]
 fn dns_anchors_parse() -> JsTestResult {
-    let name = JsName::new("@expede.wtf/foo/bar")?;
+    let name = JsName::new(&text("@expede.wtf/foo/bar"))?;
 
     assert_eq!(name.anchor_kind(), "dns");
     assert_eq!(name.anchor(), "@expede.wtf");
@@ -30,7 +30,7 @@ fn dns_anchors_parse() -> JsTestResult {
 
 #[wasm_bindgen_test]
 fn local_anchors_parse() -> JsTestResult {
-    let name = JsName::new("~/bob/pics")?;
+    let name = JsName::new(&text("~/bob/pics"))?;
 
     assert_eq!(name.anchor_kind(), "local");
     Ok(())
@@ -38,7 +38,9 @@ fn local_anchors_parse() -> JsTestResult {
 
 #[wasm_bindgen_test]
 fn doc_anchors_parse_with_heads() -> JsTestResult {
-    let name = JsName::new("automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj/pics")?;
+    let name = JsName::new(&text(
+        "automerge:VDTcixKK9uxrREEENGJUPLNLqJnx63hXYDA9gJ14gjVrLHosj/pics",
+    ))?;
 
     assert_eq!(name.anchor_kind(), "doc");
     assert_eq!(name.segments(), vec!["pics".to_string()]);
@@ -48,8 +50,8 @@ fn doc_anchors_parse_with_heads() -> JsTestResult {
 #[wasm_bindgen_test]
 fn garbage_is_rejected() {
     // A dotless `@` is a flat parse error, even in JS.
-    assert!(JsName::new("@nodots/path").is_err());
-    assert!(JsName::new("").is_err());
+    assert!(JsName::new(&text("@nodots/path")).is_err());
+    assert!(JsName::new(&text("")).is_err());
 }
 
 /// Documents naming documents, entirely in-tab: mint three docs,
@@ -63,20 +65,17 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     let gallery = held.create_document()?;
     let year = held.create_document()?;
 
-    held.set_note(&year, "🎉")?;
-    held.bind(&root, "pics/best", &gallery)?;
-    held.bind(&gallery, "2026", &year)?;
+    held.bind(&text(&root), &text("pics/best"), &text(&gallery))?;
+    held.bind(&text(&gallery), &text("2026"), &text(&year))?;
 
     let verdict = held
-        .resolve(&format!("{root}/pics/best/2026"), None, None)
+        .resolve(&text(&format!("{root}/pics/best/2026")), None, None)
         .await?;
 
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("resolved"));
     let document = js_sys::Reflect::get(&verdict, &JsValue::from_str("document"))?;
     assert_eq!(document.as_string().as_deref(), Some(year.as_str()));
-    let note = js_sys::Reflect::get(&verdict, &JsValue::from_str("note"))?;
-    assert_eq!(note.as_string().as_deref(), Some("🎉"));
     Ok(())
 }
 
@@ -88,15 +87,15 @@ async fn unsynced_targets_walk_partially() -> JsTestResult {
     let mut held = JsHeldDocuments::new();
     let root = held.create_document()?;
     let elsewhere = held.create_document()?;
-    held.bind(&root, "away", &elsewhere)?;
+    held.bind(&text(&root), &text("away"), &text(&elsewhere))?;
 
     // A second store holding only the root: the edge dangles there.
     let mut sparse = JsHeldDocuments::new();
     let sparse_root = sparse.create_document()?;
-    sparse.bind(&sparse_root, "away", &elsewhere)?;
+    sparse.bind(&text(&sparse_root), &text("away"), &text(&elsewhere))?;
 
     let verdict = sparse
-        .resolve(&format!("{sparse_root}/away/deeper"), None, None)
+        .resolve(&text(&format!("{sparse_root}/away/deeper")), None, None)
         .await?;
 
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
@@ -115,13 +114,12 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     let mut origin = JsHeldDocuments::new();
     let root = origin.create_document()?;
     let leaf = origin.create_document()?;
-    origin.set_note(&leaf, "carried across")?;
-    origin.bind(&root, "over/here", &leaf)?;
+    origin.bind(&text(&root), &text("over/here"), &text(&leaf))?;
 
     // A second tab: nothing held, so even the ROOT is an unsynced target.
     let mut other = JsHeldDocuments::new();
     let verdict = other
-        .resolve(&format!("{root}/over/here"), None, None)
+        .resolve(&text(&format!("{root}/over/here")), None, None)
         .await?;
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("partial"));
@@ -129,15 +127,23 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
     assert_eq!(target.as_string().as_deref(), Some(root.as_str()));
 
     // Carry the real bytes across (the demo does this over HTTP).
-    other.hold(&root, &origin.save(&root)?)?;
-    other.hold(&leaf, &origin.save(&leaf)?)?;
+    other.hold(&text(&root), &origin.save(&text(&root))?)?;
+    other.hold(&text(&leaf), &origin.save(&text(&leaf))?)?;
 
     let verdict = other
-        .resolve(&format!("{root}/over/here"), None, None)
+        .resolve(&text(&format!("{root}/over/here")), None, None)
         .await?;
     let status = js_sys::Reflect::get(&verdict, &JsValue::from_str("status"))?;
     assert_eq!(status.as_string().as_deref(), Some("resolved"));
-    let note = js_sys::Reflect::get(&verdict, &JsValue::from_str("note"))?;
-    assert_eq!(note.as_string().as_deref(), Some("carried across"));
+
+    // The bytes carried across resolve to the same document, which is
+    // the point: a namestore is the document, not a view of it.
+    let document = js_sys::Reflect::get(&verdict, &JsValue::from_str("document"))?;
+    assert_eq!(document.as_string().as_deref(), Some(leaf.as_str()));
     Ok(())
+}
+
+/// A name argument, owned so the call site's statement owns it.
+fn text(raw: &str) -> Text {
+    JsValue::from_str(raw).unchecked_into()
 }

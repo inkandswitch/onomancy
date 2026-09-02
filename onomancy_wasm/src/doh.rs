@@ -171,12 +171,23 @@ pub enum FetchChainError {
     Transport(#[from] DohError),
 }
 
-/// A JS-side failure, stringified: `JsValue` is neither `Send` nor
-/// `Error`, so the message is all that can cross this boundary.
+/// A JS-side failure, reduced to its message: `JsValue` is neither
+/// `Send` nor `Error`, so the message is all that can cross this
+/// boundary.
+///
+/// Deliberately not `{value:?}`. `JsValue`'s `Debug` renders
+/// `JsValue(TypeError: …)` complete with the thrower's stack trace,
+/// which then rides inside an error message all the way to whatever
+/// a caller shows a user. Take the `Error.message`, or the value
+/// itself when a bare string was thrown.
 fn js_failure(value: &JsValue) -> DohError {
-    DohError::Js {
-        message: format!("{value:?}"),
-    }
+    let message = value
+        .dyn_ref::<js_sys::Error>()
+        .map(|error| String::from(error.message()))
+        .or_else(|| value.as_string())
+        .unwrap_or_else(|| String::from("unknown JavaScript error"));
+
+    DohError::Js { message }
 }
 
 /// A `DoH` exchange failed at the transport level — never a validity
@@ -192,7 +203,11 @@ pub enum DohError {
     IdMismatch,
 
     /// A JS API failed (network error, CORS, invalid URL, …).
-    #[error("fetch failed: {message}")]
+    ///
+    /// The prefix names the layer rather than restating the failure:
+    /// a browser's most common message here is literally "fetch
+    /// failed", so a "fetch failed: " prefix rendered it twice.
+    #[error("DoH transport: {message}")]
     Js {
         /// The stringified JS error.
         message: String,
@@ -227,4 +242,42 @@ pub enum DohError {
         /// The status code.
         code: u16,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DohError;
+
+    /// A context prefix must not restate the message it wraps.
+    ///
+    /// The browser's own text for the commonest failure here is
+    /// "fetch failed", so a prefix of "fetch failed: " produced
+    /// `fetch failed: fetch failed` — a doubling that reads as a
+    /// bug in the reporter and costs a caller a debugging detour.
+    #[test]
+    fn the_context_prefix_does_not_repeat_the_message() {
+        let rendered = DohError::Js {
+            message: String::from("fetch failed"),
+        }
+        .to_string();
+
+        assert_eq!(
+            rendered.matches("fetch failed").count(),
+            1,
+            "message rendered twice: {rendered}"
+        );
+    }
+
+    /// The prefix still has to identify the layer; dropping it
+    /// entirely would leave a bare browser string with no clue
+    /// which subsystem produced it.
+    #[test]
+    fn the_context_prefix_names_the_layer() {
+        let rendered = DohError::Js {
+            message: String::from("fetch failed"),
+        }
+        .to_string();
+
+        assert!(rendered.contains("DoH"), "no layer named: {rendered}");
+    }
 }

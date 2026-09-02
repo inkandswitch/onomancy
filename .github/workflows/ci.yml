@@ -27,7 +27,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [ci-fmt, ci-clippy, ci-test, ci-wasm, ci-no-std, ci-deny, ci-e2e]
+        # ci-browser is the only job that EXECUTES wasm-target tests.
+        # `tests/verify.rs` and `tests/browser.rs` are
+        # `cfg(target_arch = "wasm32")`, so ci-test compiles them away
+        # and reports "running 0 tests" — green, while looking at
+        # nothing. Without this job those suites are ornamental.
+        check:
+          [
+            ci-fmt,
+            ci-clippy,
+            ci-test,
+            ci-wasm,
+            ci-browser,
+            ci-no-std,
+            ci-deny,
+            ci-e2e,
+          ]
     steps:
       - uses: actions/checkout@v4
 

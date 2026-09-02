@@ -15,10 +15,10 @@
 
 use std::cell::Cell;
 
-use automerge::{Automerge, ObjType, ReadDoc, ScalarValue, Value, transaction::Transactable};
+use automerge::{Automerge, transaction::Transactable};
 use ed25519_dalek::SigningKey;
 use js_sys::{Array, Reflect};
-use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY};
+use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
 use onomancy_core::{
     anchor::doc::{self, DocAnchor},
     collections::Map,
@@ -31,6 +31,8 @@ use onomancy_protocol::resolve::{
     resolve,
 };
 use wasm_bindgen::{JsError, JsValue, prelude::wasm_bindgen};
+
+use crate::text::{self, Text};
 
 /// A browser-held document set: the anchoring and replication
 /// substrate a real agent would sync, reduced to in-memory documents
@@ -76,8 +78,8 @@ impl JsHeldDocuments {
     ///
     /// Throws for malformed anchors.
     #[wasm_bindgen(js_name = holdAt)]
-    pub fn hold_at(&mut self, anchor: &str) -> Result<(), JsError> {
-        let anchor = parse_anchor(anchor)?;
+    pub fn hold_at(&mut self, anchor: &Text) -> Result<(), JsError> {
+        let anchor = parse_anchor(&text::read(anchor, "a document anchor")?)?;
         self.docs.entry(anchor).or_default();
         Ok(())
     }
@@ -90,8 +92,8 @@ impl JsHeldDocuments {
     ///
     /// Throws for malformed anchors and bytes that do not load as an
     /// Automerge document.
-    pub fn hold(&mut self, anchor: &str, bytes: &[u8]) -> Result<(), JsError> {
-        let anchor = parse_anchor(anchor)?;
+    pub fn hold(&mut self, anchor: &Text, bytes: &[u8]) -> Result<(), JsError> {
+        let anchor = parse_anchor(&text::read(anchor, "a document anchor")?)?;
         let doc = Automerge::load(bytes)
             .map_err(|error| JsError::new(&format!("not an automerge document: {error}")))?;
         self.docs.insert(anchor, doc);
@@ -103,8 +105,8 @@ impl JsHeldDocuments {
     /// # Errors
     ///
     /// Throws for unknown anchors.
-    pub fn save(&self, anchor: &str) -> Result<Vec<u8>, JsError> {
-        Ok(self.held(anchor)?.save())
+    pub fn save(&self, anchor: &Text) -> Result<Vec<u8>, JsError> {
+        Ok(self.held(&text::read(anchor, "a document anchor")?)?.save())
     }
 
     /// Every held anchor (`automerge:…`), sorted.
@@ -116,31 +118,6 @@ impl JsHeldDocuments {
         anchors
     }
 
-    /// Set a display note on a held document.
-    ///
-    /// # Errors
-    ///
-    /// Throws for unknown anchors and write failures.
-    #[wasm_bindgen(js_name = setNote)]
-    pub fn set_note(&mut self, anchor: &str, note: &str) -> Result<(), JsError> {
-        let doc = self.held_mut(anchor)?;
-        doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            tx.put(automerge::ROOT, "note", note)?;
-            Ok(())
-        })
-        .map_err(|failure| JsError::new(&failure.error.to_string()))?;
-        Ok(())
-    }
-
-    /// The display note on a held document, when set.
-    ///
-    /// # Errors
-    ///
-    /// Throws for unknown anchors.
-    pub fn note(&self, anchor: &str) -> Result<Option<String>, JsError> {
-        Ok(note_of(self.held(anchor)?))
-    }
-
     /// Add a namestore edge: `path` (segments joined by `/`) names
     /// `target` from the `anchor` document.
     ///
@@ -148,17 +125,20 @@ impl JsHeldDocuments {
     ///
     /// Throws for unknown anchors, malformed paths or targets, and
     /// write failures.
-    pub fn bind(&mut self, anchor: &str, path: &str, target: &str) -> Result<(), JsError> {
-        let key = path_of(path)?;
-        let value = format!("{}{}", doc::SCHEME_PREFIX, parse_anchor(target)?);
+    pub fn bind(&mut self, anchor: &Text, path: &Text, target: &Text) -> Result<(), JsError> {
+        let key = path_of(&text::read(path, "a path")?)?;
+        let value = format!(
+            "{}{}",
+            doc::SCHEME_PREFIX,
+            parse_anchor(&text::read(target, "a target anchor")?)?
+        );
 
-        let doc = self.held_mut(anchor)?;
+        let doc = self.held_mut(&text::read(anchor, "a document anchor")?)?;
         doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-            let map = match tx.get(automerge::ROOT, RESERVED_KEY)? {
-                Some((Value::Object(ObjType::Map), id)) => id,
-                _ => tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?,
-            };
-            tx.put(&map, key.as_str(), value.as_str())?;
+            // A name is a root key: `foo` is `root["foo"]`. The store
+            // is the document's own map, flat, shared with whatever
+            // else the document holds.
+            tx.put(automerge::ROOT, key.as_str(), value.as_str())?;
             Ok(())
         })
         .map_err(|failure| JsError::new(&failure.error.to_string()))?;
@@ -170,8 +150,11 @@ impl JsHeldDocuments {
     /// # Errors
     ///
     /// Throws for unknown anchors.
-    pub fn edges(&self, anchor: &str) -> Result<JsValue, JsError> {
-        let namestore = DocumentNamestore::new(self.held(anchor)?.clone());
+    pub fn edges(&self, anchor: &Text) -> Result<JsValue, JsError> {
+        let namestore = DocumentNamestore::new(
+            self.held(&text::read(anchor, "a document anchor")?)?
+                .clone(),
+        );
 
         let list = Array::new();
         for (path, target) in namestore.edges() {
@@ -190,7 +173,15 @@ impl JsHeldDocuments {
     /// over `DoH` (optionally at `doh_url`), validated from the
     /// baked-in IANA anchors inside the Wasm.
     ///
-    /// Returns `{ status: "resolved", document, note? }` or
+    /// **`@hostname` anchoring here is the zone's word only.** The
+    /// DNSSEC walk proves what the zone published — one direction —
+    /// and this method roots the walk on it without checking the
+    /// certificate direction (`verifyBinding` is that check; neither
+    /// direction alone is a binding). Such resolutions carry
+    /// `anchorAuthority: "zone-only"` so a caller reading `status`
+    /// cannot mistake a resolved walk for an authenticated binding.
+    ///
+    /// Returns `{ status: "resolved", document }` or
     /// `{ status: "partial", consumed, total, reason, target? }` — a
     /// partial walk is the designed norm under partition, not an
     /// error. An unheld ROOT is the same partial as any unsynced hop
@@ -203,11 +194,28 @@ impl JsHeldDocuments {
     /// and live-anchoring failures.
     pub async fn resolve(
         &self,
-        name: &str,
-        root: Option<String>,
-        doh_url: Option<String>,
+        name: &Text,
+        root: Option<Text>,
+        doh_url: Option<Text>,
     ) -> Result<JsValue, JsError> {
-        let name = SupportedName::parse(name).map_err(|error| JsError::new(&error.to_string()))?;
+        let name = text::read(name, "a name")?;
+        let name = SupportedName::parse(&name).map_err(|error| JsError::new(&error.to_string()))?;
+
+        // `Option<Text>` rather than `Option<String>`: the latter
+        // TRAPS inside the module on a non-string `Some` (`resolve(n,
+        // 42, …)` was `RuntimeError: memory access out of bounds`)
+        // and silently coerces `[]` to `""`.
+        let root = root
+            .map(|raw| text::read(&raw, "a root anchor"))
+            .transpose()?;
+        let doh_url = doh_url
+            .map(|raw| text::read(&raw, "a DoH URL"))
+            .transpose()?;
+
+        // A DNS-anchored walk roots on the zone's word alone: the
+        // certificate direction is verifyBinding's check, not this
+        // method's, and the outcome says so explicitly below.
+        let zone_anchored = matches!(name, SupportedName::Dns(_));
         let root_anchor = self.anchor_of(&name, root.as_deref(), doh_url).await?;
 
         let mut held = HeldDocuments::default();
@@ -240,9 +248,17 @@ impl JsHeldDocuments {
 
         let verdict = js_sys::Object::new();
         match resolve(root_namestore, name.segments(), &tracking) {
-            Resolution::Resolved { target, authority } => {
+            Resolution::Resolved { authority, .. } => {
                 set(&verdict, "status", &JsValue::from_str("resolved"));
                 set(&verdict, "authority", &JsValue::from_str(authority.label()));
+                // The zone's word is one direction; the certificate
+                // direction is verifyBinding's check. Said on the
+                // OBJECT, not only in a doc comment: a caller reading
+                // `status: "resolved"` must be able to see that the
+                // anchor itself is unauthenticated.
+                if zone_anchored {
+                    set(&verdict, "anchorAuthority", &JsValue::from_str("zone-only"));
+                }
                 // The browser has no keyhive route yet: every grade
                 // here is the dev bridge's, and says so.
                 set(
@@ -261,9 +277,6 @@ impl JsHeldDocuments {
                         "document",
                         &JsValue::from_str(&anchor_string(&landed)),
                     );
-                }
-                if let Some(note) = note_of(target.document()) {
-                    set(&verdict, "note", &JsValue::from_str(&note));
                 }
             }
             Resolution::Partial { consumed, reason } => {
@@ -294,6 +307,13 @@ impl JsHeldDocuments {
 }
 
 impl JsHeldDocuments {
+    /// Every held document, for readers outside this module that need
+    /// the whole set rather than one lookup — certificate
+    /// verification walks it to follow one hop of indirection.
+    pub(crate) fn documents(&self) -> impl Iterator<Item = (&DocAnchor, &Automerge)> {
+        self.docs.iter()
+    }
+
     /// The held document at `anchor`.
     fn held(&self, anchor: &str) -> Result<&Automerge, JsError> {
         let anchor = parse_anchor(anchor)?;
@@ -343,14 +363,30 @@ impl JsHeldDocuments {
                         .validate_detailed(hostname, &chain)
                         .map_err(|error| JsError::new(&error.to_string()))?;
 
-                    proof
-                        .records
-                        .iter()
-                        .max_by_key(|record| record.serial())
-                        .map(|record| *record.document())
-                        .ok_or_else(|| {
-                            JsError::new("the zone attests no binding for this hostname")
-                        })
+                    // The zone's word: the highest-serial record. All
+                    // records in one proof share one ∩-window, so the
+                    // zone-state key reduces to the serial — but the
+                    // maximum must be UNIQUE (dns-anchor, Comparing
+                    // Records Offline): a serial tie across documents
+                    // is zone equivocation, and RRset enumeration
+                    // order must never resolve it.
+                    let Some(best) = proof.records.iter().max_by_key(|record| record.serial())
+                    else {
+                        return Err(JsError::new(
+                            "the zone attests no binding for this hostname",
+                        ));
+                    };
+
+                    if proof.records.iter().any(|record| {
+                        record.serial() == best.serial() && record.document() != best.document()
+                    }) {
+                        return Err(JsError::new(
+                            "the zone equivocates: two documents share the highest \
+                             serial — refusing to let RRset order decide",
+                        ));
+                    }
+
+                    Ok(*best.document())
                 }
                 #[cfg(not(feature = "doh"))]
                 {
@@ -410,18 +446,6 @@ fn path_of(path: &str) -> Result<String, JsError> {
         .map(Segment::as_str)
         .collect::<Vec<_>>()
         .join("/"))
-}
-
-/// The `note` scalar on a document's root, when set.
-fn note_of(doc: &Automerge) -> Option<String> {
-    let (value, _) = doc.get(automerge::ROOT, "note").ok()??;
-    let Value::Scalar(scalar) = value else {
-        return None;
-    };
-    let ScalarValue::Str(text) = scalar.as_ref() else {
-        return None;
-    };
-    Some(text.to_string())
 }
 
 /// Segment counts fit in a JS number.

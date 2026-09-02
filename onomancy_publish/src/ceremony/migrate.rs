@@ -16,6 +16,7 @@ use onomancy_dnssec::{
     statement::{rotation::RotationStatement, successor::SuccessorStatement},
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
     ceremony::{CeremonyError, Intent, simulate},
@@ -47,7 +48,7 @@ pub struct Migrate {
     /// empty for a fresh document).
     pub lineage: Vec<RotationStatement>,
 
-    /// The successor document's authority carriage: D10 path proof
+    /// The successor document's authority carriage: generation-path proof
     /// for the new `g=`, attached to the successor certificate.
     /// Opaque here — minted by `onomancy_keyhive::mint`.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,
@@ -64,11 +65,12 @@ impl Migrate {
     /// simulated dual-publish zone does not derive the successor as
     /// the accepted document (e.g. the proof does not connect the
     /// documents the records attest).
-    pub fn plan(
+    pub fn plan<A: AuthorityVerifier>(
         &self,
         now_ms: u64,
         predecessor_authority: &Signer,
         certificate_signer: &Signer,
+        authority: &A,
     ) -> Result<Plan, CeremonyError> {
         let proof = SuccessorStatement::sign(
             &self.predecessor,
@@ -109,6 +111,7 @@ impl Migrate {
                 generation: self.successor_generation,
                 serial,
             },
+            authority,
         )?;
 
         Ok(Plan {

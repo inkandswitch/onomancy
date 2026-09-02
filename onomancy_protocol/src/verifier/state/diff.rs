@@ -43,7 +43,7 @@ pub enum EventKind {
     LineageForkSurfaced(Fork),
 
     /// The effective serial moved DOWN for the same document — legal
-    /// only via fresh evidence (D4a), and always surfaced.
+    /// only via fresh evidence, and always surfaced.
     SerialRegression {
         /// The previous effective serial.
         from: Serial,
@@ -51,7 +51,7 @@ pub enum EventKind {
         to: Serial,
     },
 
-    /// A newly surfaced succession fork (D16): competing valid
+    /// A newly surfaced succession fork: competing valid
     /// successor statements from one predecessor.
     SuccessionForkSurfaced(SuccessionFork),
 
@@ -59,7 +59,7 @@ pub enum EventKind {
     ContestedCleared,
 
     /// The hostname entered the contested state (zone equivocation or
-    /// receipt-tied acceptances, B13).
+    /// receipt-tied acceptances).
     ContestedEntered,
 
     /// A divergence badge cleared.
@@ -85,10 +85,10 @@ pub enum EventKind {
     LosingAcceptanceSurfaced(DocAnchor),
 
     /// A pending candidate's badge cleared (confirmed or refuted —
-    /// B2/B3).
+    /// eligibility and refutation rules).
     PendingCleared(DocAnchor),
 
-    /// A stale, unproven challenger entered quarantine (B1).
+    /// A stale, unproven challenger entered quarantine.
     PendingSurfaced(DocAnchor),
 }
 

@@ -46,7 +46,9 @@ Path resolution is defined over any substrate providing:
 | Flat string-keyed maps            | REQUIRED                         | A namestore is a map from strings to values; nothing more is assumed about what a namestore contains                                                                       |
 | Deterministic conflict resolution | REQUIRED (replicated substrates) | Concurrent writes to the same key MUST resolve to one deterministic winner, with the losing value(s) still observable                                                      |
 
-A namestore MAY be embedded in a larger document (e.g. as one field among other application data). The namestore is the map itself, not its container: path resolution reads only the map, and a namestore reference designates the map's location within the containing document, however the substrate expresses that.
+A namestore is a document's **own top-level map**, not a container within it. A namestore reference therefore designates a document, and resolution reads that document's top-level keys directly: the name `foo` is the key `foo`, and nothing is nested.
+
+This is why names, protocol entries, and ordinary application data share one map. Isolating names under a container key would be the obvious alternative, and it is rejected: a container makes the reserved prefix below namespace against nothing, and it replaces a rule about **values** (E8, mechanical) with a rule about **location** that every writer and reader must agree on out of band.
 
 # Namestore Layout
 [Namestore Layout]: #namestore-layout
@@ -56,6 +58,7 @@ A namestore MAY be embedded in a larger document (e.g. as one field among other 
 - Keys containing empty segments (`foo//bar`), `.` or `..` segments, or `#` MUST be rejected outright — there is no normalization for these.
 - Writers MUST NOT add leading or trailing `/` to keys (`/foo/bar/`); `foo/bar` is the only spelling of that path. Resolvers MUST ignore non-conforming keys during matching (treat them as absent) and SHOULD surface them as malformed.
 - A namestore MAY contain both a key and a longer key that extends it (e.g. `foo` and `foo/bar/baz`). This is not a conflict; the [Resolution] section defines which one a given lookup selects.
+- Keys under `.well-known/` are conventionally used for protocol and application data rather than names, namespaced by owner: `.well-known/<owner>/<artifact>`. This is a **writers' convention only** — resolvers apply no special rule to the prefix, because such entries carry values that are not references and are already absent from matching ([E8][Error Conditions]). An entry under the prefix whose value *is* a reference resolves like any other. This specification assigns `.well-known/onomancy/` to the Onomancy protocol and reserves no other owner.
 
 Namestore (flat):
 
@@ -82,7 +85,20 @@ NOT this (nested):
 
 This specification does not define an encoding for references; that belongs to the profile or substrate that writes them. Whatever the encoding, a reference MUST yield exactly one _target_: a namestore reference (self-certifying, per the [Namestore Model]) that carries no path segments of its own. A profile MAY define reference encodings that pin the target to a version — pinning is edge data, never name grammar.
 
-The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, nothing more (e.g. [Petname Anchoring] maps labels directly to Automerge URLs). Richer values are permitted but discouraged: field-wise CRDT merges can tear a composite value (one writer's target beside another's metadata), and unknown fields become parsing policy. Metadata (display names, timestamps, provenance) SHOULD live in a sidecar outside the walked map, keyed by label or target. Metadata, wherever it lives, MUST NOT affect resolution.
+The RECOMMENDED encoding is a **bare reference** — the value _is_ the target, nothing more (e.g. [Petname Anchoring] maps labels directly to Automerge URLs). Richer values are permitted but discouraged: field-wise CRDT merges can tear a composite value (one writer's target beside another's metadata), and unknown fields become parsing policy. Metadata *about a reference* (display names, timestamps, provenance) SHOULD live in a sidecar outside the walked map, keyed by label or target. Metadata, wherever it lives, MUST NOT affect resolution.
+
+A value that is not a reference under any encoding the profile defines is not an edge: it is absent from matching ([E8][Error Conditions]) and carries no resolution meaning. Namestores MAY therefore hold non-reference data — see the `.well-known/` convention in [Namestore Layout] — without that data participating in the walk.
+
+> [!WARNING]
+> **A reference is an immutable value, and MUST be stored as one.**
+>
+> A CRDT substrate typically offers two ways to hold text: an immutable scalar, and a *mutable* collaborative string that merges character-by-character edits. Only the first is a reference. The second is a small document in its own right, and the danger is specific to **in-place editing**: two writers splicing different ranges of one stored identifier merge into a third identifier *neither wrote* — a redirect no signature covers. (Concurrent whole-value *assignment* does not interleave: the substrate's conflict rule picks one of the two, as with any register.) A writer who only ever assigns whole values is therefore not exposed to the merge hazard — but their mutable strings are still non-references and resolve nowhere, and the hazard is why a *reader* must never accept mutable text as a reference, however lenient it intends to be.
+>
+> Where a substrate offers both, a profile MUST say which is the reference; the other is a non-reference value, absent from matching however much it resembles a string.
+>
+> The failure is silent by construction. The writer's own reader sees a string and reports success, so nothing local disagrees; it is caught only by a *conforming resolver*, which is usually somebody else's, later. Implementers SHOULD surface non-reference values under [E8][Error Conditions] rather than merely skipping them, because that report is the only signal a writer will get.
+>
+> **Automerge**, as the worked example: a reference is a **scalar string**, never a `Text` object. The hazard is that JavaScript's binding does *not* preserve the distinction that the assignment appears to make — `doc[name] = "automerge:…"` stores a `Text`, and `typeof` still reports `"string"` when read back. The scalar spelling is `RawString`. A namestore written the obvious way in JavaScript therefore resolves nowhere while looking correct from inside the application that wrote it.
 
 > [!IMPORTANT]
 > **No symlinks.** A reference MUST NOT contain a name (of any anchor family) that would be re-parsed and re-resolved. Namestore values hold namestore references only. This invariant is what makes [Termination] structural rather than policed by a hop limit.
@@ -165,6 +181,7 @@ pub enum Resolution {
 | E5  | Value carrying a name (of any anchor family) in place of a namestore reference    | MUST be rejected as a symlink; MUST NOT be re-parsed or re-resolved (see [References])                                |
 | E6  | Non-conforming key (empty, `.`, or `..` segments; `#`; leading/trailing `/`)      | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [Namestore Layout])         |
 | E7  | Conflicting values for the matched key                                            | MUST resolve to the substrate's deterministic winner; SHOULD surface the loser(s) (see [Conflicting Updates])         |
+| E8  | Value that is not a reference under any encoding the profile defines              | MUST be ignored during matching (treated as absent); SHOULD be surfaced as malformed (see [References])               |
 
 # Security Considerations
 [Security Considerations]: #security-considerations

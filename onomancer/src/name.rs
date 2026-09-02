@@ -117,12 +117,27 @@ impl NameWalk {
                 let chain = crate::block_on(provider.fetch_chain(hostname))??;
                 let proof = Validator::iana().validate_detailed(hostname, &chain)?;
 
-                proof
+                // The zone's word: the highest-serial record — and
+                // the maximum must be UNIQUE (dns-anchor, Comparing
+                // Records Offline). A serial tie across documents is
+                // zone equivocation, and RRset enumeration order
+                // must never resolve it: `max_by_key` returns the
+                // LAST maximum, which is exactly a fold on arrival
+                // order. Same rule, same wording as the wasm anchor
+                // path (`onomancy_wasm::held`).
+                let best = proof
                     .records
                     .iter()
                     .max_by_key(|record| record.serial())
-                    .map(|record| *record.document())
-                    .ok_or(NameError::NoBinding)
+                    .ok_or(NameError::NoBinding)?;
+
+                if proof.records.iter().any(|record| {
+                    record.serial() == best.serial() && record.document() != best.document()
+                }) {
+                    return Err(NameError::Equivocation);
+                }
+
+                Ok(*best.document())
             }
         }
     }
@@ -218,6 +233,13 @@ pub(crate) enum NameError {
     /// The name did not parse.
     #[error("name: {0}")]
     Name(#[from] ParseSupportedNameError),
+
+    /// Two documents share the zone's highest serial.
+    #[error(
+        "the zone equivocates: two documents share the highest serial — \
+         refusing to let RRset order decide"
+    )]
+    Equivocation,
 
     /// The zone attests no binding record.
     #[error("the zone attests no binding for this hostname")]

@@ -15,6 +15,7 @@ use onomancy_dnssec::{
     statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
     ceremony::{CeremonyError, Intent, simulate},
@@ -44,7 +45,7 @@ pub struct Rotate {
     /// The authority carriage: delegation proof terminating at Gₙ₊₁
     /// (dns-anchor §Statement validity item 3). Rides BOTH the
     /// rotation statement (its signing authority) and the refreshed
-    /// certificate (D10 path membership for the new `g=`). Opaque
+    /// certificate (path membership for the new `g=`). Opaque
     /// here — minted by `onomancy_keyhive::mint`.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,
 }
@@ -60,11 +61,12 @@ impl Rotate {
     /// appears anywhere in the lineage (reuse converts the lineage
     /// into a permanent surfaced fork), and the usual cap/simulation
     /// failures otherwise.
-    pub fn plan(
+    pub fn plan<A: AuthorityVerifier>(
         &self,
         now_ms: u64,
         successor: &Signer,
         certificate_signer: &Signer,
+        authority: &A,
     ) -> Result<Plan, CeremonyError> {
         let next_generation = GenerationKey::from(successor.verifying_key());
 
@@ -121,6 +123,7 @@ impl Rotate {
                 generation: next_generation,
                 serial,
             },
+            authority,
         )?;
 
         Ok(Plan {

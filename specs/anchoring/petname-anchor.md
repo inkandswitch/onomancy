@@ -70,6 +70,8 @@ The petname store is the user's own root [namestore][Namestore Layout] — the f
 
 A petname edge is a **bare document reference**: the namestore maps the label directly to the referent's [Automerge URL], with no wrapping record.
 
+The value MUST be an Automerge **scalar string**, never a `Text` object. A reference is an immutable value; a `Text` is a collaborative document, and two writers concurrently editing one could merge into a target neither wrote. Values stored as `Text` are not references and are absent from matching ([Onomancy Path Resolution], References) — which is a silent failure for the writer, because their own reader will still see a string. Implementers writing from JavaScript should note that `doc[label] = "automerge:…"` produces a `Text`; the scalar spelling is `RawString`.
+
 ```
 {
   "bob":      "automerge:2nBeEM…",

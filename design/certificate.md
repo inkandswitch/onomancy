@@ -1,18 +1,18 @@
 # Onomancy Certificate
 
-The certificate is the self-authenticating record that binds a DNS hostname to a document. It is served over HTTP, cached, and gossiped — and verifiable by anyone holding the IANA root KSK, regardless of where the bytes came from.
+The certificate is the self-authenticating record that binds a DNS hostname to a document. It is replicated, cached, and gossiped — and verifiable by anyone holding the IANA root KSK, regardless of where the bytes came from.
 
 ## Retrieval
 
-```
-GET https://<endpoint host>/onomancy/v0/expede.wtf
-```
+The certificate lives **in the document it binds**, at the top-level key `.well-known/onomancy/certificates` — beside the document's names, since a namestore is the document's own map rather than a container inside it. No name can address that key: the value is a list rather than a reference, so path resolution skips it, which is what lets protocol data and names share one map without a registry.
 
-The endpoint host comes from the SVCB/SRV hint at `_onomancy.<name>`, a mirror, or out-of-band knowledge — it is a transport hint, never an authority. The response is integrity-safe even over plain HTTP — the record proves itself — though the fetch is not private (see [security.md](./security.md#privacy)).
+So retrieval is not a mechanism of its own. A verifier that resolves `@expede.wtf/foo` must replicate the document to walk `/foo` anyway; the binding evidence rides along. There is no server to run, no endpoint to publish, and no second artifact to keep in sync with the first.
 
-This endpoint is the default bootstrap, not a canonical location — whatever DNS makes it reachable is transport plumbing on the _target_ host, nothing more; the name's own address records play no role. Because the record is self-authenticating, any onomancy server can serve any name's certificate (aggregator/mirror endpoint shape is an open design point), and gossip needs no server at all. A server can withhold or serve stale records, never forge them; verifiers attach no meaning to which source supplied the bytes.
+A publisher MAY instead store a **reference** to another document — one hop, no further — and usually should. The certificate is document content, so whoever can write the document holding it can remove or replace it; putting it in a document written only by the keys that issue certificates keeps naming authority above collaboration authority. It also spares the identity document the churn of chain refreshes, which are frequent by design since anyone may re-attach fresher evidence without a key.
 
-Fetch-based retrieval is deliberately HTTPS-and-static at v0: the certificate is an immutable blob, so "serve it" means a plain GET returning the bytes — nginx, a bucket, or a pages host suffices, and the server component reduces to a cert generator plus any static file server. Serving the certificate over document sync (from a public identity doc, riding the same connection as the documents themselves) is the intended warm path later, pending the public-readability design under Keyhive encryption — verification is source-agnostic, so adding that channel changes no trust semantics.
+Where a verifier finds a peer holding that document is a transport question, and the SVCB/SRV hint at `_onomancy.<name>` answers it the way a magnet link's tracker field does: the document is identified self-certifyingly by the TXT record, so a hint can only affect whether bytes arrive, never whether they verify. Gossip needs no hint at all. A source can withhold or serve stale records, never forge them; verifiers attach no meaning to which one supplied the bytes.
+
+Storage in the document does hand any writer a way to suppress a binding — denial of service and a freshness downgrade, never a forged or redirected one. Publishers who care SHOULD either separate the two documents' write authority as above, or keep a second source reachable.
 
 ## Fields
 
@@ -142,7 +142,7 @@ The certificate is a _record_, not a session: it can be relayed by untrusted pee
 
 | Path | Example |
 |------|---------|
-| Direct fetch | `GET /onomancy/v0/<name>` at any serving host |
+| In the bound document | `.well-known/onomancy/certificates`, replicated with the document itself |
 | P2P gossip | Bluetooth exchange at DWeb Camp |
 | Cache | Local binding cache ([resolution.md](./resolution.md#binding-cache)) |
 

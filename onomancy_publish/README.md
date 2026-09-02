@@ -33,4 +33,4 @@ Plan { dns_ops · artifacts · postconditions }
 | `Rotate`  | Gₙ₊₁ (signs the statement) + signer | replace TXT    |
 | `Migrate` | predecessor authority + signer       | dual-publish   |
 
-Delegation carriages are empty until `onomancy_keyhive` lands — the same loudly-documented gap as the verifier's (`design/keyhive-coordination.md`).
+Ceremonies carry real delegation carriages (minted by `onomancy_keyhive`), and `plan()` takes the `AuthorityVerifier` to judge them with — pass the same authority your verifiers run, and a carriage they would reject fails at plan time (`design/keyhive-coordination.md` tracks the remaining upstream asks).

@@ -19,7 +19,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 automerge = { workspace = true, optional = true }
 console_error_panic_hook = { workspace = true }
-ed25519-dalek = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true }
 # Seed minting + automerge's RNG; the `wasm_js` feature unlocks the
 # backend that .cargo/config.toml's `getrandom_backend` cfg selects.
 getrandom = { workspace = true, features = ["wasm_js"], optional = true }
@@ -35,8 +35,9 @@ js-sys = { workspace = true }
 onomancy_automerge = { workspace = true, optional = true }
 onomancy_chain = { workspace = true, optional = true }
 onomancy_core = { workspace = true }
-onomancy_dnssec = { workspace = true, features = ["std"] }
-onomancy_protocol = { workspace = true, optional = true, features = ["std"] }
+onomancy_dnssec = { workspace = true, features = ["idna", "std"] }
+onomancy_keyhive = { workspace = true }
+onomancy_protocol = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 wasm-bindgen = { workspace = true }
@@ -46,6 +47,10 @@ web-sys = { workspace = true, optional = true, features = [
   "Request",
   "RequestInit",
   "Response",
+  # `Url` validates a caller-supplied resolver URL before the fetch,
+  # so a malformed one is a caller error rather than a `transport`
+  # failure inviting a retry that cannot succeed.
+  "Url",
 ] }
 
 [dev-dependencies]
@@ -56,18 +61,14 @@ wasm-bindgen-test = "=0.3.71"
 default = ["doh", "names"]
 names = [
   "dep:automerge",
-  "dep:ed25519-dalek",
   "dep:getrandom",
   "dep:onomancy_automerge",
-  "dep:onomancy_protocol",
   "std",
 ]
 doh = [
   "dep:hickory-proto",
   "dep:onomancy_chain",
-  "dep:onomancy_protocol",
   "dep:web-sys",
-  "onomancy_dnssec/idna",
   "std",
 ]
 live = []

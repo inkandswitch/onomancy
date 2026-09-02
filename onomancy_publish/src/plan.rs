@@ -23,7 +23,7 @@ pub struct Plan {
     /// Zone edits, in order.
     pub dns_ops: Vec<DnsOp>,
 
-    /// Bytes to serve at the designated endpoint and/or gossip.
+    /// Bytes to write into the bound document's certificate list, or gossip.
     pub artifacts: Vec<Artifact>,
 
     /// Checkable facts, once the zone reflects `dns_ops` (the

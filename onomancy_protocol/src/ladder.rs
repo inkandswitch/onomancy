@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn fresh_beats_stale_outright_even_with_a_lower_key() {
-        // The D4a case: fresh wins rung 0 including with a lower
+        // Fresh wins rung 0 including with a lower
         // serial — the downward move surfaces as a ratchet reset, but
         // the ladder's pick is deterministic.
         let fresh_low = contender(1, Freshness::Fresh, key(10, 1, 1));
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn rung_zero_outranks_rung_one() {
-        // A fresh chain vs a valid superseding statement is D12a fork
+        // A fresh chain vs a valid superseding statement is fork
         // territory upstream, but at ladder level rung 0 speaks first;
         // the fork input only matters within a freshness class.
         let fresh = contender(1, Freshness::Fresh, key(1, 1, 1));

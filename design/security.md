@@ -10,33 +10,33 @@ Threat model, mitigations, and accepted residual risks. Read alongside [assumpti
 
 ## Adversaries
 
-| Adversary                  | Capabilities                                                            |
-|----------------------------|-------------------------------------------------------------------------|
-| Network attacker           | Observe/modify/drop traffic; malicious resolver                         |
-| Transient zone attacker    | Briefly controls a DNS zone (registrar compromise, expired-domain grab) |
-| Malicious gossip peer      | Sends arbitrary records P2P                                             |
-| Malicious onomancer server | Serves arbitrary bytes at its certificate endpoint                       |
-| Local malware (limited)    | Reads/corrupts caches, but no signing-key access                        |
-| Local malware (full)       | Signing-key access — out of scope, game over                            |
+| Adversary               | Capabilities                                                            |
+|-------------------------|-------------------------------------------------------------------------|
+| Network attacker        | Observe/modify/drop traffic; malicious resolver                         |
+| Transient zone attacker | Briefly controls a DNS zone (registrar compromise, expired-domain grab) |
+| Malicious gossip peer   | Sends arbitrary records P2P                                             |
+| Malicious source        | A sync peer, mirror, or relay serving arbitrary bytes                   |
+| Local malware (limited) | Reads/corrupts caches, but no signing-key access                        |
+| Local malware (full)    | Signing-key access — out of scope, game over                            |
 
 ## Threats and Mitigations
 
-| Threat                                               | Mitigation                                                                            | Residual                  |
-|------------------------------------------------------|---------------------------------------------------------------------------------------|---------------------------|
-| Near-miss phishing (`@bob` vs `@bob.co`)             | Grammar: petnames never under `@`; dotless must parse as key ([names.md](./names.md)) | homographs (below)        |
-| Homograph/confusable DNS names (Cyrillic lookalikes) | Layered: A-label canonicalization + petname pinning + display-layer confusable detection (below) | attentive-user gap until display layer built |
-| Key borrowing via TXT (attacker's zone points at victim's pubkey) | Certificate binds `hostname` and is signed by the key owner — no valid cert for the attacker's hostname can exist | none |
-| Replay of superseded TXT record                      | Serial ratchet (stale must exceed; fresh may reset, surfaced)                         | ratchet poisoning (below) |
-| Stripped-record downgrade ("no binding here")        | Absence is never provable at v0: a missing record is always a possible downgrade, never "no binding" — fails toward retention | closed by doctrine |
-| Forged certificate                                   | Ed25519 sig + chain from baked-in KSK + TXT pubkey match                              | KSK compromise (below)    |
-| Malicious gossip peer                                | Records are self-authenticating; receiver verifies from own KSK                       | DoS only                  |
-| Malicious onomancer server                           | Serves signed records it cannot forge; delegation revocation cuts it off    | DoS only                  |
-| Poisoned binding cache                               | Cache confers no authority; chain re-verified at use                                  | none by design            |
-| Forged petname edges                                 | Only writable by your signing keys                                                    | full local compromise     |
-| Replayed stale chain offline                         | Graded freshness: stale ⚠ is surfaced, not hidden                                     | user judgment             |
-| Revoked signer keeps minting certs                   | Generation rotation: `g=` no longer attests their chain's chokepoint; fresh chains reject | stale-chain window (below) |
-| Revoked insider who also regains zone control        | Rewinds `g=` — provable via generation lineage (ratchet + equivocation surfacing)       | lineage forks (below)     |
-| KSK rolls/revoked while client offline               | Trust-anchor set + RFC 5011 rollover (future work); app-update cadence at v0          | offline anchor rot (below) |
+| Threat                                                            | Mitigation                                                                                                                    | Residual                                     |
+|-------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
+| Near-miss phishing (`@bob` vs `@bob.co`)                          | Grammar: petnames never under `@`; dotless must parse as key ([names.md](./names.md))                                         | homographs (below)                           |
+| Homograph/confusable DNS names (Cyrillic lookalikes)              | Layered: A-label canonicalization + petname pinning + display-layer confusable detection (below)                              | attentive-user gap until display layer built |
+| Key borrowing via TXT (attacker's zone points at victim's pubkey) | Certificate binds `hostname` and is signed by the key owner — no valid cert for the attacker's hostname can exist             | none                                         |
+| Replay of superseded TXT record                                   | Serial ratchet (stale must exceed; fresh may reset, surfaced)                                                                 | ratchet poisoning (below)                    |
+| Stripped-record downgrade ("no binding here")                     | Absence is never provable at v0: a missing record is always a possible downgrade, never "no binding" — fails toward retention | closed by doctrine                           |
+| Forged certificate                                                | Ed25519 sig + chain from baked-in KSK + TXT pubkey match                                                                      | KSK compromise (below)                       |
+| Malicious gossip peer                                             | Records are self-authenticating; receiver verifies from own KSK                                                               | DoS only                                     |
+| Malicious source                                                  | Serves signed records it cannot forge; delegation revocation cuts it off                                                      | DoS only                                     |
+| Poisoned binding cache                                            | Cache confers no authority; chain re-verified at use                                                                          | none by design                               |
+| Forged petname edges                                              | Only writable by your signing keys                                                                                            | full local compromise                        |
+| Replayed stale chain offline                                      | Graded freshness: stale ⚠ is surfaced, not hidden                                                                             | user judgment                                |
+| Revoked signer keeps minting certs                                | Generation rotation: `g=` no longer attests their chain's chokepoint; fresh chains reject                                     | stale-chain window (below)                   |
+| Revoked insider who also regains zone control                     | Rewinds `g=` — provable via generation lineage (ratchet + equivocation surfacing)                                             | lineage forks (below)                        |
+| KSK rolls/revoked while client offline                            | Trust-anchor set + RFC 5011 rollover (future work); app-update cadence at v0                                                  | offline anchor rot (below)                   |
 
 ## Homographs and the Display Layer
 
@@ -66,7 +66,7 @@ Displaying a hash of the name was considered and rejected as a mechanism: a fing
 
 A transient zone attacker publishes an absurdly high TXT serial (e.g. `n=2^60`), trying to burn the monotonic ratchet past the legitimate owner's reach. Two mechanisms bound this:
 
-1. _Serial-as-timestamp with 5-minute skew_: serials reading more than 5 minutes in the future are deferred, so the attacker can advance the ratchet at most ~5 minutes past wall-clock — honest serials (`max(now_ms, last+1)`) outgrow the poison within the skew window.
+1. _Serial-as-timestamp with 5-minute skew_: serials reading more than 5 minutes in the future are deferred, so the attacker can advance the ratchet at most ~5 minutes past wall-clock — honest serials (`max(now_ms, last+1)`) outgrow the poison within the skew window. This bound rests on a **publisher-side** rule ([dns-anchor.md](../specs/anchoring/dns-anchor.md#serial-ratchet)): serials that do not track the clock cannot overtake a planted one on schedule, so a shortcut in the minter silently weakens this defence.
 2. _Fresh-beats-stale_: a record carried by a fresh DNSSEC chain may lower the ratchet (surfaced as a binding change, never silent). Minting a fresh chain requires current zone control — exactly what the transient attacker lost — so one fresh owner chain heals any verifier immediately.
 
 _Residual (accepted)_: a fully offline verifier that accepted poison before the owner recovered has no automatic path — the escape hatch remains a per-name manual "reset trust" action. Note the ratchet's direction also means domain re-registration works for legitimate new owners: a higher serial simply wins, and fresh chains carry the day.

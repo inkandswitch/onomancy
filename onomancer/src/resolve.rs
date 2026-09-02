@@ -119,9 +119,9 @@ impl Resolve {
         };
         let bytes = std::fs::read(cert_path)?;
 
-        // Real authority: carriages replay into a Keyhive
-        // delegation graph; doc-key-signed certificates pass by the
-        // identity rule.
+        // Carriages replay into a Keyhive delegation graph — the
+        // spec's one authority model; doc-key-signed certificates
+        // pass by the identity rule.
         let authority = KeyhiveAuthority;
 
         let verdict = verdict::verify(&bytes, &hostname, now, &validator, &authority)?;

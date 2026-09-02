@@ -13,6 +13,7 @@ use onomancy_dnssec::{
     statement::rotation::RotationStatement,
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
     ceremony::{CeremonyError, Intent, simulate},
@@ -44,7 +45,7 @@ pub struct Bind {
     pub lineage: alloc::vec::Vec<RotationStatement>,
 
     /// The authority carriage to attach: delegation proof that
-    /// `generation` lies on `document`'s path (D10). Opaque here —
+    /// `generation` lies on `document`'s path. Opaque here —
     /// minted by `onomancy_keyhive::mint`, verified by the agent's
     /// authority.
     pub carriage: onomancy_core::delegation_chain::DelegationChain,
@@ -62,7 +63,12 @@ impl Bind {
     /// Returns [`CeremonyError`] when a unit exceeds the encoder cap
     /// or the simulated derivation does not accept exactly this
     /// binding.
-    pub fn plan(&self, now_ms: u64, signer: &Signer) -> Result<Plan, CeremonyError> {
+    pub fn plan<A: AuthorityVerifier>(
+        &self,
+        now_ms: u64,
+        signer: &Signer,
+        authority: &A,
+    ) -> Result<Plan, CeremonyError> {
         let serial = Serial::from(now_ms);
         let now = UnixSeconds::from(now_ms / 1000);
 
@@ -96,6 +102,7 @@ impl Bind {
                 generation: self.generation,
                 serial,
             },
+            authority,
         )?;
 
         Ok(Plan {

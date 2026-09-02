@@ -1,7 +1,7 @@
 //! Minting carriages: the owner-side counterpart of verification.
 //!
 //! The verifier demands proof that a TXT `g=` generation key lies on
-//! the document's delegation path (D10). This module lets ceremonies
+//! the document's delegation path. This module lets ceremonies
 //! produce that proof from the keys they already hold: a two-event
 //! carriage introducing the generation key (proof of possession,
 //! signed by the generation key itself) and delegating to it from the
@@ -12,7 +12,7 @@
 //! delegating hop is the root itself (dns-anchor §Who Signs) — which
 //! is deliberate: successor generation keys must sign rotation
 //! statements. A leaked generation key can pollute cert evidence
-//! until rotation; rotation heals it fully (D10 rejects fresh records
+//! until rotation; rotation heals it fully (verifiers reject fresh records
 //! whose zone generation is off the leaked carriage's path). Analysis
 //! in design/security.md.
 
@@ -28,7 +28,7 @@ use rand::rngs::OsRng;
 use crate::carriage::{Carriage, EncodeCarriageError};
 
 /// Delegate `generation_key` from `doc_key`'s document, producing the
-/// carriage entries a certificate attaches to prove D10 path
+/// carriage entries a certificate attaches to prove generation-path
 /// membership for its TXT `g=`.
 ///
 /// Both signing keys are borrowed only for signing; nothing is stored.

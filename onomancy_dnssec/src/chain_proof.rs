@@ -27,7 +27,7 @@ pub struct ChainProof {
     /// key), not the validator's — the validator only proves what
     /// the zone said. Unknown-version and unknown-record strings
     /// are already dispositioned out; per-record grammar rejections
-    /// (D5) drop only the offending record.
+    /// drop only the offending record.
     pub records: Vec<TxtRecord>,
 
     /// The chain's ∩-window.

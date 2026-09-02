@@ -4,10 +4,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use clap::Args;
-use onomancy_core::{
-    anchor::doc::DocAnchor, delegation_chain::DelegationChain, time::UnixSeconds,
-    wire::OversizeUnit,
-};
+use onomancy_core::{anchor::doc::DocAnchor, time::UnixSeconds, wire::OversizeUnit};
 use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams},
     chain::DnssecChain,
@@ -15,6 +12,7 @@ use onomancy_dnssec::{
     txt::{generation_key::GenerationKey, record::TxtRecord, serial::Serial},
 };
 use onomancy_hickory::provider::FetchChainError;
+use onomancy_keyhive::mint;
 
 use crate::{
     say,
@@ -110,10 +108,26 @@ impl Record {
         };
 
         let signer = if self.signer_seed.is_some() || self.signer_key.is_some() {
-            seed::load(self.signer_seed.as_deref(), self.signer_key.as_deref())?
+            let signer = seed::load(self.signer_seed.as_deref(), self.signer_key.as_deref())?;
+
+            // A carriage minted here proves the document delegates
+            // the GENERATION key; it says nothing about some third
+            // signer. Minting anyway would emit a certificate that
+            // fails for a reason its holder cannot see.
+            if signer.verifying_key() != doc_key.verifying_key() {
+                return Err(RecordError::UnprovableSigner);
+            }
+
+            signer
         } else {
-            doc_key
+            doc_key.clone()
         };
+
+        // The generation-path proof, as `bind` mints it: without it the attested
+        // generation key lies on no path, so the certificate is
+        // REJECTED while its own chain is fresh and only graded
+        // provisional once stale — exactly backwards.
+        let carriage = mint::generation_carriage(&doc_key, &generation_key)?;
 
         let certificate = Certificate::sign(
             CertificateParams {
@@ -122,9 +136,7 @@ impl Record {
                 hostname: hostname.clone(),
                 heads: vec![],
                 predecessor: None,
-                // Empty until Keyhive delegation lands: verification
-                // of the carriage is the AuthorityVerifier seam's job.
-                delegation_chain: DelegationChain::default(),
+                delegation_chain: carriage,
                 lineage: vec![],
                 chain,
             },
@@ -161,6 +173,10 @@ pub(crate) enum RecordError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
+    /// The carriage could not be minted.
+    #[error(transparent)]
+    Mint(#[from] onomancy_keyhive::mint::MintError),
+
     /// The certificate would exceed the unit cap.
     #[error(transparent)]
     Oversize(#[from] OversizeUnit),
@@ -168,4 +184,19 @@ pub(crate) enum RecordError {
     /// A seed argument was malformed.
     #[error(transparent)]
     Seed(#[from] SeedError),
+
+    /// A signer was supplied whose authority this verb cannot prove.
+    ///
+    /// `record` mints the one carriage it can derive from its own
+    /// arguments: the document delegating the generation key. A third
+    /// signer needs a delegation path from the document, which lives
+    /// in the Keyhive graph rather than in a seed file.
+    #[error(
+        "refusing to mint a certificate for a signer this verb cannot prove: \
+         --signer-key is not the document key, and the carriage minted here \
+         proves only that the document delegates the generation key. Such a \
+         certificate would be dropped by verifiers without a visible reason. \
+         Use the document key, or run the full `bind` ceremony."
+    )]
+    UnprovableSigner,
 }

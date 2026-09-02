@@ -65,7 +65,7 @@ Rather than squatting one corner, Onomancy lets each name occupy the corner that
 
 ## Revocation and Server Trust
 
-The TXT record's pubkey (= doc ID) roots each DNS binding, and the certificate's signing authority is a delegation from it — held by the **user** (a cold admin key), never by a server: onomancer servers are keyless couriers, so server compromise is denial-of-service only. Revocation happens _inside the document_: revoke a compromised device or admin key's delegation and its signatures fail verification — the TXT record never changes. Changing the TXT `p=` is reserved for genuine document migration (a new identity), which carries a signed successor statement so continuity is provable rather than asserted. Resolution mechanics under the hood are deliberately open (signed records could bridge to ATProto etc.); the delegation graph is the kill switch.
+The TXT record's pubkey (= doc ID) roots each DNS binding, and the certificate's signing authority is a delegation from it — held by the **user** (a cold admin key), never by whoever relays the bytes: every source is a keyless courier, so a compromised one causes denial of service only. Revocation happens _inside the document_: revoke a compromised device or admin key's delegation and its signatures fail verification — the TXT record never changes. Changing the TXT `p=` is reserved for genuine document migration (a new identity), which carries a signed successor statement so continuity is provable rather than asserted. Resolution mechanics under the hood are deliberately open (signed records could bridge to ATProto etc.); the delegation graph is the kill switch.
 
 ## The Mutual Backstop
 

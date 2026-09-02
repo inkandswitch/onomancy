@@ -11,14 +11,12 @@ test("resolves a two-hop walk across held documents", async ({ page }) => {
     const john = held.createDocument();
     held.bind(root, "team", team);
     held.bind(team, "john", john);
-    held.setNote(john, "hi from john");
     const outcome = await held.resolve("~/team/john", root);
     return { john, outcome };
   });
 
   expect(verdict.outcome.status).toBe("resolved");
   expect(verdict.outcome.document).toBe(verdict.john);
-  expect(verdict.outcome.note).toBe("hi from john");
 });
 
 test("reports a partial walk instead of failing", async ({ page }) => {

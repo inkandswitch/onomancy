@@ -9,9 +9,9 @@
 
 #![allow(clippy::panic)] // assertion failures in tests
 
-use automerge::{Automerge, ObjType, transaction::Transactable};
+use automerge::{Automerge, transaction::Transactable};
 use ed25519_dalek::SigningKey;
-use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments, RESERVED_KEY};
+use onomancy_automerge::namestore::{DocumentNamestore, HeldDocuments};
 use onomancy_core::{anchor::doc::DocAnchor, name::segment::Segment};
 use onomancy_protocol::resolve::{
     namestore::{Authority, Vouched},
@@ -32,9 +32,8 @@ fn segments(path: &[&str]) -> TestResult<Vec<Segment>> {
 fn namestore_doc(entries: &[(&str, &DocAnchor)]) -> TestResult<Automerge> {
     let mut doc = Automerge::new();
     doc.transact::<_, _, automerge::AutomergeError>(|tx| {
-        let map = tx.put_object(automerge::ROOT, RESERVED_KEY, ObjType::Map)?;
         for (key, target) in entries {
-            tx.put(&map, *key, format!("automerge:{target}"))?;
+            tx.put(automerge::ROOT, *key, format!("automerge:{target}"))?;
         }
         Ok(())
     })

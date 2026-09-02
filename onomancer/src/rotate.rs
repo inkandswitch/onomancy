@@ -8,7 +8,7 @@ use onomancy_core::anchor::doc::DocAnchor;
 use onomancy_dnssec::{
     certificate::Certificate, dns_name::DnsName, txt::generation_key::GenerationKey,
 };
-use onomancy_keyhive::mint;
+use onomancy_keyhive::{authority::KeyhiveAuthority, mint};
 use onomancy_publish::{ceremony::rotate::Rotate as RotateCeremony, signer::Signer};
 
 use crate::{
@@ -82,7 +82,7 @@ impl Rotate {
         };
 
         // One carriage serves both: the statement's signing authority
-        // (terminates at Gₙ₊₁) and the certificate's D10 path proof.
+        // (terminates at Gₙ₊₁) and the certificate's generation-path proof.
         let carriage = mint::generation_carriage(&doc_key, &successor)?;
 
         let plan = RotateCeremony {
@@ -92,7 +92,12 @@ impl Rotate {
             prior_lineage,
             carriage,
         }
-        .plan(now_ms(), &Signer::new(successor), &Signer::new(doc_key))?;
+        .plan(
+            now_ms(),
+            &Signer::new(successor),
+            &Signer::new(doc_key),
+            &KeyhiveAuthority,
+        )?;
 
         crate::block_on(plan_io::execute(&plan, &self.out_dir))??;
         Ok(())

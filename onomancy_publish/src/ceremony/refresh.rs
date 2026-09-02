@@ -9,6 +9,7 @@ use alloc::{format, vec, vec::Vec};
 
 use onomancy_core::time::UnixSeconds;
 use onomancy_dnssec::{certificate::Certificate, chain::DnssecChain, txt::record::TxtRecord};
+use onomancy_protocol::verifier::state::authority_verifier::AuthorityVerifier;
 
 use crate::{
     ceremony::{CeremonyError, Intent, simulate},
@@ -41,7 +42,11 @@ impl Refresh {
     /// encoder cap or the simulated derivation does not accept the
     /// certificate's own binding (e.g. the supplied chain proves a
     /// different document's records).
-    pub fn plan(&self, now: UnixSeconds) -> Result<Plan, CeremonyError> {
+    pub fn plan<A: AuthorityVerifier>(
+        &self,
+        now: UnixSeconds,
+        authority: &A,
+    ) -> Result<Plan, CeremonyError> {
         let refreshed = self.certificate.with_attachments(
             self.certificate.delegation_chain().clone(),
             self.certificate.lineage().to_vec(),
@@ -71,6 +76,7 @@ impl Refresh {
                 generation: *best.generation(),
                 serial: best.serial(),
             },
+            authority,
         )?;
 
         Ok(Plan {

@@ -1,5 +1,6 @@
 //! The `Name` binding: parsed edgenames for JavaScript.
 
+use crate::text::{self, Text};
 use onomancy_dnssec::supported_name::SupportedName;
 use wasm_bindgen::prelude::*;
 
@@ -12,13 +13,22 @@ pub struct JsName(SupportedName);
 impl JsName {
     /// Parse a raw string into a `Name`.
     ///
+    /// Takes a `JsValue` rather than a `&str` on purpose: a `&str`
+    /// parameter makes wasm-bindgen read `.length` off whatever it is
+    /// handed, so `new Name(42)` faults inside the module and surfaces
+    /// as `RuntimeError: memory access out of bounds` — an alarming
+    /// diagnostic for an ordinary type error, in an API whose callers
+    /// are untyped by construction.
+    ///
     /// # Errors
     ///
-    /// Throws when the sigil is missing, the anchor is malformed, or any
-    /// path segment is invalid.
+    /// Throws a plain error for non-string input, and when the sigil is
+    /// missing, the anchor is malformed, or any path segment is invalid.
     #[wasm_bindgen(constructor)]
-    pub fn new(raw: &str) -> Result<JsName, JsError> {
-        Ok(Self(SupportedName::parse(raw)?))
+    pub fn new(raw: &Text) -> Result<JsName, JsError> {
+        let raw = text::read(raw, "a name")?;
+
+        Ok(Self(SupportedName::parse(&raw)?))
     }
 
     /// The canonical (normalized) printed form.

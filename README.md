@@ -18,7 +18,7 @@ This repository contains:
 
 All three name forms resolve to an [Automerge](https://automerge.org) document whose ID is an ed25519 verifying key (via [Keyhive](https://github.com/inkandswitch/keyhive)) — a self-certifying identity, and the root that resolution starts from. Petnames and DNS names are naming layers over those documents, so an account created offline already has a globally shareable name, and binding a domain later adds a memorable spelling for the _same_ identity. No migration, ever.
 
-DNS-rooted names verify locally, from a baked-in [IANA] [root KSK] through a [DNSSEC]-protected [TXT record] to a signed certificate fetched from a designated endpoint (or received by gossip). Verified bindings are self-authenticating records: they can be gossiped peer-to-peer (Bluetooth at a field campout, QR codes) and re-verified by the receiver with no trust in the sender.
+DNS-rooted names verify locally, from a baked-in [IANA] [root KSK] through a [DNSSEC]-protected [TXT record] to a signed certificate carried **inside the document it binds** (or received by gossip). The zone says which document; the certificate says which hostnames that document accepts. Neither direction alone is a binding — anyone controlling any signed zone can name any document — so a resolved name is not an authenticated one until both agree. Verified bindings are self-authenticating records: they can be gossiped peer-to-peer (Bluetooth at a field campout, QR codes) and re-verified by the receiver with no trust in the sender.
 
 ## Design
 
@@ -37,7 +37,7 @@ See [`specs/`](./specs/README.md) for the normative protocol specifications (pat
 | [`onomancy_keyhive`](./onomancy_keyhive)     | Keyhive authority verification: delegation-chain replay behind `AuthorityVerifier`     |
 | [`onomancy_hickory`](./onomancy_hickory)     | Host chain courier: stub DNS transport driving the chain builder                       |
 | [`onomancy_wasm`](./onomancy_wasm)           | Wasm/JavaScript bindings, DoH chain courier, [live browser demo](./onomancy_wasm/demo) |
-| [`onomancer`](./onomancer)                   | The agent (binary): keygen · record · resolve                                          |
+| [`onomancer`](./onomancer)                   | The agent (binary): resolve · name · keygen · vouch · bind · refresh · rotate · migrate · record · watch |
 
 Libraries implement the protocol (`onomancy_*`); agents that practice it are onomancers (`onomancer_*`).
 
@@ -61,7 +61,7 @@ graph TD
         wasm["onomancy_wasm<br/><i>browser bindings · DoH fetch</i>"]
     end
 
-    onomancer["onomancer (binary)<br/><i>resolve · keygen · bind · refresh<br/>rotate · migrate · watch · serve</i>"]
+    onomancer["onomancer (binary)<br/><i>resolve · name · keygen · vouch · bind<br/>refresh · rotate · migrate · record · watch</i>"]
 
     dnssec --> core
     proto --> dnssec

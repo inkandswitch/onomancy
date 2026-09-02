@@ -46,7 +46,15 @@ type Instance = Keyhive<
     OsRng,
 >;
 
-/// Authority verification over real Keyhive delegation graphs.
+/// Authority verification over Keyhive delegation graphs — the
+/// spec's one authority model (dns-anchor, Who Signs: the carriage
+/// IS "the standard Keyhive authority proof").
+///
+/// The `AuthorityVerifier` seam this implements exists for layering,
+/// not pluralism: it quarantines the `keyhive_core` dependency tree
+/// out of the sans-IO crates (as `onomancy_dnssec` quarantines its
+/// crypto backends) and gives tests `MemoryAuthority`. This is the
+/// only implementation that judges evidence.
 ///
 /// Stateless between calls: each question replays its carriage into a
 /// fresh instance, so verdicts depend only on the presented evidence
@@ -144,7 +152,12 @@ impl KeyhiveAuthority {
                 // Keyhive enforces issuer == subject for rootless
                 // delegations: this grant came from the root key.
                 None => true,
-                Some(proof) => proof.payload().can() == Access::Admin,
+                // At-least, never equality. `Access` is ordered and
+                // Admin is merely its current maximum; an equality
+                // test would refuse a hop holding something strictly
+                // stronger the day Keyhive grows one, and §Who Signs
+                // asks whether the hop HOLDS admin access.
+                Some(proof) => proof.payload().can() >= Access::Admin,
             }
         })
     }
@@ -207,5 +220,40 @@ impl AuthorityVerifier for KeyhiveAuthority {
 
             false
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Access;
+
+    /// The signing bar is `>= Access::Admin`, not `== Access::Admin`.
+    ///
+    /// Those agree on every input only because Admin is currently the
+    /// maximum of Keyhive's ladder. What this test provides: the
+    /// exhaustive `match` is a compile-time tripwire — a new `Access`
+    /// variant refuses to compile until a human visits — and the
+    /// array below is hand-kept, so the runtime maximum only
+    /// re-checks what the visitor listed. The tripwire forces the
+    /// visit; the comments below are the visit's instructions.
+    #[test]
+    fn admin_is_the_top_of_the_ladder() {
+        // Tripwire: a new `Access` variant fails to compile here.
+        // When it fires: add the variant to the ARRAY below too, and
+        // re-read `sanctioned`'s `>= Access::Admin` bar against the
+        // new level's meaning.
+        let every_level = |level: Access| match level {
+            Access::Relay | Access::Read | Access::Edit | Access::Admin => level,
+        };
+
+        // Hand-kept enumeration — extend together with the match arm.
+        assert_eq!(
+            [Access::Relay, Access::Read, Access::Edit, Access::Admin]
+                .map(every_level)
+                .into_iter()
+                .max(),
+            Some(Access::Admin),
+            "the signing bar admits exactly the ladder's maximum and up"
+        );
     }
 }

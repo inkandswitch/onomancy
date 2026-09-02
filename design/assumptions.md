@@ -120,4 +120,4 @@ Petname edges live here; local malware with signing access can forge petnames. T
 | Caches are trustworthy | Re-verification at use; cache confers no authority |
 | Clocks are synchronized | Verification is clock-free; time only grades freshness |
 | Names are unambiguous to humans | Syntactic anchor disjointness + display-layer confusable detection |
-| The onomancer server is honest | It serves signed records it cannot forge; servers hold no keys, so compromise is DoS/staleness only |
+| The source of the bytes is honest | Every source serves signed records it cannot forge; sources hold no keys, so compromise is DoS/staleness only |

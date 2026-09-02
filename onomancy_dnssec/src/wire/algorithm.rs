@@ -1,6 +1,6 @@
 //! DNSSEC security algorithm codes.
 //!
-//! Onomancy's D13 rule: an **unsupported algorithm is invalid ✗**,
+//! Onomancy's rule: an **unsupported algorithm is invalid ✗**,
 //! never insecure-but-ok — RFC 4035's treat-unknown-as-insecure
 //! behavior would be an algorithm-downgrade path for a KSK-rooted
 //! binding, so this crate inverts it.
@@ -33,7 +33,8 @@ impl Algorithm {
     pub const RSA_SHA256: Self = Self(8);
 
     /// Whether this implementation can verify signatures under the
-    /// algorithm. Everything else fails validation (D13).
+    /// algorithm. Everything else fails validation — unsupported is
+    /// invalid, never insecure.
     #[must_use]
     pub const fn supported(self) -> bool {
         matches!(

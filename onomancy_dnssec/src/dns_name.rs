@@ -63,8 +63,12 @@ impl DnsName {
 
         validate_label(tld)?;
 
+        // An all-digit rightmost label is what separates a hostname
+        // from an IPv4 literal: `1.2.3.4` must not parse as a name.
+        // Testing the TLD alone is sufficient and catches `host.123`
+        // too, which is no IP literal but is equally unresolvable.
         if tld.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(ParseDnsNameError::IpLiteral);
+            return Err(ParseDnsNameError::AllDigitTld);
         }
 
         let mut label_count = 1usize;
@@ -201,9 +205,16 @@ pub enum ParseDnsNameError {
     #[error("DNS labels must not begin or end with a hyphen")]
     HyphenAtLabelEdge,
 
-    /// The name looked like an IP address, which is not a DNS name.
-    #[error("IP literals are not DNS names")]
-    IpLiteral,
+    /// The rightmost label was all digits.
+    ///
+    /// Stated as the rule rather than as one of its consequences:
+    /// "IP literals are not DNS names" explains `1.2.3.4` but
+    /// misdescribes `host.123`, which is no IP literal and is
+    /// rejected by the same rule.
+    #[error(
+        "a top-level domain must not be all digits (the rule that keeps IP literals from being names)"
+    )]
+    AllDigitTld,
 
     /// A label exceeded 63 octets.
     #[error("DNS labels are limited to {MAX_LABEL_LEN} octets")]
@@ -243,8 +254,26 @@ mod tests {
     fn rejects_ipv4_literals() {
         assert_eq!(
             DnsName::parse("127.0.0.1"),
-            Err(ParseDnsNameError::IpLiteral)
+            Err(ParseDnsNameError::AllDigitTld)
         );
+    }
+
+    /// The same rule, on a name that is not an IP literal — the
+    /// all-digit-TLD rejection covers more than IP literals, and this
+    /// pins the wider half.
+    #[test]
+    fn rejects_an_all_digit_tld_that_is_not_an_ip_literal() {
+        assert_eq!(
+            DnsName::parse("host.123"),
+            Err(ParseDnsNameError::AllDigitTld)
+        );
+    }
+
+    /// A digit-leading TLD is fine as long as it is not *all* digits;
+    /// the rule is about the whole label, not its first byte.
+    #[test]
+    fn accepts_a_tld_with_digits_and_letters() {
+        assert!(DnsName::parse("example.4d").is_ok());
     }
 
     #[test]

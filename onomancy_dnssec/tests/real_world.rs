@@ -86,8 +86,8 @@ fn the_production_chain_validates_from_the_iana_anchors() -> TestResult {
 
 #[test]
 fn the_production_certificate_verifies_end_to_end() -> TestResult {
-    // KEYHIVE PENDING: MemoryAuthority is permissive, so the D10
-    // path-membership half is vacuous here; the DNSSEC half is real.
+    // MemoryAuthority is permissive, so the path-membership half is
+    // vacuous here; the DNSSEC half is real.
     let verdict = verdict::verify(
         &fixture("real_brooklynzelenka.onc"),
         &hostname(),

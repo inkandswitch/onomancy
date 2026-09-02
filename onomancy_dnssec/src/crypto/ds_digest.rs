@@ -9,7 +9,8 @@ use super::sha256::Sha256;
 
 /// A digest whose [`DigestType`] is DERIVED from its payload, never
 /// stored beside it — the tag and the bytes cannot disagree, and only
-/// supported digest kinds are representable (D13 as a type: an
+/// supported digest kinds are representable (unsupported-is-invalid
+/// as a type: an
 /// unsupported trust anchor is not rejected, it cannot be written
 /// down). One variant today; SHA-384 support would be a new variant,
 /// not a new field.

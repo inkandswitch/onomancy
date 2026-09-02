@@ -33,7 +33,7 @@ use onomancy_core::{
 use onomancy_dnssec::chain_proof::ChainValidator;
 
 use super::{
-    BindingEvidence,
+    Attestation, BindingEvidence,
     authority_verifier::AuthorityVerifier,
     decisions::Decisions,
     store::{Store, item::Item},
@@ -126,15 +126,38 @@ pub fn prune<V: ChainValidator, A: AuthorityVerifier>(
 /// irrelevant. Requires the same document AND generation (a lineage
 /// statement can re-weigh generations, so cross-generation domination
 /// is never safe from static data), at-least-as-good in every
-/// component, strictly better somewhere or a distinct item.
+/// component, and STRICTLY better in at least one.
 fn dominates(other: &BindingEvidence, record: &BindingEvidence) -> bool {
-    other.hash != record.hash
-        && other.document == record.document
-        && other.generation == record.generation
-        && other.window.inception() <= record.window.inception()
+    // A refresh row never prunes a certificate: candidacy is
+    // certificate-attested, so a ChainOnly item component-wise
+    // beating a document's last certificate would leave the pruned
+    // store unable to derive the binding at all — an invariant
+    // violation from static data.
+    let attestation_allows = !(other.attestation == Attestation::ChainOnly
+        && record.attestation == Attestation::Certificate);
+
+    let at_least_as_good = other.window.inception() <= record.window.inception()
         && other.window.expiration() >= record.window.expiration()
         && other.key.serial >= record.key.serial
-        && other.key.issued_at >= record.key.issued_at
+        && other.key.issued_at >= record.key.issued_at;
+
+    // Strictness is what makes the relation antisymmetric. Items
+    // equal in every component would otherwise dominate each other
+    // MUTUALLY — both fall off the frontier and a hash-arbitrary
+    // tenure endpoint survives alone, which a reset addressing the
+    // dropped sibling by hash can then no longer exclude: the pruned
+    // derivation diverges. Equal-component classes are kept whole.
+    let strictly_better = other.window.inception() < record.window.inception()
+        || other.window.expiration() > record.window.expiration()
+        || other.key.serial > record.key.serial
+        || other.key.issued_at > record.key.issued_at;
+
+    other.hash != record.hash
+        && attestation_allows
+        && other.document == record.document
+        && other.generation == record.generation
+        && at_least_as_good
+        && strictly_better
 }
 
 #[cfg(test)]
@@ -283,6 +306,61 @@ mod tests {
         let pruned = assert_prune_invariant(&store, &validator, &Decisions::default());
 
         assert_eq!(pruned.items().len(), 1, "past the horizon: dropped");
+        Ok(())
+    }
+
+    #[test]
+    fn equal_component_duplicates_are_kept_whole_and_survive_resets() -> TestResult {
+        // Two certificates identical in every ladder component —
+        // same document, generation, window, serial, issued_at — but
+        // distinct bytes (one carries a lineage statement). Without
+        // strictness they would dominate each other mutually: both
+        // fall off the frontier, a hash-arbitrary tenure endpoint
+        // survives alone, and a reset naming the dropped sibling by
+        // hash loses its target — derive(pruned) diverges from
+        // derive(store). Equal-component classes are kept whole.
+        use crate::test_utils::binding_carrying;
+
+        let plain = binding(1, 11, 1, 100, (NOW - 5_000, NOW + 1_000), 20)?;
+        let carrying = binding_carrying(
+            1,
+            11,
+            1,
+            100,
+            (NOW - 5_000, NOW + 1_000),
+            20,
+            vec![rotation(9, 40, 41)?],
+        )?;
+        assert_ne!(
+            plain.cert.digest(),
+            carrying.cert.digest(),
+            "fixture sanity: distinct items"
+        );
+
+        // The reset names the record that a hash-arbitrary survivor
+        // choice may or may not have kept.
+        let excluded = if plain.cert.digest().erase() < carrying.cert.digest().erase() {
+            &plain
+        } else {
+            &carrying
+        };
+        let mut resets = Map::default();
+        let mut set = Set::default();
+        set.insert(excluded.cert.digest().erase());
+        resets.insert(host(), set);
+        let decisions = Decisions {
+            resets,
+            ..Decisions::default()
+        };
+
+        let (store, validator) = setup(&[&plain, &carrying], vec![]);
+        let pruned = assert_prune_invariant(&store, &validator, &decisions);
+
+        assert_eq!(
+            pruned.items().len(),
+            2,
+            "equal-component classes are kept whole"
+        );
         Ok(())
     }
 }
