@@ -321,7 +321,7 @@ mod tests {
         );
 
         // Interior hyphens are ordinary LDH.
-        assert!(DnsName::parse("fo-o.com").is_ok());
+        assert!(DnsName::parse("f-oo.com").is_ok());
     }
 
     #[test]

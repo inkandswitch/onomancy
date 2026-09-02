@@ -495,16 +495,20 @@ mod tests {
                         ..Decisions::default()
                     };
 
-                    let mut ab = left.clone();
-                    ab.merge(&mut right.clone()).expect("merge");
-                    let mut ba = right.clone();
-                    ba.merge(&mut left.clone()).expect("merge");
+                    let mut left_first = left.clone();
+                    left_first.merge(&mut right.clone()).expect("merge");
+                    let mut right_first = right.clone();
+                    right_first.merge(&mut left.clone()).expect("merge");
 
-                    let joined_ab = pins(&DocumentNamestore::new(ab), &decisions);
-                    let joined_ba = pins(&DocumentNamestore::new(ba), &decisions);
+                    let joined_left_first = pins(&DocumentNamestore::new(left_first), &decisions);
+                    let joined_right_first =
+                        pins(&DocumentNamestore::new(right_first), &decisions);
 
-                    assert_eq!(joined_ab, joined_ba, "the join is merge-order-insensitive");
-                    for targets in joined_ab.values() {
+                    assert_eq!(
+                        joined_left_first, joined_right_first,
+                        "the join is merge-order-insensitive"
+                    );
+                    for targets in joined_left_first.values() {
                         assert!(targets.is_sorted(), "values are sorted");
                         let mut deduped = targets.clone();
                         deduped.dedup();
