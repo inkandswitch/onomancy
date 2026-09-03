@@ -22,15 +22,15 @@ authors = ["Brooklyn Zelenka <hello@brooklynzelenka.com>"]
 
 [workspace.dependencies]
 # Internal crates
-onomancy_automerge = { version = "0.2.0", path = "onomancy_automerge", default-features = false }
-onomancy_chain = { version = "0.2.0", path = "onomancy_chain", default-features = false }
-onomancy_core = { version = "0.2.0", path = "onomancy_core", default-features = false }
-onomancy_dnssec = { version = "0.2.0", path = "onomancy_dnssec", default-features = false }
-onomancy_hickory = { version = "0.2.0", path = "onomancy_hickory", default-features = false }
-onomancy_keyhive = { version = "0.2.0", path = "onomancy_keyhive", default-features = false }
-onomancy_protocol = { version = "0.2.0", path = "onomancy_protocol", default-features = false }
-onomancy_publish = { version = "0.2.0", path = "onomancy_publish", default-features = false }
-onomancy_wasm = { version = "0.2.0", path = "onomancy_wasm", default-features = false }
+onomancy_automerge = { version = "0.3.0", path = "onomancy_automerge", default-features = false }
+onomancy_chain = { version = "0.3.0", path = "onomancy_chain", default-features = false }
+onomancy_core = { version = "0.3.0", path = "onomancy_core", default-features = false }
+onomancy_dnssec = { version = "0.3.0", path = "onomancy_dnssec", default-features = false }
+onomancy_hickory = { version = "0.3.0", path = "onomancy_hickory", default-features = false }
+onomancy_keyhive = { version = "0.3.0", path = "onomancy_keyhive", default-features = false }
+onomancy_protocol = { version = "0.3.0", path = "onomancy_protocol", default-features = false }
+onomancy_publish = { version = "0.3.0", path = "onomancy_publish", default-features = false }
+onomancy_wasm = { version = "0.3.0", path = "onomancy_wasm", default-features = false }
 
 # External crates
 arbitrary = "1.4"

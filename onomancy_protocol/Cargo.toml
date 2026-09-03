@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_protocol"
-version = "0.2.0"
+version = "0.3.0"
 description = "The sans-IO protocol machines for Onomancy: resolution, comparison, derivation"
 
 authors.workspace = true
