@@ -79,12 +79,3 @@ pub(crate) fn base64_key(bytes: &[u8; 32]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
-
-/// Parse the TXT `g=` spelling back into 32 key bytes.
-pub(crate) fn parse_base64_key(text: &str) -> Option<[u8; 32]> {
-    use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(text.trim())
-        .ok()?;
-    bytes.as_slice().try_into().ok()
-}

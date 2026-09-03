@@ -31,6 +31,7 @@ use onomancy_core::{
     anchor::doc::DocAnchor,
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
+    key,
     signed::{
         Signed,
         payload::{Malformed, Payload},
@@ -226,7 +227,7 @@ fn read_key(
     field: FieldName,
 ) -> Result<VerifyingKey, DecodeSuccessorError> {
     let bytes: [u8; 32] = reader.take_array()?;
-    VerifyingKey::from_bytes(&bytes).map_err(|_| DecodeSuccessorError::NotACurvePoint { field })
+    key::decode(&bytes).map_err(|_| DecodeSuccessorError::NotACurvePoint { field })
 }
 
 /// Which fixed-width key field a decode error pinpoints.

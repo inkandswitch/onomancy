@@ -6,7 +6,7 @@ use core::fmt;
 pub const MAX_SERIAL_DIGITS: usize = 20;
 
 /// The anti-replay serial: an opaque `u64` to verifiers, RECOMMENDED to
-/// be `max(now_ms, last + 1)` for publishers.
+/// be `max(now_ms, last + 1)` for publishers — [`Serial::next`].
 ///
 /// The wire spelling is canonical decimal — no leading zeros, at most
 /// [`MAX_SERIAL_DIGITS`] digits — so each serial has exactly one
@@ -47,6 +47,32 @@ impl Serial {
             .map_err(|_| ParseSerialError::Overflow)
     }
 
+    /// The publisher's serial rule: `max(now_ms, last + 1)`.
+    ///
+    /// A bare clock read fails silently at both ends of the wire: two
+    /// records minted in the same millisecond tie (and a top-serial tie
+    /// across documents derives *contested*), and a clock that steps
+    /// backwards mints a record that loses to the one it supersedes.
+    /// The floor is the highest serial the publisher has seen for the
+    /// record body — `None` on a first binding.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SerialExhausted`] when `last` is `u64::MAX`: there is
+    /// no serial after it. Refused rather than saturated or wrapped —
+    /// a saturated serial mints a record that nothing can ever
+    /// supersede, a wrapped one a record that loses to everything, and
+    /// both look well-formed.
+    pub fn next(last: Option<Self>, now_ms: u64) -> Result<Self, SerialExhausted> {
+        let Some(last) = last else {
+            return Ok(Self(now_ms));
+        };
+
+        let bumped = last.0.checked_add(1).ok_or(SerialExhausted)?;
+
+        Ok(Self(now_ms.max(bumped)))
+    }
+
     /// The numeric value.
     #[must_use]
     pub const fn value(&self) -> u64 {
@@ -71,6 +97,11 @@ impl fmt::Display for Serial {
         write!(f, "{}", self.0)
     }
 }
+
+/// No serial follows `u64::MAX`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the serial space is exhausted: nothing follows u64::MAX")]
+pub struct SerialExhausted;
 
 /// The serial violated its canonical-decimal grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -155,6 +186,35 @@ mod tests {
                             raw,
                             "parse must only accept the canonical spelling"
                         );
+                    }
+                });
+        }
+
+        /// The publisher rule, as its two guarantees: the result never
+        /// lags the clock, and strictly exceeds the floor — or there
+        /// is no floor, or nothing exceeds it.
+        #[test]
+        fn next_is_monotone_and_clock_tracking() {
+            bolero::check!()
+                .with_type::<(Option<u64>, u64)>()
+                .for_each(|&(last, now_ms)| {
+                    let last = last.map(Serial::from);
+
+                    match Serial::next(last, now_ms) {
+                        Ok(next) => {
+                            assert!(next.value() >= now_ms, "never behind the clock");
+                            if let Some(last) = last {
+                                assert!(next > last, "strictly after the floor");
+                            }
+                            assert_eq!(
+                                next.value(),
+                                last.map_or(now_ms, |l| now_ms.max(l.value() + 1)),
+                                "exactly max(now, last + 1)"
+                            );
+                        }
+                        Err(SerialExhausted) => {
+                            assert_eq!(last, Some(Serial::from(u64::MAX)));
+                        }
                     }
                 });
         }

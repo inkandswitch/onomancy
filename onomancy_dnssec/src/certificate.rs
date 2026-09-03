@@ -58,6 +58,7 @@ use onomancy_core::{
     anchor::doc::{DocAnchor, Head},
     delegation_chain::DelegationChain,
     digest::{Blake3, Digest},
+    key,
     signed::{Signed, payload::Malformed},
     time::UnixSeconds,
     wire::{self, OversizeUnit, Reader, WireError},
@@ -421,7 +422,7 @@ fn read_key(
     field: FieldName,
 ) -> Result<VerifyingKey, DecodeCertificateError> {
     let bytes: [u8; 32] = reader.take_array()?;
-    VerifyingKey::from_bytes(&bytes).map_err(|_| DecodeCertificateError::NotACurvePoint { field })
+    key::decode(&bytes).map_err(|_| DecodeCertificateError::NotACurvePoint { field })
 }
 
 /// Read the heads list, enforcing sortedness and uniqueness.

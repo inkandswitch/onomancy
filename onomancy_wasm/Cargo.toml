@@ -1,6 +1,6 @@
 [package]
 name = "onomancy_wasm"
-version = "0.2.0"
+version = "0.3.0"
 description = "Wasm/JavaScript bindings for Onomancer (browser and Node.js)"
 categories = ["web-programming"]
 keywords = ["onomancy", "wasm"]

@@ -104,6 +104,55 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     Ok(())
 }
 
+/// `docAnchorBytes` is the bytes-side counterpart of the emitted
+/// `automerge:` anchors: prefix optional, checksum and canonical-key
+/// rules exactly the grammar's.
+#[wasm_bindgen_test]
+fn doc_anchor_bytes_inverts_the_emitted_anchor() -> JsTestResult {
+    use ed25519_dalek::SigningKey;
+    use onomancy_core::anchor::doc::DocAnchor;
+    use onomancy_wasm::name::doc_anchor_bytes;
+
+    let key = SigningKey::from_bytes(&[7; 32]).verifying_key();
+    let anchor = DocAnchor::from(key);
+
+    for spelling in [format!("automerge:{anchor}"), anchor.to_string()] {
+        assert_eq!(doc_anchor_bytes(&text(&spelling))?, key.as_bytes().to_vec());
+    }
+
+    assert!(doc_anchor_bytes(&text("automerge:nonsense")).is_err());
+    Ok(())
+}
+
+/// The `.well-known/` prefix carries protocol data by the writers'
+/// convention, so `bind` refuses it before any document is touched —
+/// a bind at the certificate list's key would replace the list with a
+/// name while reporting success.
+#[wasm_bindgen_test]
+fn binds_under_well_known_are_refused() -> JsTestResult {
+    use onomancy_wasm::held::JsHeldDocuments;
+
+    let mut held = JsHeldDocuments::new();
+    let root = held.create_document()?;
+    let target = held.create_document()?;
+
+    for path in [
+        ".well-known",
+        ".well-known/onomancy/certificates",
+        ".well-known/other-app/data",
+    ] {
+        assert!(
+            held.bind(&text(&root), &text(path), &text(&target))
+                .is_err(),
+            "{path} must refuse"
+        );
+    }
+
+    // The refusal is about the reserved prefix, not dotted names.
+    held.bind(&text(&root), &text(".well-known-ish"), &text(&target))?;
+    Ok(())
+}
+
 /// A hop to an unheld document is the designed partial outcome.
 #[wasm_bindgen_test]
 async fn unsynced_targets_walk_partially() -> JsTestResult {
@@ -179,4 +228,23 @@ async fn saved_documents_rehold_and_unheld_roots_are_partials() -> JsTestResult 
 /// A name argument, owned so the call site's statement owns it.
 fn text(raw: &str) -> Text {
     JsValue::from_str(raw).unchecked_into()
+}
+
+/// A loaded module says which build it is: the package version, and
+/// a revision that is never empty (the builder's fallback is the
+/// literal `unknown`, so an empty string would mean the plumbing
+/// broke).
+#[wasm_bindgen_test]
+fn build_info_identifies_the_module() -> JsTestResult {
+    let info = JsValue::from(onomancy_wasm::build_info());
+    let get = |key: &str| js_sys::Reflect::get(&info, &JsValue::from_str(key));
+
+    assert_eq!(
+        get("version")?.as_string(),
+        Some(env!("CARGO_PKG_VERSION").to_owned())
+    );
+
+    let revision = get("revision")?.as_string().unwrap_or_default();
+    assert!(!revision.is_empty(), "revision is never empty");
+    Ok(())
 }

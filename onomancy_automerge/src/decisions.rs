@@ -13,11 +13,11 @@
 #![allow(clippy::wildcard_enum_match_arm)]
 
 use automerge::{Automerge, ObjId, ObjType, Prop, ReadDoc, ScalarValue, Value};
-use ed25519_dalek::VerifyingKey;
 use onomancy_core::{
     anchor::doc::DocAnchor,
     collections::Set,
     digest::{Blake3, Digest},
+    key,
 };
 use onomancy_dnssec::dns_name::DnsName;
 use onomancy_protocol::verifier::state::decisions::{Acceptance, Claim, Decisions};
@@ -199,9 +199,9 @@ impl<'a> DecisionsView<'a> {
 
     fn document<O: AsRef<ObjId>>(self, obj: O, prop: &str) -> Option<DocAnchor> {
         let bytes = self.bytes32(obj, prop)?;
-        // Point validity at decode applies to decisions
-        // documents too: a non-key "document" contributes nothing.
-        let key = VerifyingKey::from_bytes(&bytes).ok()?;
+        // Strict key decoding applies to decisions documents too: a
+        // non-canonical "document" contributes nothing.
+        let key = key::decode(&bytes).ok()?;
         Some(DocAnchor::from(key))
     }
 
@@ -235,7 +235,7 @@ impl<'a> DecisionsView<'a> {
 mod tests {
     use super::*;
     use automerge::{ObjId, transaction::Transactable};
-    use ed25519_dalek::SigningKey;
+    use ed25519_dalek::{SigningKey, VerifyingKey};
     use testresult::TestResult;
 
     fn anchor(seed: u8) -> DocAnchor {

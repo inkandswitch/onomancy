@@ -45,10 +45,17 @@ pub(crate) struct Record {
     #[arg(long)]
     generation_key: Option<PathBuf>,
 
-    /// Record serial; defaults to the current time in milliseconds
-    /// (the serial-as-timestamp convention).
-    #[arg(long)]
+    /// Record serial. Defaults to the publisher rule
+    /// `max(now_ms, after + 1)`; an explicit value bypasses it.
+    #[arg(long, conflicts_with = "after")]
     serial: Option<u64>,
+
+    /// The highest serial already published for this record body
+    /// (`g=`/`p=`). The new serial strictly exceeds it, so a
+    /// stepped-back clock cannot mint a record that loses to the one
+    /// it supersedes.
+    #[arg(long)]
+    after: Option<u64>,
 
     /// Also sign an ONC certificate and write it here.
     #[arg(long)]
@@ -91,7 +98,10 @@ impl Record {
 
         let document = DocAnchor::from(doc_key.verifying_key());
         let generation = GenerationKey::from(generation_key.verifying_key());
-        let serial = Serial::from(self.serial.unwrap_or_else(crate::now_ms));
+        let serial = match self.serial {
+            Some(explicit) => Serial::from(explicit),
+            None => Serial::next(self.after.map(Serial::from), crate::now_ms())?,
+        };
 
         let record = TxtRecord::new(serial, generation, document);
         say("; publish this record (then re-sign the zone):");
@@ -161,6 +171,10 @@ fn fetch_chain(
 /// Record generation failed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RecordError {
+    /// `--after` was `u64::MAX`; no serial follows it.
+    #[error(transparent)]
+    SerialExhausted(#[from] onomancy_dnssec::txt::serial::SerialExhausted),
+
     /// The live chain could not be fetched.
     #[error(transparent)]
     Fetch(#[from] FetchChainError),

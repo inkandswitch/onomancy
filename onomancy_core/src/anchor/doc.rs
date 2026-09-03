@@ -18,6 +18,7 @@ use ed25519_dalek::VerifyingKey;
 
 use crate::{
     anchor::Anchor,
+    key,
     name::{Name, ParseSegmentsError, parse_segments, split_anchor},
 };
 
@@ -75,8 +76,7 @@ impl DocAnchor {
             .try_into()
             .map_err(|_| ParseDocAnchorError::WrongLength)?;
 
-        let key = VerifyingKey::from_bytes(&key_bytes)
-            .map_err(|_| ParseDocAnchorError::NotACurvePoint)?;
+        let key = key::decode(&key_bytes).map_err(|_| ParseDocAnchorError::NotACurvePoint)?;
 
         Ok(Self(key))
     }
@@ -174,7 +174,8 @@ pub enum ParseDocAnchorError {
     #[error("malformed bs58check payload")]
     MalformedBase58Check,
 
-    /// The bytes decoded but were not a valid ed25519 curve point.
+    /// The bytes were not the canonical encoding of an ed25519 curve
+    /// point.
     #[error("not a valid ed25519 verifying key")]
     NotACurvePoint,
 

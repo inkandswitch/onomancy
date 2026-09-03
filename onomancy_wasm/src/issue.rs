@@ -7,13 +7,23 @@
 //! boundary to save a round trip would trade the property worth having
 //! for a convenience.
 //!
-//! So issuance is two calls with the signing in between:
+//! So issuance is two calls with the signing in between, and the
+//! signer is a capability (the published `Signing` shape), never key
+//! material:
 //!
 //! ```js
-//! const fields = { rootDoc, signer, issuedAt, hostname };
-//! const signature = await hive.signData(signableBytes(fields));
-//! const bytes = encodeCertificate(fields, signature, carriage, chain);
+//! const signing = { verifyingKey, sign }; // a `Signing`
+//! const fields = [rootDoc, signing.verifyingKey, issuedAt, hostname];
+//! const signature = await signing.sign(signableBytes(...fields));
+//! const bytes = encodeCertificate(...fields, signature, carriage, chain);
 //! ```
+//!
+//! The signer MUST sign the bytes verbatim. `encodeCertificate`
+//! checks that the signature covers the signable region itself, so a
+//! signer that frames its input (a length prefix, a domain tag, an
+//! envelope) yields a signature over other bytes, and nothing the
+//! caller prepends or appends can make it validate — framing signers
+//! do not compose with this contract.
 //!
 //! This module never sees a signing key, which makes it a serializer
 //! rather than a trusted party — the same posture `verifyCertificate`
@@ -25,7 +35,7 @@
 //! it: a hand-filtered bundle today, a scoped export later.
 
 use js_sys::Uint8Array;
-use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain};
+use onomancy_core::{anchor::doc::DocAnchor, delegation_chain::DelegationChain, key};
 use onomancy_dnssec::{
     certificate::{Certificate, CertificateParams},
     chain::DnssecChain,
@@ -227,7 +237,7 @@ fn parts(
         .map_err(|_| IssueError::SignerKeyLength)
         .map_err(JsValue::from)?;
 
-    let signer = ed25519_dalek::VerifyingKey::from_bytes(&signer)
+    let signer = key::decode(&signer)
         .map_err(|_| IssueError::SignerKeyNotACurvePoint)
         .map_err(JsValue::from)?;
 
@@ -254,4 +264,24 @@ fn parts(
         },
         signer,
     ))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    /// The signing contract this module documents is declared to
+    /// TypeScript under the names the docs use, so a consumer can
+    /// import the type rather than reconstruct it from prose.
+    #[test]
+    fn the_signing_contract_is_declared() {
+        for declaration in [
+            "export type SignBytes = (bytes: Uint8Array) => Promise<Uint8Array>;",
+            "export interface Signing {",
+        ] {
+            assert!(
+                crate::shapes::TYPES.contains(declaration),
+                "`{declaration}` is missing from shapes.d.ts"
+            );
+        }
+    }
 }
