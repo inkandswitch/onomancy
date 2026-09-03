@@ -104,6 +104,29 @@ async fn held_documents_resolve_names_across_documents() -> JsTestResult {
     Ok(())
 }
 
+/// `docAnchorBytes` is the bytes-side counterpart of the emitted
+/// `automerge:` anchors: prefix optional, checksum and canonical-key
+/// rules exactly the grammar's.
+#[wasm_bindgen_test]
+fn doc_anchor_bytes_inverts_the_emitted_anchor() -> JsTestResult {
+    use ed25519_dalek::SigningKey;
+    use onomancy_core::anchor::doc::DocAnchor;
+    use onomancy_wasm::name::doc_anchor_bytes;
+
+    let key = SigningKey::from_bytes(&[7; 32]).verifying_key();
+    let anchor = DocAnchor::from(key);
+
+    for spelling in [format!("automerge:{anchor}"), anchor.to_string()] {
+        assert_eq!(
+            doc_anchor_bytes(&text(&spelling))?,
+            key.as_bytes().to_vec()
+        );
+    }
+
+    assert!(doc_anchor_bytes(&text("automerge:nonsense")).is_err());
+    Ok(())
+}
+
 /// The `.well-known/` prefix carries protocol data by the writers'
 /// convention, so `bind` refuses it before any document is touched —
 /// a bind at the certificate list's key would replace the list with a
