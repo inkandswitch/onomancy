@@ -202,8 +202,8 @@ fn encode_refusals_are_argument_problems() {
         ("7", unpadded.as_str(), document.as_str()),    // not canonical base64
         ("7", generation.as_str(), "automerge:nonsense"),
     ] {
-        let refused = encode_record(&text(serial), &text(generation), &text(document))
-            .expect_err("refused");
+        let refused =
+            encode_record(&text(serial), &text(generation), &text(document)).expect_err("refused");
         assert_eq!(
             reason(&refused),
             "invalid-argument",

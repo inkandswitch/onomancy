@@ -117,10 +117,7 @@ fn doc_anchor_bytes_inverts_the_emitted_anchor() -> JsTestResult {
     let anchor = DocAnchor::from(key);
 
     for spelling in [format!("automerge:{anchor}"), anchor.to_string()] {
-        assert_eq!(
-            doc_anchor_bytes(&text(&spelling))?,
-            key.as_bytes().to_vec()
-        );
+        assert_eq!(doc_anchor_bytes(&text(&spelling))?, key.as_bytes().to_vec());
     }
 
     assert!(doc_anchor_bytes(&text("automerge:nonsense")).is_err());

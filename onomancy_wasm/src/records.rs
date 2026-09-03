@@ -89,11 +89,7 @@ pub fn next_serial(last: Option<Text>, now_ms: Option<f64>) -> Result<String, Js
 /// key that is not the canonical base64 spelling of a curve point,
 /// and a document that is not a key-based Automerge URL.
 #[wasm_bindgen(js_name = encodeRecord)]
-pub fn encode_record(
-    serial: &Text,
-    generation: &Text,
-    document: &Text,
-) -> Result<String, JsValue> {
+pub fn encode_record(serial: &Text, generation: &Text, document: &Text) -> Result<String, JsValue> {
     let serial = text::read(serial, "a serial").map_err(JsValue::from)?;
     let serial =
         Serial::parse(&serial).map_err(|error| JsValue::from(RecordsError::Serial(error)))?;
