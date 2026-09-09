@@ -17,7 +17,16 @@
 use keyhive_core::event::static_event::StaticEvent;
 use onomancy_core::delegation_chain::{DelegationChain, SignedDelegationBytes};
 
-/// The envelope version tag for Keyhive 0.5 bincode encoding.
+/// The envelope version tag for Keyhive 0.5 bincode encoding with
+/// `[u8; 32]` content references — Keyhive's default `ContentRef`, a
+/// content hash.
+///
+/// Keyhive is generic over its content-reference type, and bincode
+/// encodes `[u8; 32]` bare but `Vec<u8>` length-prefixed, so a peer
+/// instantiating Keyhive over a variable-width reference emits a
+/// different wire format under the same Keyhive version. Such entries
+/// are undecodable here: `kh0` names Keyhive's default, and every peer
+/// whose proofs must verify here instantiates `[u8; 32]`.
 ///
 /// Keyhive is pre-alpha; when its event encoding changes, this tag
 /// bumps (`kh1`, …) and old entries fail loudly instead of misparsing.
